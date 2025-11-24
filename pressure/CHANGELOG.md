@@ -1,6 +1,38 @@
-# Changelog
+# CHANGELOG
 
 All notable changes to the pressure monitoring system.
+
+## [1.2.0] - 2025-01-23
+
+**Development conversation**: https://claude.ai/share/5a41cbd7-563e-4a13-8891-07fe08c14df7
+
+### Added
+- Shebang line (`#!/usr/bin/env python3`) - can now run as `./pressure_monitor.py`
+- Signal handlers for graceful shutdown on SIGINT (Ctrl+C) and SIGTERM (kill)
+- Four event types in CSV logging:
+  - `NORMAL`: Pressure cycle completed normally
+  - `SHUTDOWN`: Program stopped while pressure was high
+  - `STARTUP`: Pressure was already high at program start
+  - `MAXTIME`: Pressure checkpoint after 30 minutes of continuous high pressure
+- `--debug` flag for console output (quiet mode by default)
+- `--debug-interval SECONDS` parameter to configure console logging interval (default: 60s)
+- Automatic logging every 30 minutes (1800s) when pressure remains high
+- Graceful handling of startup when pressure is already ≥10 PSI
+- `event_type` column in CSV output
+- Internal tracking flag for startup activations to ensure correct event type logging
+
+### Changed
+- **Breaking**: CSV format now includes fifth column: `event_type`
+- Console output now disabled by default (enable with `--debug`)
+- When pressure stays high for 30+ minutes, logs checkpoint and resets timer
+- Debug logging interval changed from 5 seconds to 60 seconds (configurable)
+- Simplified background operation - no need for `2>&1` redirection in quiet mode
+- Signal handling moved to PressureMonitor class for cleaner architecture
+
+### Fixed
+- Program now properly logs final event when terminated via kill signal
+- Startup with high pressure no longer creates incomplete log entries
+- STARTUP event type now correctly logged (was being logged as NORMAL)
 
 ## [1.1.0] - 2025-01-23
 
