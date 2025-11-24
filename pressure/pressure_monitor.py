@@ -10,13 +10,41 @@ import sys
 import argparse
 import csv
 
+# GPIO Configuration
 PRESSURE_PIN = 17
+
+# Water Volume Estimation Constants
+RESIDUAL_PRESSURE_SECONDS = 30  # Last N seconds are residual pressure (not pumping)
+SECONDS_PER_GALLON = 350 / 15   # 350 seconds = 15 gallons, so ~23.33 seconds/gallon
+
+def estimate_gallons(duration_seconds):
+    """
+    Estimate gallons pumped based on pressure duration.
+    
+    Args:
+        duration_seconds: Total time pressure was active
+    
+    Returns:
+        Estimated gallons (float), or 0 if duration too short
+    """
+    # Subtract residual pressure time
+    effective_pumping_time = duration_seconds - RESIDUAL_PRESSURE_SECONDS
+    
+    # If duration was less than residual time, no water pumped
+    if effective_pumping_time <= 0:
+        return 0.0
+    
+    # Calculate gallons
+    gallons = effective_pumping_time / SECONDS_PER_GALLON
+    
+    return gallons
 
 def get_status_text(state):
     return "≥10 PSI (NC OPEN)" if state else "<10 PSI (NC CLOSED)"
 
-def log_status(state, change=False, log_file=None, change_log_file=None, activation_start=None):
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]  # Include milliseconds
+def log_status(state, change=False, log_file=None, activation_start=None, activation_time=None):
+    """Log status to console and main log file"""
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
     status = get_status_text(state)
     prefix = ">>> CHANGE: " if change else ""
     
@@ -26,27 +54,25 @@ def log_status(state, change=False, log_file=None, change_log_file=None, activat
     print(message)
     sys.stdout.flush()
     
-    # Write to main log file (text format for readability)
+    # Write to main log file
     if log_file:
         with open(log_file, 'a') as f:
             f.write(message + '\n')
     
-    # Write to change-only log file (CSV format)
-    if change and change_log_file:
-        with open(change_log_file, 'a', newline='') as f:
-            writer = csv.writer(f)
-            
-            if state == GPIO.HIGH:  # Pressure activated
-                writer.writerow([timestamp, 'PRESSURE_ON', '>=10', ''])
-            else:  # Pressure deactivated
-                if activation_start:
-                    duration = time.time() - activation_start
-                    writer.writerow([timestamp, 'PRESSURE_OFF', '<10', f'{duration:.3f}'])
-                else:
-                    writer.writerow([timestamp, 'PRESSURE_OFF', '<10', ''])
-    
     if change:
         print('\a', end='', flush=True)
+
+def log_pressure_event(start_time, end_time, duration, gallons, change_log_file):
+    """Log complete pressure event to CSV (one row per event)"""
+    start_timestamp = datetime.fromtimestamp(start_time).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+    end_timestamp = datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+    
+    with open(change_log_file, 'a', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([start_timestamp, end_timestamp, f'{duration:.3f}', f'{gallons:.2f}'])
+    
+    # Also print summary to console
+    print(f"  → Event summary: {duration:.1f}s duration, ~{gallons:.1f} gallons")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -58,22 +84,22 @@ Examples:
   python3 pressure_monitor.py
       Log every 5 seconds to pressure_log.txt
   
-  python3 pressure_monitor.py --changes pressure_changes.csv
-      Also log state changes with durations to CSV file
+  python3 pressure_monitor.py --changes pressure_events.csv
+      Also log pressure events with water volume estimates to CSV
   
-  python3 pressure_monitor.py --log full.txt --changes changes.csv
+  python3 pressure_monitor.py --log full.txt --changes events.csv
       Custom log filenames for both logs
 
 Running in Background (survives SSH disconnect):
   
   Method 1 - Using nohup (simplest):
-    nohup python3 pressure_monitor.py --changes changes.csv > output.txt 2>&1 &
+    nohup python3 pressure_monitor.py --changes events.csv > output.txt 2>&1 &
     
     To check if running:
       ps aux | grep pressure_monitor
     
     To view logs:
-      tail -f changes.csv
+      tail -f events.csv
       tail -f output.txt
     
     To stop:
@@ -81,7 +107,7 @@ Running in Background (survives SSH disconnect):
   
   Method 2 - Using screen (interactive):
     screen -S pressure
-    python3 pressure_monitor.py --changes changes.csv
+    python3 pressure_monitor.py --changes events.csv
     <Ctrl+A, then D to detach>
     
     To reattach:
@@ -93,7 +119,7 @@ Running in Background (survives SSH disconnect):
   
   Method 3 - Using tmux (modern alternative):
     tmux new -s pressure
-    python3 pressure_monitor.py --changes changes.csv
+    python3 pressure_monitor.py --changes events.csv
     <Ctrl+B, then D to detach>
     
     To reattach:
@@ -103,10 +129,15 @@ Running in Background (survives SSH disconnect):
       tmux kill-session -t pressure
 
 CSV Format:
-  timestamp, event, pressure, duration_seconds
-  2025-01-23 20:30:12.345, PRESSURE_ON, >=10, 
-  2025-01-23 20:30:20.123, PRESSURE_OFF, <10, 8.153
+  pressure_on_time, pressure_off_time, duration_seconds, estimated_gallons
+  2025-01-23 20:30:12.345, 2025-01-23 20:30:20.123, 7.778, 0.00
+  2025-01-23 20:45:05.123, 2025-01-23 21:30:15.456, 2710.333, 114.86
 
+Water Volume Estimation:
+  - Last {sec}s of pressure assumed to be residual (not pumping)
+  - Formula: gallons = (duration - {sec}s) / {spg:.2f} seconds/gallon
+  - Adjust RESIDUAL_PRESSURE_SECONDS and SECONDS_PER_GALLON at top of file
+  
 Hardware Setup:
   - Pressure switch NC contact → GPIO17 (physical pin 11)
   - Pressure switch C contact  → Ground (physical pin 9)
@@ -114,18 +145,17 @@ Hardware Setup:
   
 Monitoring:
   - Logs every 5 seconds in main log
-  - Logs immediately on state changes
-  - CSV file logs only changes with durations
+  - Logs complete events (start/end/duration/gallons) to CSV
   - Terminal beeps on state changes
   - Press Ctrl+C to stop gracefully
-        ''')
+        '''.format(sec=RESIDUAL_PRESSURE_SECONDS, spg=SECONDS_PER_GALLON))
     
     parser.add_argument('--log', default='pressure_log.txt', 
                        metavar='FILE',
                        help='Main log file with all events (default: pressure_log.txt)')
     parser.add_argument('--changes', default=None,
                        metavar='FILE',
-                       help='CSV file for state changes only with durations (e.g., pressure_changes.csv)')
+                       help='CSV file for pressure events with water volume (e.g., pressure_events.csv)')
     parser.add_argument('--version', action='version', version='%(prog)s 1.0')
     
     args = parser.parse_args()
@@ -136,19 +166,21 @@ Monitoring:
     
     # Initialize change log CSV with header if specified
     if args.changes:
-        with open(args.changes, 'a', newline='') as f:
-            # Check if file is empty (new file)
-            f.seek(0, 2)  # Go to end
-            if f.tell() == 0:  # File is empty
+        try:
+            with open(args.changes, 'x', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(['timestamp', 'event', 'pressure', 'duration_seconds'])
+                writer.writerow(['pressure_on_time', 'pressure_off_time', 'duration_seconds', 'estimated_gallons'])
+        except FileExistsError:
+            # File exists, append to it
+            pass
     
     # Startup message
     startup_msg = f"=== Pressure Monitor Started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ==="
     print(startup_msg)
     print(f"Main log: {args.log}")
     if args.changes:
-        print(f"Change log (CSV): {args.changes}")
+        print(f"Events log (CSV): {args.changes}")
+    print(f"\nWater estimation: {SECONDS_PER_GALLON:.2f}s/gallon, {RESIDUAL_PRESSURE_SECONDS}s residual")
     print("Press Ctrl+C to stop\n")
     
     with open(args.log, 'a') as f:
@@ -159,7 +191,8 @@ Monitoring:
     log_status(last_state, log_file=args.log)
     
     last_log_time = time.time()
-    activation_start = None
+    activation_start_time = None  # Wall clock time when pressure activated
+    activation_start_timestamp = None  # Formatted timestamp for logging
     
     try:
         while True:
@@ -168,18 +201,22 @@ Monitoring:
             
             # Check for state change
             if current_state != last_state:
-                # Track activation time for duration calculation
                 if current_state == GPIO.HIGH:
-                    activation_start = current_time
-                
-                log_status(current_state, change=True, 
-                          log_file=args.log, 
-                          change_log_file=args.changes,
-                          activation_start=activation_start)
-                
-                # Reset activation_start after logging deactivation
-                if current_state == GPIO.LOW:
-                    activation_start = None
+                    # Pressure activated
+                    activation_start_time = current_time
+                    activation_start_timestamp = datetime.fromtimestamp(current_time).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+                    log_status(current_state, change=True, log_file=args.log)
+                    
+                else:
+                    # Pressure deactivated - log complete event
+                    log_status(current_state, change=True, log_file=args.log)
+                    
+                    if activation_start_time and args.changes:
+                        duration = current_time - activation_start_time
+                        gallons = estimate_gallons(duration)
+                        log_pressure_event(activation_start_time, current_time, 
+                                         duration, gallons, args.changes)
+                        activation_start_time = None
                 
                 last_state = current_state
                 last_log_time = current_time
@@ -194,10 +231,15 @@ Monitoring:
     except KeyboardInterrupt:
         shutdown_msg = f"\n✓ Pressure Monitor stopped at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         
-        # If pressure still active, log final duration
-        if activation_start:
-            duration = time.time() - activation_start
+        # If pressure still active, log final event
+        if activation_start_time:
+            duration = time.time() - activation_start_time
             shutdown_msg += f"\n  (Pressure was active for {duration:.2f}s when stopped)"
+            
+            if args.changes:
+                gallons = estimate_gallons(duration)
+                log_pressure_event(activation_start_time, time.time(), 
+                                 duration, gallons, args.changes)
         
         print(shutdown_msg)
         with open(args.log, 'a') as f:
