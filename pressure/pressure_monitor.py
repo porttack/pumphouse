@@ -16,7 +16,7 @@ PRESSURE_PIN = 17
 
 # Water Volume Estimation Constants
 RESIDUAL_PRESSURE_SECONDS = 30  # Last N seconds are residual pressure (not pumping)
-SECONDS_PER_GALLON = 350 / 15   # 350 seconds = 15 gallons, so ~23.33 seconds/gallon
+SECONDS_PER_GALLON = 10 / 0.14   # 10 seconds = 0.14 gallons - represents 2 clicks of dosatron at 0.08
 
 # Logging Configuration
 MAX_PRESSURE_LOG_INTERVAL = 1800  # Log at least every 30 minutes (1800s) when pressure is high
