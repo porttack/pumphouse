@@ -13,6 +13,7 @@ import signal
 
 # GPIO Configuration
 PRESSURE_PIN = 17
+POLL_INTERVAL = 5  # Seconds between pressure sensor readings (default: 5)
 
 # Water Volume Estimation Constants
 RESIDUAL_PRESSURE_SECONDS = 30  # Last N seconds are residual pressure (not pumping)
@@ -20,6 +21,43 @@ SECONDS_PER_GALLON = 10 / 0.14   # 10 seconds = 0.14 gallons - represents 2 clic
 
 # Logging Configuration
 MAX_PRESSURE_LOG_INTERVAL = 1800  # Log at least every 30 minutes (1800s) when pressure is high
+
+def setup_gpio():
+    """Setup GPIO for reading. Returns True on success, False on failure."""
+    try:
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(PRESSURE_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        return True
+    except RuntimeError as e:
+        # GPIO already in use
+        return False
+    except Exception as e:
+        print(f"Error setting up GPIO: {e}", file=sys.stderr)
+        return False
+
+def cleanup_gpio():
+    """Release GPIO resources"""
+    try:
+        GPIO.cleanup()
+    except Exception:
+        pass  # Ignore cleanup errors
+
+def read_pressure():
+    """
+    Read pressure sensor with GPIO setup/cleanup.
+    Returns state (GPIO.HIGH/GPIO.LOW) or None if failed to access GPIO.
+    """
+    if not setup_gpio():
+        return None
+    
+    try:
+        state = GPIO.input(PRESSURE_PIN)
+        return state
+    except Exception as e:
+        print(f"Error reading pressure: {e}", file=sys.stderr)
+        return None
+    finally:
+        cleanup_gpio()
 
 def estimate_gallons(duration_seconds):
     """
@@ -92,11 +130,12 @@ def log_pressure_event(start_time, end_time, duration, gallons, event_type, chan
         print(f"  → Event summary: {duration:.1f}s duration, ~{gallons:.1f} gallons [{event_type}]")
 
 class PressureMonitor:
-    def __init__(self, log_file, change_log_file, debug=False, debug_interval=60):
+    def __init__(self, log_file, change_log_file, debug=False, debug_interval=60, poll_interval=5):
         self.log_file = log_file
         self.change_log_file = change_log_file
         self.debug = debug
         self.debug_interval = debug_interval
+        self.poll_interval = poll_interval
         self.running = True
         self.activation_start_time = None
         self.last_maxtime_log = None
@@ -117,7 +156,8 @@ class PressureMonitor:
         shutdown_msg = f"\n✓ Pressure Monitor stopped at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         
         # If pressure still active, log final event as SHUTDOWN
-        current_state = GPIO.input(PRESSURE_PIN)
+        # Need to read pressure one more time
+        current_state = read_pressure()
         if current_state == GPIO.HIGH and self.activation_start_time:
             current_time = time.time()
             duration = current_time - self.activation_start_time
@@ -136,12 +176,16 @@ class PressureMonitor:
         with open(self.log_file, 'a') as f:
             f.write(shutdown_msg + '\n')
         
-        GPIO.cleanup()
+        # No GPIO cleanup needed - already cleaned up after each read
     
     def run(self):
         """Main monitoring loop"""
         # Initial state
-        last_state = GPIO.input(PRESSURE_PIN)
+        last_state = read_pressure()
+        
+        if last_state is None:
+            print("ERROR: Cannot read pressure sensor on startup", file=sys.stderr)
+            return
         
         # Handle startup with pressure already high
         if last_state == GPIO.HIGH:
@@ -157,8 +201,15 @@ class PressureMonitor:
         
         try:
             while self.running:
-                current_state = GPIO.input(PRESSURE_PIN)
+                current_state = read_pressure()
                 current_time = time.time()
+                
+                # If we couldn't read GPIO (in use by another program), wait and try again
+                if current_state is None:
+                    if self.debug:
+                        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Waiting for GPIO access...")
+                    time.sleep(self.poll_interval)
+                    continue
                 
                 # Check for state change
                 if current_state != last_state:
@@ -216,7 +267,8 @@ class PressureMonitor:
                     log_status(current_state, log_file=self.log_file, debug=self.debug)
                     last_log_time = current_time
                 
-                time.sleep(0.1)
+                # Sleep for poll interval
+                time.sleep(self.poll_interval)
                 
         except Exception as e:
             if self.debug:
@@ -245,6 +297,9 @@ Examples:
   
   ./pressure_monitor.py --changes events.csv --debug --debug-interval 10
       Debug mode with console output every 10 seconds
+  
+  ./pressure_monitor.py --changes events.csv --poll-interval 10
+      Poll pressure sensor every 10 seconds instead of default 5
 
 Running in Background:
   
@@ -290,6 +345,11 @@ Debug Mode:
   - With --debug: Console output with configurable interval
   - Default debug interval: 60 seconds
   - Always logs state changes immediately in debug mode
+
+Polling:
+  - Default poll interval: 5 seconds
+  - GPIO is released between readings (allows other programs to access)
+  - If GPIO is busy, waits and tries again next poll cycle
         '''.format(sec=RESIDUAL_PRESSURE_SECONDS, spg=SECONDS_PER_GALLON))
     
     parser.add_argument('--log', default='pressure_log.txt', 
@@ -302,13 +362,11 @@ Debug Mode:
                        help='Enable console output (quiet mode by default)')
     parser.add_argument('--debug-interval', type=int, default=60, metavar='SECONDS',
                        help='Console logging interval in debug mode (default: 60 seconds)')
-    parser.add_argument('--version', action='version', version='%(prog)s 1.2.0')
+    parser.add_argument('--poll-interval', type=int, default=5, metavar='SECONDS',
+                       help='Seconds between pressure sensor readings (default: 5 seconds)')
+    parser.add_argument('--version', action='version', version='%(prog)s 1.3.0')
     
     args = parser.parse_args()
-    
-    # Setup GPIO after argument parsing
-    GPIO.setmode(GPIO.BCM)
-    GPIO.setup(PRESSURE_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
     
     # Initialize change log CSV with header if specified
     if args.changes:
@@ -331,6 +389,7 @@ Debug Mode:
         print(f"\nWater estimation: {SECONDS_PER_GALLON:.2f}s/gallon, {RESIDUAL_PRESSURE_SECONDS}s residual")
         print(f"Max pressure log interval: {MAX_PRESSURE_LOG_INTERVAL}s (30 minutes)")
         print(f"Debug interval: {args.debug_interval}s")
+        print(f"Poll interval: {args.poll_interval}s")
         print("Press Ctrl+C to stop\n")
     
     # Always log startup to file
@@ -339,7 +398,7 @@ Debug Mode:
         f.write('\n' + startup_msg + '\n')
     
     # Create and run monitor
-    monitor = PressureMonitor(args.log, args.changes, args.debug, args.debug_interval)
+    monitor = PressureMonitor(args.log, args.changes, args.debug, args.debug_interval, args.poll_interval)
     monitor.run()
 
 if __name__ == "__main__":
