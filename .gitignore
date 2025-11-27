@@ -1,6 +1,5 @@
 # Log files
 *.log
-*.txt
 *.csv
 output.txt
 
