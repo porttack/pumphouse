@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Pressure Monitor - Log and track pressure sensor state changes
-Monitors a pressure switch connected to GPIO and logs events
+Comprehensive Monitor - Pressure and Tank Level Monitoring
+Monitors pressure switch and tank level, logs when tank data changes
 """
 import RPi.GPIO as GPIO
 import time
@@ -10,26 +10,146 @@ import sys
 import argparse
 import csv
 import signal
+import threading
+import requests
+from bs4 import BeautifulSoup
+import re
 
 # GPIO Configuration
 PRESSURE_PIN = 17
-POLL_INTERVAL = 5  # Seconds between pressure sensor readings (default: 5)
+FLOAT_PIN = 27
+POLL_INTERVAL = 5  # Seconds between pressure sensor readings
+TANK_POLL_INTERVAL = 60  # Seconds between tank level checks (1 minute)
+
+# Tank configuration
+TANK_HEIGHT_INCHES = 58
+TANK_CAPACITY_GALLONS = 1400
+TANK_URL = "https://www.mypt.in/s/REDACTED-TANK-URL"
 
 # Water Volume Estimation Constants
-RESIDUAL_PRESSURE_SECONDS = 30  # Last N seconds are residual pressure (not pumping)
-SECONDS_PER_GALLON = 10 / 0.14   # 10 seconds = 0.14 gallons - represents 2 clicks of dosatron at 0.08
+RESIDUAL_PRESSURE_SECONDS = 30
+SECONDS_PER_GALLON = 10 / 0.14
 
 # Logging Configuration
-MAX_PRESSURE_LOG_INTERVAL = 1800  # Log at least every 30 minutes (1800s) when pressure is high
+MAX_PRESSURE_LOG_INTERVAL = 1800
 
+class SystemState:
+    """
+    Shared state for all monitoring threads.
+    Thread-safe access to current system state for future web serving.
+    """
+    def __init__(self):
+        self.lock = threading.Lock()
+        
+        # Pressure state
+        self.pressure_state = None
+        self.pressure_last_change = None
+        self.pressure_activation_start = None
+        
+        # Tank state - current
+        self.tank_depth = None
+        self.tank_percentage = None
+        self.tank_pt_percentage = None
+        self.tank_gallons = None
+        self.tank_last_updated = None
+        self.float_state = None
+        self.float_last_change = None
+        
+        # Tank state - previous (for detecting changes)
+        self.prev_tank_depth = None
+        self.prev_tank_percentage = None
+        self.prev_tank_pt_percentage = None
+        self.prev_tank_gallons = None
+        
+        # Last logged values for calculating deltas
+        self.last_logged_gallons = None
+        
+        # Flag to indicate tank data has changed
+        self.tank_data_changed = threading.Event()
+    
+    def update_pressure(self, state, activation_start=None):
+        with self.lock:
+            if state != self.pressure_state:
+                self.pressure_last_change = datetime.now()
+            self.pressure_state = state
+            if activation_start is not None:
+                self.pressure_activation_start = activation_start
+    
+    def update_tank(self, depth, percentage, pt_percentage, gallons, last_updated, float_state):
+        """
+        Update tank state and set changed flag if any values differ.
+        Returns True if data changed, False otherwise.
+        """
+        with self.lock:
+            changed = False
+            
+            # Check if any values changed
+            if (depth != self.tank_depth or 
+                percentage != self.tank_percentage or
+                pt_percentage != self.tank_pt_percentage or
+                gallons != self.tank_gallons):
+                changed = True
+            
+            # Check float state change
+            if float_state != self.float_state and float_state is not None:
+                self.float_last_change = datetime.now()
+                changed = True
+            
+            # Save previous values
+            self.prev_tank_depth = self.tank_depth
+            self.prev_tank_percentage = self.tank_percentage
+            self.prev_tank_pt_percentage = self.tank_pt_percentage
+            self.prev_tank_gallons = self.tank_gallons
+            
+            # Update current values
+            self.tank_depth = depth
+            self.tank_percentage = percentage
+            self.tank_pt_percentage = pt_percentage
+            self.tank_gallons = gallons
+            self.tank_last_updated = last_updated
+            self.float_state = float_state
+            
+            if changed:
+                self.tank_data_changed.set()
+            
+            return changed
+    
+    def clear_tank_changed_flag(self):
+        """Clear the tank data changed flag"""
+        self.tank_data_changed.clear()
+    
+    def wait_for_tank_change(self, timeout=None):
+        """Wait for tank data to change"""
+        return self.tank_data_changed.wait(timeout)
+    
+    def get_snapshot(self):
+        """Get a thread-safe snapshot of current state"""
+        with self.lock:
+            return {
+                'pressure_state': self.pressure_state,
+                'pressure_last_change': self.pressure_last_change,
+                'pressure_activation_start': self.pressure_activation_start,
+                'tank_depth': self.tank_depth,
+                'tank_percentage': self.tank_percentage,
+                'tank_pt_percentage': self.tank_pt_percentage,
+                'tank_gallons': self.tank_gallons,
+                'tank_last_updated': self.tank_last_updated,
+                'float_state': self.float_state,
+                'float_last_change': self.float_last_change,
+                'last_logged_gallons': self.last_logged_gallons
+            }
+    
+    def set_last_logged_gallons(self, gallons):
+        with self.lock:
+            self.last_logged_gallons = gallons
+
+# GPIO Helper Functions
 def setup_gpio():
     """Setup GPIO for reading. Returns True on success, False on failure."""
     try:
         GPIO.setmode(GPIO.BCM)
-        GPIO.setup(PRESSURE_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         return True
-    except RuntimeError as e:
-        # GPIO already in use
+    except RuntimeError:
         return False
     except Exception as e:
         print(f"Error setting up GPIO: {e}", file=sys.stderr)
@@ -40,17 +160,15 @@ def cleanup_gpio():
     try:
         GPIO.cleanup()
     except Exception:
-        pass  # Ignore cleanup errors
+        pass
 
 def read_pressure():
-    """
-    Read pressure sensor with GPIO setup/cleanup.
-    Returns state (GPIO.HIGH/GPIO.LOW) or None if failed to access GPIO.
-    """
+    """Read pressure sensor with GPIO management"""
     if not setup_gpio():
         return None
     
     try:
+        GPIO.setup(PRESSURE_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
         state = GPIO.input(PRESSURE_PIN)
         return state
     except Exception as e:
@@ -59,26 +177,122 @@ def read_pressure():
     finally:
         cleanup_gpio()
 
+def read_float_sensor():
+    """Read float sensor with GPIO management"""
+    if not setup_gpio():
+        return 'UNKNOWN'
+    
+    try:
+        GPIO.setup(FLOAT_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        state = GPIO.input(FLOAT_PIN)
+        
+        if state == GPIO.HIGH:
+            return 'OPEN/FULL'
+        else:
+            return 'CLOSED/CALLING'
+    except Exception:
+        return 'UNKNOWN'
+    finally:
+        cleanup_gpio()
+
+# Tank monitoring functions (from scrape_tank_level.py)
+def calculate_gallons(depth_inches):
+    """Calculate gallons based on linear relationship"""
+    if depth_inches is None:
+        return None
+    gallons = (depth_inches / TANK_HEIGHT_INCHES) * TANK_CAPACITY_GALLONS
+    return gallons
+
+def parse_last_updated(last_updated_text):
+    """Parse 'X minutes, Y seconds ago' text"""
+    current_time = datetime.now()
+    minutes = 0
+    
+    minutes_match = re.search(r'(\d+)\s+minute', last_updated_text)
+    if minutes_match:
+        minutes = int(minutes_match.group(1))
+    
+    from datetime import timedelta
+    time_delta = timedelta(minutes=minutes)
+    last_updated = current_time - time_delta
+    last_updated = last_updated.replace(second=0, microsecond=0)
+    
+    return last_updated
+
+def get_tank_data(url):
+    """Scrape tank data from PT website"""
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        current_timestamp = datetime.now()
+        
+        # Find PT percentage
+        pt_percentage = None
+        script_tags = soup.find_all('script')
+        for script in script_tags:
+            if script.string and 'ptlevel' in script.string:
+                match = re.search(r"level:\s*(\d+)", script.string)
+                if match:
+                    pt_percentage = int(match.group(1))
+                    break
+        
+        # Find depth
+        depth_inches = None
+        inch_level_span = soup.find('span', class_='inchLevel')
+        if inch_level_span:
+            depth_inches = float(inch_level_span.get_text(strip=True))
+        
+        # Find last updated time
+        last_updated_timestamp = None
+        updated_on_span = soup.find('span', class_='updated_on')
+        if updated_on_span:
+            last_updated_text = updated_on_span.get_text(strip=True)
+            last_updated_timestamp = parse_last_updated(last_updated_text)
+        
+        # Calculate percentage and gallons
+        percentage = None
+        gallons = None
+        if depth_inches is not None:
+            percentage = (depth_inches / TANK_HEIGHT_INCHES) * 100
+            percentage = round(percentage, 1)
+            gallons = calculate_gallons(depth_inches)
+        
+        # Read float sensor
+        float_state = read_float_sensor()
+        
+        return {
+            'percentage': percentage,
+            'pt_percentage': pt_percentage,
+            'depth': depth_inches,
+            'gallons': gallons,
+            'last_updated': last_updated_timestamp,
+            'float_state': float_state,
+            'status': 'success'
+        }
+        
+    except Exception as e:
+        return {
+            'percentage': None,
+            'pt_percentage': None,
+            'depth': None,
+            'gallons': None,
+            'last_updated': None,
+            'float_state': read_float_sensor(),
+            'status': 'error',
+            'error_message': str(e)
+        }
+
+# Pressure monitoring functions
 def estimate_gallons(duration_seconds):
-    """
-    Estimate gallons pumped based on pressure duration.
-    
-    Args:
-        duration_seconds: Total time pressure was active
-    
-    Returns:
-        Estimated gallons (float), or 0 if duration too short
-    """
-    # Subtract residual pressure time
+    """Estimate gallons pumped based on pressure duration"""
     effective_pumping_time = duration_seconds - RESIDUAL_PRESSURE_SECONDS
     
-    # If duration was less than residual time, no water pumped
     if effective_pumping_time <= 0:
         return 0.0
     
-    # Calculate gallons
     gallons = effective_pumping_time / SECONDS_PER_GALLON
-    
     return gallons
 
 def get_status_text(state):
@@ -92,7 +306,6 @@ def log_status(state, change=False, log_file=None, debug=False):
     
     message = f"{timestamp} - {prefix}{status}"
     
-    # Print to console only if debug mode
     if debug:
         print(message)
         sys.stdout.flush()
@@ -100,48 +313,126 @@ def log_status(state, change=False, log_file=None, debug=False):
         if change:
             print('\a', end='', flush=True)
     
-    # Always write to main log file
     if log_file:
         with open(log_file, 'a') as f:
             f.write(message + '\n')
 
-def log_pressure_event(start_time, end_time, duration, gallons, event_type, change_log_file, debug=False):
+def log_pressure_event(start_time, end_time, duration, gallons_pumped, event_type, 
+                       change_log_file, system_state, debug=False):
     """
-    Log complete pressure event to CSV (one row per event)
+    Log complete pressure event to CSV with tank data
     
-    Args:
-        start_time: Unix timestamp when pressure activated
-        end_time: Unix timestamp when pressure deactivated (or current time for partial events)
-        duration: Duration in seconds
-        gallons: Estimated gallons pumped
-        event_type: Type of event - 'NORMAL', 'SHUTDOWN', 'STARTUP', 'MAXTIME'
-        change_log_file: Path to CSV file
-        debug: Whether to print to console
+    CSV columns: pressure_on_time, pressure_off_time, duration_seconds, estimated_gallons, 
+                 event_type, float_state, float_last_change, tank_gallons, tank_depth, 
+                 tank_percentage, tank_pt_percentage, gallons_changed
     """
     start_timestamp = datetime.fromtimestamp(start_time).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
     end_timestamp = datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
     
+    # Get current system state
+    state = system_state.get_snapshot()
+    
+    # Calculate gallons changed
+    gallons_changed = None
+    if state['tank_gallons'] is not None and state['last_logged_gallons'] is not None:
+        gallons_changed = state['tank_gallons'] - state['last_logged_gallons']
+    
+    # Format float last change
+    float_last_change_str = ''
+    if state['float_last_change']:
+        float_last_change_str = state['float_last_change'].strftime('%Y-%m-%d %H:%M:%S')
+    
     with open(change_log_file, 'a', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow([start_timestamp, end_timestamp, f'{duration:.3f}', f'{gallons:.2f}', event_type])
+        writer.writerow([
+            start_timestamp,
+            end_timestamp,
+            f'{duration:.3f}',
+            f'{gallons_pumped:.2f}',
+            event_type,
+            state['float_state'] or '',
+            float_last_change_str,
+            f'{state["tank_gallons"]:.0f}' if state['tank_gallons'] else '',
+            f'{state["tank_depth"]:.2f}' if state['tank_depth'] else '',
+            f'{state["tank_percentage"]:.1f}' if state['tank_percentage'] else '',
+            f'{state["tank_pt_percentage"]}' if state['tank_pt_percentage'] else '',
+            f'{gallons_changed:.1f}' if gallons_changed is not None else ''
+        ])
     
-    # Print summary to console only if debug mode
+    # Update last logged gallons
+    if state['tank_gallons'] is not None:
+        system_state.set_last_logged_gallons(state['tank_gallons'])
+    
     if debug:
-        print(f"  → Event summary: {duration:.1f}s duration, ~{gallons:.1f} gallons [{event_type}]")
+        print(f"  → Event: {duration:.1f}s, ~{gallons_pumped:.1f}gal pumped [{event_type}]")
+        if state['tank_gallons']:
+            change_str = f", Δ{gallons_changed:+.1f}gal" if gallons_changed is not None else ""
+            print(f"     Tank: {state['tank_gallons']:.0f}gal ({state['tank_percentage']:.1f}%){change_str}, "
+                  f"Float: {state['float_state']}")
+
+class TankMonitor(threading.Thread):
+    """Thread for monitoring tank level periodically"""
+    
+    def __init__(self, system_state, url, interval, debug=False):
+        super().__init__(daemon=True)
+        self.system_state = system_state
+        self.url = url
+        self.interval = interval
+        self.debug = debug
+        self.running = True
+    
+    def stop(self):
+        self.running = False
+    
+    def run(self):
+        """Periodically fetch tank data and update system state"""
+        while self.running:
+            try:
+                data = get_tank_data(self.url)
+                
+                if data['status'] == 'success':
+                    changed = self.system_state.update_tank(
+                        data['depth'],
+                        data['percentage'],
+                        data['pt_percentage'],
+                        data['gallons'],
+                        data['last_updated'],
+                        data['float_state']
+                    )
+                    
+                    if self.debug:
+                        change_indicator = " [CHANGED]" if changed else ""
+                        print(f"\n[Tank Update{change_indicator}] {data['gallons']:.0f}gal ({data['percentage']:.1f}%), "
+                              f"Float: {data['float_state']}")
+                else:
+                    if self.debug:
+                        print(f"\n[Tank Error] {data.get('error_message', 'Unknown error')}")
+                
+            except Exception as e:
+                if self.debug:
+                    print(f"\n[Tank Monitor Error] {e}")
+            
+            # Sleep in small increments to allow faster shutdown
+            for _ in range(self.interval):
+                if not self.running:
+                    break
+                time.sleep(1)
 
 class PressureMonitor:
-    def __init__(self, log_file, change_log_file, debug=False, debug_interval=60, poll_interval=5):
+    def __init__(self, log_file, change_log_file, system_state, tank_monitor, debug=False, 
+                 debug_interval=60, poll_interval=5):
         self.log_file = log_file
         self.change_log_file = change_log_file
+        self.system_state = system_state
+        self.tank_monitor = tank_monitor
         self.debug = debug
         self.debug_interval = debug_interval
         self.poll_interval = poll_interval
         self.running = True
         self.activation_start_time = None
         self.last_maxtime_log = None
-        self.is_startup_activation = False  # Track if current activation is from startup
+        self.is_startup_activation = False
         
-        # Setup signal handlers
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
     
@@ -155,8 +446,6 @@ class PressureMonitor:
         """Perform clean shutdown"""
         shutdown_msg = f"\n✓ Pressure Monitor stopped at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         
-        # If pressure still active, log final event as SHUTDOWN
-        # Need to read pressure one more time
         current_state = read_pressure()
         if current_state == GPIO.HIGH and self.activation_start_time:
             current_time = time.time()
@@ -164,37 +453,55 @@ class PressureMonitor:
             
             if self.debug:
                 shutdown_msg += f"\n  (Pressure was active for {duration:.2f}s when stopped)"
+                print("\n  Fetching final tank level before shutdown...")
+            
+            # Fetch tank level one final time before logging shutdown event
+            tank_data = get_tank_data(self.tank_monitor.url)
+            if tank_data['status'] == 'success':
+                self.system_state.update_tank(
+                    tank_data['depth'],
+                    tank_data['percentage'],
+                    tank_data['pt_percentage'],
+                    tank_data['gallons'],
+                    tank_data['last_updated'],
+                    tank_data['float_state']
+                )
             
             if self.change_log_file:
                 gallons = estimate_gallons(duration)
                 log_pressure_event(self.activation_start_time, current_time, 
-                                 duration, gallons, 'SHUTDOWN', self.change_log_file, self.debug)
+                                 duration, gallons, 'SHUTDOWN', self.change_log_file,
+                                 self.system_state, self.debug)
         
         if self.debug:
             print(shutdown_msg)
         
         with open(self.log_file, 'a') as f:
             f.write(shutdown_msg + '\n')
-        
-        # No GPIO cleanup needed - already cleaned up after each read
+    
+    def wait_for_tank_update_or_timeout(self, timeout):
+        """
+        Wait for tank data to change or timeout.
+        Returns True if tank changed, False if timeout.
+        """
+        return self.system_state.wait_for_tank_change(timeout)
     
     def run(self):
         """Main monitoring loop"""
-        # Initial state
         last_state = read_pressure()
         
         if last_state is None:
             print("ERROR: Cannot read pressure sensor on startup", file=sys.stderr)
             return
         
-        # Handle startup with pressure already high
         if last_state == GPIO.HIGH:
             if self.debug:
                 print(f"Startup: Pressure already ≥10 PSI, starting timer from 0")
             self.activation_start_time = time.time()
             self.last_maxtime_log = time.time()
-            self.is_startup_activation = True  # Mark as startup activation
+            self.is_startup_activation = True
         
+        self.system_state.update_pressure(last_state, self.activation_start_time)
         log_status(last_state, log_file=self.log_file, debug=self.debug)
         
         last_log_time = time.time()
@@ -204,7 +511,6 @@ class PressureMonitor:
                 current_state = read_pressure()
                 current_time = time.time()
                 
-                # If we couldn't read GPIO (in use by another program), wait and try again
                 if current_state is None:
                     if self.debug:
                         print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - Waiting for GPIO access...")
@@ -214,192 +520,222 @@ class PressureMonitor:
                 # Check for state change
                 if current_state != last_state:
                     if current_state == GPIO.HIGH:
-                        # Pressure activated
+                        # Pressure activated - clear any previous tank change flag and start fresh
+                        self.system_state.clear_tank_changed_flag()
                         self.activation_start_time = current_time
                         self.last_maxtime_log = current_time
-                        self.is_startup_activation = False  # Normal activation, not startup
+                        self.is_startup_activation = False
+                        self.system_state.update_pressure(current_state, self.activation_start_time)
                         log_status(current_state, change=True, log_file=self.log_file, debug=self.debug)
                         
                     else:
-                        # Pressure deactivated - log complete event
+                        # Pressure deactivated - wait for tank update, then log
                         log_status(current_state, change=True, log_file=self.log_file, debug=self.debug)
                         
                         if self.activation_start_time and self.change_log_file:
+                            if self.debug:
+                                print("  Waiting for tank level update before logging...")
+                            
+                            # Wait up to 2 minutes for tank data to update
+                            # (tank updates every 1 minute, so this gives it time)
+                            tank_updated = self.wait_for_tank_update_or_timeout(120)
+                            
+                            if tank_updated:
+                                if self.debug:
+                                    print("  Tank level updated, logging event...")
+                                self.system_state.clear_tank_changed_flag()
+                            else:
+                                if self.debug:
+                                    print("  Timeout waiting for tank update, logging with current data...")
+                            
                             duration = current_time - self.activation_start_time
                             gallons = estimate_gallons(duration)
                             
-                            # Determine event type based on startup flag
                             event_type = 'STARTUP' if self.is_startup_activation else 'NORMAL'
                             
                             log_pressure_event(self.activation_start_time, current_time, 
-                                             duration, gallons, event_type, self.change_log_file, self.debug)
+                                             duration, gallons, event_type, self.change_log_file,
+                                             self.system_state, self.debug)
                             self.activation_start_time = None
                             self.last_maxtime_log = None
-                            self.is_startup_activation = False  # Reset flag
+                            self.is_startup_activation = False
+                        
+                        self.system_state.update_pressure(current_state, None)
                     
                     last_state = current_state
                     last_log_time = current_time
                 
-                # Check if pressure has been high for MAX_PRESSURE_LOG_INTERVAL
+                # Check for MAXTIME event (only log if tank data changed)
                 elif (current_state == GPIO.HIGH and 
                       self.activation_start_time and 
                       self.last_maxtime_log and
                       current_time - self.last_maxtime_log >= MAX_PRESSURE_LOG_INTERVAL):
                     
-                    # Log MAXTIME event
-                    duration = current_time - self.activation_start_time
-                    gallons = estimate_gallons(duration)
-                    
-                    if self.change_log_file:
-                        log_pressure_event(self.activation_start_time, current_time,
-                                         duration, gallons, 'MAXTIME', self.change_log_file, self.debug)
-                    
-                    # Reset for next interval, but preserve is_startup_activation flag
-                    # (so if this was a startup activation, subsequent MAXTIME events know that)
-                    self.activation_start_time = current_time
-                    self.last_maxtime_log = current_time
-                    
-                    if self.debug:
-                        print(f"  → Pressure still high, resetting timer for next interval")
+                    # Only log MAXTIME if tank data has changed since last log
+                    if self.system_state.wait_for_tank_change(0):  # Non-blocking check
+                        if self.debug:
+                            print("  Tank data changed during long pressure event, logging MAXTIME...")
+                        
+                        self.system_state.clear_tank_changed_flag()
+                        duration = current_time - self.activation_start_time
+                        gallons = estimate_gallons(duration)
+                        
+                        if self.change_log_file:
+                            log_pressure_event(self.activation_start_time, current_time,
+                                             duration, gallons, 'MAXTIME', self.change_log_file,
+                                             self.system_state, self.debug)
+                        
+                        self.activation_start_time = current_time
+                        self.last_maxtime_log = current_time
+                    else:
+                        # Reset timer but don't log since tank data hasn't changed
+                        self.last_maxtime_log = current_time
+                        if self.debug:
+                            print(f"  → 30 min checkpoint (no tank change, not logging)")
                 
-                # Check if debug interval has passed for regular logging
+                # Regular debug logging
                 elif self.debug and current_time - last_log_time >= self.debug_interval:
                     log_status(current_state, log_file=self.log_file, debug=self.debug)
                     last_log_time = current_time
                 
-                # Sleep for poll interval
                 time.sleep(self.poll_interval)
                 
         except Exception as e:
             if self.debug:
                 print(f"\nError occurred: {e}")
-            # Always log errors to file
             with open(self.log_file, 'a') as f:
                 f.write(f"\nERROR: {e}\n")
             self.shutdown()
             raise
         
-        # Normal shutdown
         self.shutdown()
 
 def main():
     parser = argparse.ArgumentParser(
-        prog='pressure_monitor.py',
-        description='Monitor pressure sensor and log state changes',
+        prog='monitor.py',
+        description='Monitor pressure sensor and tank level',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 Examples:
-  ./pressure_monitor.py --changes events.csv
-      Run quietly, log events to CSV
+  ./monitor.py --changes events.csv
+      Monitor pressure and tank, log events to CSV when tank data changes
   
-  ./pressure_monitor.py --changes events.csv --debug
-      Run with console output (debug mode), log every 60 seconds
+  ./monitor.py --changes events.csv --debug
+      Debug mode with console output
   
-  ./pressure_monitor.py --changes events.csv --debug --debug-interval 10
-      Debug mode with console output every 10 seconds
-  
-  ./pressure_monitor.py --changes events.csv --poll-interval 10
-      Poll pressure sensor every 10 seconds instead of default 5
+  ./monitor.py --tank-interval 5
+      Check tank level every 5 minutes instead of default 1 minute
 
-Running in Background:
-  
-  # Quiet mode (recommended) - no output redirection needed
-  nohup ./pressure_monitor.py --changes events.csv &
-  
-  # With debug output
-  nohup ./pressure_monitor.py --changes events.csv --debug > output.txt 2>&1 &
-  
-  # Check if running
-  ps aux | grep pressure_monitor
-  
-  # View logs
-  tail -f events.csv
-  
-  # Stop
-  pkill -f pressure_monitor.py
+Logging Behavior:
+  - Logs when pressure drops AND tank level data has been updated
+  - Waits up to 2 minutes after pressure drop for fresh tank data
+  - For long pressure events (30+ min), only logs if tank data changed
+  - Fetches final tank reading on shutdown if pressure is active
 
-CSV Format:
-  pressure_on_time, pressure_off_time, duration_seconds, estimated_gallons, event_type
-  2025-01-23 20:30:12.345, 2025-01-23 20:30:20.123, 7.778, 0.00, NORMAL
-  2025-01-23 20:45:05.123, 2025-01-23 21:30:15.456, 2710.333, 114.86, NORMAL
-  2025-01-23 21:30:15.456, 2025-01-23 22:00:15.456, 1800.000, 75.86, MAXTIME
-
-Event Types:
-  NORMAL   - Pressure cycle completed normally (pressure dropped below 10 PSI)
-  SHUTDOWN - Program stopped while pressure was still high (Ctrl+C or kill signal)
-  STARTUP  - Pressure was already high when program started (logs when it drops)
-  MAXTIME  - Pressure has been high for 30+ minutes, logging checkpoint
-
-Water Volume Estimation:
-  - Last {sec}s of pressure assumed to be residual (not pumping)
-  - Formula: gallons = (duration - {sec}s) / {spg:.2f} seconds/gallon
-  - Adjust RESIDUAL_PRESSURE_SECONDS and SECONDS_PER_GALLON at top of file
-  
-Hardware Setup:
-  - Pressure switch NC contact → GPIO17 (physical pin 11)
-  - Pressure switch C contact  → Ground (physical pin 9)
-  - NC closes below 10 PSI, opens at/above 10 PSI
-  
-Debug Mode:
-  - Without --debug: No console output (quiet mode)
-  - With --debug: Console output with configurable interval
-  - Default debug interval: 60 seconds
-  - Always logs state changes immediately in debug mode
-
-Polling:
-  - Default poll interval: 5 seconds
-  - GPIO is released between readings (allows other programs to access)
-  - If GPIO is busy, waits and tries again next poll cycle
-        '''.format(sec=RESIDUAL_PRESSURE_SECONDS, spg=SECONDS_PER_GALLON))
+CSV Columns:
+  pressure_on_time, pressure_off_time, duration_seconds, estimated_gallons, event_type,
+  float_state, float_last_change, tank_gallons, tank_depth, tank_percentage, 
+  tank_pt_percentage, gallons_changed
+        ''')
     
     parser.add_argument('--log', default='pressure_log.txt', 
-                       metavar='FILE',
-                       help='Main log file with all events (default: pressure_log.txt)')
+                       help='Main log file (default: pressure_log.txt)')
     parser.add_argument('--changes', default=None,
-                       metavar='FILE',
-                       help='CSV file for pressure events with water volume (e.g., pressure_events.csv)')
+                       help='CSV file for pressure events')
     parser.add_argument('--debug', action='store_true',
-                       help='Enable console output (quiet mode by default)')
-    parser.add_argument('--debug-interval', type=int, default=60, metavar='SECONDS',
-                       help='Console logging interval in debug mode (default: 60 seconds)')
-    parser.add_argument('--poll-interval', type=int, default=5, metavar='SECONDS',
-                       help='Seconds between pressure sensor readings (default: 5 seconds)')
-    parser.add_argument('--version', action='version', version='%(prog)s 1.3.0')
+                       help='Enable console output')
+    parser.add_argument('--debug-interval', type=int, default=60,
+                       help='Console logging interval in debug mode (default: 60s)')
+    parser.add_argument('--poll-interval', type=int, default=5,
+                       help='Pressure sensor poll interval (default: 5s)')
+    parser.add_argument('--tank-interval', type=int, default=1,
+                       help='Tank check interval in minutes (default: 1 minute)')
+    parser.add_argument('--tank-url', default=TANK_URL,
+                       help='Tank monitoring URL')
+    parser.add_argument('--version', action='version', version='%(prog)s 2.0.0')
     
     args = parser.parse_args()
     
-    # Initialize change log CSV with header if specified
+    # Initialize CSV with new headers
     if args.changes:
         try:
             with open(args.changes, 'x', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(['pressure_on_time', 'pressure_off_time', 'duration_seconds', 
-                               'estimated_gallons', 'event_type'])
+                writer.writerow([
+                    'pressure_on_time', 'pressure_off_time', 'duration_seconds', 
+                    'estimated_gallons', 'event_type', 'float_state', 'float_last_change',
+                    'tank_gallons', 'tank_depth', 'tank_percentage', 'tank_pt_percentage',
+                    'gallons_changed'
+                ])
         except FileExistsError:
-            # File exists, append to it
             pass
     
-    # Startup message - only show if debug mode
+    # Startup message
     if args.debug:
-        startup_msg = f"=== Pressure Monitor Started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ==="
-        print(startup_msg)
-        print(f"Main log: {args.log}")
-        if args.changes:
-            print(f"Events log (CSV): {args.changes}")
-        print(f"\nWater estimation: {SECONDS_PER_GALLON:.2f}s/gallon, {RESIDUAL_PRESSURE_SECONDS}s residual")
-        print(f"Max pressure log interval: {MAX_PRESSURE_LOG_INTERVAL}s (30 minutes)")
-        print(f"Debug interval: {args.debug_interval}s")
-        print(f"Poll interval: {args.poll_interval}s")
-        print("Press Ctrl+C to stop\n")
+        print(f"=== Monitor Started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
+        print(f"Pressure poll: {args.poll_interval}s")
+        print(f"Tank poll: {args.tank_interval}m")
+        print("\nFetching initial tank level...")
     
-    # Always log startup to file
-    startup_msg = f"=== Pressure Monitor Started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ==="
+    startup_msg = f"=== Monitor Started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ==="
     with open(args.log, 'a') as f:
         f.write('\n' + startup_msg + '\n')
     
-    # Create and run monitor
-    monitor = PressureMonitor(args.log, args.changes, args.debug, args.debug_interval, args.poll_interval)
-    monitor.run()
+    # Create shared state
+    system_state = SystemState()
+    
+    # Fetch initial tank level before starting monitoring
+    initial_tank_data = get_tank_data(args.tank_url)
+    if initial_tank_data['status'] == 'success':
+        system_state.update_tank(
+            initial_tank_data['depth'],
+            initial_tank_data['percentage'],
+            initial_tank_data['pt_percentage'],
+            initial_tank_data['gallons'],
+            initial_tank_data['last_updated'],
+            initial_tank_data['float_state']
+        )
+        # Set initial logged gallons so first event can calculate delta
+        if initial_tank_data['gallons'] is not None:
+            system_state.set_last_logged_gallons(initial_tank_data['gallons'])
+        
+        if args.debug:
+            print(f"Initial tank: {initial_tank_data['gallons']:.0f}gal ({initial_tank_data['percentage']:.1f}%), "
+                  f"Float: {initial_tank_data['float_state']}")
+            print("Press Ctrl+C to stop\n")
+    else:
+        if args.debug:
+            print(f"Warning: Could not fetch initial tank data: {initial_tank_data.get('error_message')}")
+    
+    # Clear the changed flag since we just initialized
+    system_state.clear_tank_changed_flag()
+    
+    # Start tank monitoring thread
+    tank_monitor = TankMonitor(
+        system_state, 
+        args.tank_url, 
+        args.tank_interval * 60,  # Convert minutes to seconds
+        args.debug
+    )
+    tank_monitor.start()
+    
+    # Run pressure monitor in main thread
+    monitor = PressureMonitor(
+        args.log, 
+        args.changes, 
+        system_state,
+        tank_monitor,
+        args.debug, 
+        args.debug_interval, 
+        args.poll_interval
+    )
+    
+    try:
+        monitor.run()
+    finally:
+        # Stop tank monitor thread
+        tank_monitor.stop()
+        tank_monitor.join(timeout=2)
 
 if __name__ == "__main__":
     main()
