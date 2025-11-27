@@ -2,86 +2,98 @@
 
 All notable changes to the pressure monitoring system.
 
-## [1.2.0] - 2025-01-23
+## [2.0.0] - 2025-01-27
 
-**Development conversation**: https://claude.ai/share/5a41cbd7-563e-4a13-8891-07fe08c14df7
+### Major Refactoring
+- **Breaking Change**: Restructured as Python package (`python -m monitor`)
+- Split monolithic script into modular components:
+  - `config.py` - Configuration constants and file loading
+  - `gpio_helpers.py` - GPIO access with proper cleanup
+  - `state.py` - Thread-safe shared state
+  - `tank.py` - Tank monitoring and scraping
+  - `pressure.py` - Pressure monitoring logic
+  - `logger.py` - CSV and file logging
+  - `main.py` - Entry point and argument parsing
 
 ### Added
-- Shebang line (`#!/usr/bin/env python3`) - can now run as `./pressure_monitor.py`
-- Signal handlers for graceful shutdown on SIGINT (Ctrl+C) and SIGTERM (kill)
+- **Config file support**: Optional `~/.config/pumphouse/monitor.conf`
+- **Graceful degradation**: Pressure monitoring continues even if tank monitoring fails
+- **Error tracking**: Counts consecutive tank fetch errors, continues operation
+- **Tank data change detection**: Only logs events when tank data actually changes
+- **Smart logging**: Waits for tank update after pressure drop (up to 2 minutes)
+- **Initial state capture**: Fetches tank level at startup for accurate `gallons_changed`
+- **Final state capture**: Fetches tank level on shutdown if pressure active
+- **Enhanced CSV columns**: 
+  - `float_state` - Current float sensor state
+  - `float_last_change` - Timestamp of last float state change
+  - `tank_gallons` - Current tank gallons
+  - `tank_depth` - Current tank depth (inches)
+  - `tank_percentage` - Calculated percentage (based on 58" height)
+  - `tank_pt_percentage` - PT sensor reported percentage
+  - `gallons_changed` - Delta from last logged event
+- **Threading**: Separate threads for pressure (5s) and tank (1min) monitoring
+- **Web-ready architecture**: SystemState designed for future web dashboard
+
+### Changed
+- Pressure polling interval now configurable via `--poll-interval` (default: 5s)
+- Tank polling interval now in minutes via `--tank-interval` (default: 1m)
+- GPIO properly released between readings to avoid conflicts
+- MAXTIME events only logged if tank data has changed
+- Version number reset to 2.0.0 to reflect major architectural change
+
+### Fixed
+- GPIO conflicts with other scripts running simultaneously
+- Missing tank data in pressure events
+- Inaccurate gallons_changed calculations
+- Race conditions between pressure and tank monitoring
+
+## [1.2.0] - 2025-01-23
+
+### Added
+- Shebang line (`#!/usr/bin/env python3`)
+- Signal handlers for graceful shutdown (SIGINT, SIGTERM)
 - Four event types in CSV logging:
   - `NORMAL`: Pressure cycle completed normally
   - `SHUTDOWN`: Program stopped while pressure was high
   - `STARTUP`: Pressure was already high at program start
-  - `MAXTIME`: Pressure checkpoint after 30 minutes of continuous high pressure
+  - `MAXTIME`: Pressure checkpoint after 30 minutes
 - `--debug` flag for console output (quiet mode by default)
-- `--debug-interval SECONDS` parameter to configure console logging interval (default: 60s)
-- Automatic logging every 30 minutes (1800s) when pressure remains high
-- Graceful handling of startup when pressure is already ≥10 PSI
+- `--debug-interval` parameter (default: 60s)
+- Automatic logging every 30 minutes when pressure remains high
+- Graceful handling of startup when pressure already ≥10 PSI
 - `event_type` column in CSV output
-- Internal tracking flag for startup activations to ensure correct event type logging
 
 ### Changed
 - **Breaking**: CSV format now includes fifth column: `event_type`
-- Console output now disabled by default (enable with `--debug`)
-- When pressure stays high for 30+ minutes, logs checkpoint and resets timer
-- Debug logging interval changed from 5 seconds to 60 seconds (configurable)
-- Simplified background operation - no need for `2>&1` redirection in quiet mode
-- Signal handling moved to PressureMonitor class for cleaner architecture
+- Console output disabled by default (enable with `--debug`)
+- Debug logging interval changed from 5s to 60s (configurable)
+- Simplified background operation
 
 ### Fixed
 - Program now properly logs final event when terminated via kill signal
 - Startup with high pressure no longer creates incomplete log entries
-- STARTUP event type now correctly logged (was being logged as NORMAL)
+- STARTUP event type now correctly logged
 
 ## [1.1.0] - 2025-01-23
 
 ### Added
 - Water volume estimation with configurable parameters
-- `RESIDUAL_PRESSURE_SECONDS` constant for residual pressure time
-- `SECONDS_PER_GALLON` constant for pumping rate calculation
+- `RESIDUAL_PRESSURE_SECONDS` constant
+- `SECONDS_PER_GALLON` constant
 - Estimated gallons column in CSV output
-- Event summary output to console showing duration and gallons
+- Event summary output to console
 - Documentation for calibration process
 
 ### Changed
 - CSV format now logs complete events in single row (start, end, duration, gallons)
-- Removed separate PRESSURE_ON and PRESSURE_OFF rows
-- CSV header updated: `pressure_on_time, pressure_off_time, duration_seconds, estimated_gallons`
-- Improved help text with water estimation details
+- Removed interim "pressure activated" CSV entries
 
-### Fixed
-- CSV file creation now uses 'x' mode to avoid overwriting headers
+## [1.0.0] - 2025-01-22
 
-## [1.0.0] - 2025-01-23
-
-### Added
-- Initial release of `pressure_monitor.py`
-- Continuous pressure monitoring on GPIO17
-- Text log with 5-second intervals
-- CSV event logging with timestamps and durations
-- State change detection and alerts
-- Terminal beep on pressure changes
-- Background operation support (nohup, screen, tmux)
-- Command line arguments for log file configuration
-- `test_pressure.py` for hardware verification
-- Comprehensive help documentation
-- Support for graceful shutdown (Ctrl+C)
-
-### Hardware
-- NC pressure switch on GPIO17 (physical pin 11)
-- Ground connection on physical pin 9
-- Internal pull-up resistor configuration
-- Support for 100-foot wire runs
-
-## Format
-
-This changelog follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
-
-### Categories
-- **Added** for new features
-- **Changed** for changes in existing functionality
-- **Deprecated** for soon-to-be removed features
-- **Removed** for now removed features
-- **Fixed** for any bug fixes
-- **Security** for vulnerability fixes
+### Initial Release
+- Pressure sensor monitoring on GPIO 17
+- Event detection via polling (100ms intervals)
+- CSV logging of pressure events
+- Main log file with timestamped events
+- Background operation support
+- Graceful shutdown handling
