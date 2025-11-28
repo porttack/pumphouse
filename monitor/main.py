@@ -6,14 +6,15 @@ from datetime import datetime
 
 from monitor import __version__
 from monitor.config import (
-    POLL_INTERVAL, TANK_POLL_INTERVAL, TANK_URL, 
+    POLL_INTERVAL, TANK_POLL_INTERVAL, TANK_URL, TANK_CHANGE_THRESHOLD,
     DEFAULT_LOG_FILE, DEFAULT_EVENTS_FILE,
     load_config_file
 )
 from monitor.state import SystemState
 from monitor.tank import TankMonitor, get_tank_data
 from monitor.pressure import PressureMonitor
-from monitor.logger import initialize_csv
+from monitor.logger import initialize_csv, log_startup
+from monitor.gpio_helpers import read_pressure
 
 def main():
     """Main entry point"""
@@ -35,6 +36,9 @@ Examples:
   
   python -m monitor --tank-interval 5
       Check tank level every 5 minutes instead of default 1 minute
+  
+  python -m monitor --tank-threshold 5.0
+      Log tank changes when ≥5 gallons instead of default 2 gallons
 
 Running in Background:
   nohup venv/bin/python -m monitor --changes events.csv --debug > output.txt 2>&1 &
@@ -46,16 +50,27 @@ Running in Background:
   pkill -f "python -m monitor"
 
 Logging Behavior:
+  - Logs startup state (INIT event)
   - Logs when pressure drops AND tank level data has been updated
+  - Logs when tank changes by ≥threshold gallons (usage/filling detection)
   - Waits up to 2 minutes after pressure drop for fresh tank data
   - For long pressure events (30+ min), only logs if tank data changed
   - Fetches final tank reading on shutdown if pressure is active
   - Continues pressure monitoring even if tank monitoring fails
+  - Ignores pressure when float is OPEN/FULL (prevents false logging)
+
+Event Types:
+  INIT        - System startup state
+  NORMAL      - Pressure cycle completed normally
+  STARTUP     - Pressure was already high at startup (logged when it drops)
+  SHUTDOWN    - Program stopped while pressure was high
+  MAXTIME     - Pressure checkpoint after 30 minutes (if tank changed)
+  TANK_CHANGE - Tank level changed by ≥threshold gallons (usage detection)
 
 CSV Columns:
-  pressure_on_time, pressure_off_time, duration_seconds, estimated_gallons, event_type,
-  float_state, float_last_change, tank_gallons, tank_depth, tank_percentage, 
-  tank_pt_percentage, gallons_changed
+  timestamp, event_type, pressure_state, duration_seconds, estimated_gallons,
+  pressure_on_time, pressure_off_time, float_state, float_last_change, 
+  tank_gallons, tank_depth, tank_percentage, tank_pt_percentage, gallons_changed
         ''')
     
     parser.add_argument('--log', default=file_config.get('LOG_FILE', DEFAULT_LOG_FILE),
@@ -73,6 +88,9 @@ CSV Columns:
     parser.add_argument('--tank-interval', type=int, 
                        default=file_config.get('TANK_POLL_INTERVAL', TANK_POLL_INTERVAL // 60),
                        help='Tank check interval in minutes (default: 1 minute)')
+    parser.add_argument('--tank-threshold', type=float,
+                       default=file_config.get('TANK_CHANGE_THRESHOLD', TANK_CHANGE_THRESHOLD),
+                       help='Log tank changes ≥ this many gallons (default: 2.0)')
     parser.add_argument('--tank-url', 
                        default=file_config.get('TANK_URL', TANK_URL),
                        help='Tank monitoring URL')
@@ -91,6 +109,7 @@ CSV Columns:
         print(f"=== Monitor v{__version__} Started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
         print(f"Pressure poll: {args.poll_interval}s")
         print(f"Tank poll: {args.tank_interval}m")
+        print(f"Tank threshold: {args.tank_threshold}gal")
         print("\nFetching initial tank level...")
     
     startup_msg = f"=== Monitor v{__version__} Started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ==="
@@ -120,12 +139,21 @@ CSV Columns:
         if args.debug:
             print(f"Initial tank: {initial_tank_data['gallons']:.0f}gal ({initial_tank_data['percentage']:.1f}%), "
                   f"Float: {initial_tank_data['float_state']}")
-            print("Press Ctrl+C to stop\n")
     else:
         system_state.record_tank_error(initial_tank_data.get('error_message', 'Unknown'))
         if args.debug:
             print(f"Warning: Could not fetch initial tank data: {initial_tank_data.get('error_message')}")
             print("Continuing with pressure monitoring...\n")
+    
+    # Get initial pressure state
+    initial_pressure = read_pressure()
+    
+    # Log startup event
+    if args.changes:
+        log_startup(args.changes, system_state, initial_pressure, args.debug)
+    
+    if args.debug:
+        print("Press Ctrl+C to stop\n")
     
     # Clear the changed flag since we just initialized
     system_state.clear_tank_changed_flag()
@@ -135,7 +163,9 @@ CSV Columns:
         system_state, 
         args.tank_url, 
         args.tank_interval * 60,  # Convert minutes to seconds
-        args.debug
+        change_log_file=args.changes,
+        debug=args.debug,
+        change_threshold=args.tank_threshold
     )
     tank_monitor.start()
     
