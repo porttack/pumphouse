@@ -4,6 +4,21 @@ All notable changes to the pressure monitoring system.
 
 ## [2.0.0] - 2025-01-27
 
+## [2.1.0] - 2025-11-28
+
+### Fixed
+- **Tank data age calculation**: Now correctly uses the actual timestamp from PT website "last updated" field instead of fetch time, so age increases from ~5-20 minutes before resetting (was incorrectly counting down)
+- **Snapshot gallons estimation**: Snapshots now estimate gallons from accumulated pressure HIGH time when no completed pump cycles occurred during the interval (prevents 0.00 gallons when pressure stays HIGH across snapshot boundaries)
+
+### Changed
+- `tank.py`: Added scraping of "updated_on" timestamp from PT website
+- `poll.py`: Updated `fetch_tank_data()` to store actual PT timestamp instead of current time
+- `poll.py`: Enhanced `get_snapshot_data()` to estimate gallons from `pressure_high_time` when no completed cycles exist
+
+### Removed
+- Deleted unused `pressure.py` legacy code (old PressureMonitor class from v2.0.0 architecture)
+
+
 ### Major Refactoring
 - **Breaking Change**: Restructured as Python package (`python -m monitor`)
 - Split monolithic script into modular components:
