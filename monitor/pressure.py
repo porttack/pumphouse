@@ -388,6 +388,47 @@ class PressureMonitor:
                         if self.debug:
                             print(f"  → 30 min checkpoint: No tank change, not logging")
                 
+                # Check if float changed while in artifact state (tank now ready to receive water)
+                elif (current_state and  # Pressure still HIGH
+                      self.is_artifact and 
+                      self.artifact_start_time):
+                    
+                    # Check if float has changed to CLOSED/CALLING (tank can now accept water)
+                    current_float = self.system_state.get_snapshot()['float_state']
+                    
+                    if current_float == 'CLOSED/CALLING':
+                        # Float opened - artifact ends, convert to normal water event
+                        duration = current_time - self.artifact_start_time
+                        
+                        if self.debug:
+                            print(f"\n  Float changed to CLOSED/CALLING while pressure artifact active")
+                            print(f"  Artifact lasted {duration:.1f}s, now converting to water event")
+                        
+                        # Log the artifact that just ended
+                        if self.change_log_file:
+                            if self.debug:
+                                print(f"\n  === LOGGING PRESSURE_ARTIFACT EVENT ===")
+                                state = self.system_state.get_snapshot()
+                                print(f"  Artifact duration: {duration:.1f}s")
+                                print(f"  Float state:       {current_float} (changed from OPEN/FULL)")
+                                print(f"  Pressure state:    HIGH (still active)")
+                                print(f"  Trigger:           Float changed, tank can now accept water")
+                            
+                            log_pressure_event(self.artifact_start_time, current_time, 
+                                             duration, 0.0, 'PRESSURE_ARTIFACT', self.change_log_file,
+                                             self.system_state, self.debug)
+                        
+                        # Now start normal water event tracking
+                        self.system_state.clear_tank_changed_flag()
+                        self.activation_start_time = current_time
+                        self.last_maxtime_log = current_time
+                        self.is_startup_activation = False
+                        self.artifact_start_time = None
+                        self.is_artifact = False
+                        
+                        if self.debug:
+                            print(f"  Started water event timer")
+                
                 # Regular debug logging
                 elif self.debug and current_time - last_log_time >= self.debug_interval:
                     log_status(current_state, log_file=self.log_file, debug=self.debug)

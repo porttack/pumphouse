@@ -159,13 +159,14 @@ def get_tank_data(url, timeout=10):
 class TankMonitor(threading.Thread):
     """Thread for monitoring tank level periodically"""
     
-    def __init__(self, system_state, url, interval, change_log_file=None, 
+    def __init__(self, system_state, url, interval, change_log_file=None, pressure_monitor=None,
                  debug=False, max_consecutive_errors=10, change_threshold=TANK_CHANGE_THRESHOLD):
         super().__init__(daemon=True)
         self.system_state = system_state
         self.url = url
         self.interval = interval
         self.change_log_file = change_log_file
+        self.pressure_monitor = pressure_monitor  # Reference to pressure monitor
         self.debug = debug
         self.max_consecutive_errors = max_consecutive_errors
         self.change_threshold = change_threshold
@@ -193,9 +194,10 @@ class TankMonitor(threading.Thread):
                     consecutive_errors = 0
                     self.system_state.record_tank_success()
                     
-                    # Get previous gallons before update
+                    # Get previous gallons and float state before update
                     prev_state = self.system_state.get_snapshot()
                     prev_gallons = prev_state['last_logged_gallons']
+                    prev_float = prev_state['float_state']
                     
                     # Update tank state
                     changed = self.system_state.update_tank(
@@ -207,10 +209,24 @@ class TankMonitor(threading.Thread):
                         data['float_state']
                     )
                     
-                    # Check for significant change (usage detection)
+                    # Check if float changed from OPEN/FULL to CLOSED/CALLING
+                    # This might end a pressure artifact
+                    if (prev_float == 'OPEN/FULL' and 
+                        data['float_state'] == 'CLOSED/CALLING' and
+                        self.pressure_monitor and
+                        self.pressure_monitor.is_artifact):
+                        if self.debug:
+                            print(f"\n  Float changed from OPEN/FULL to CLOSED/CALLING")
+                            print(f"  This ends the pressure artifact (we can now receive water)")
+                        # The pressure monitor will handle logging the artifact
+                        # when it detects the float state change
+                    
+                    # Check for significant tank change (usage detection)
+                    # But NOT if we're currently in an artifact state (pressure with full tank)
                     if (self.change_log_file and 
                         prev_gallons is not None and 
-                        data['gallons'] is not None):
+                        data['gallons'] is not None and
+                        not (self.pressure_monitor and self.pressure_monitor.is_artifact)):
                         delta = data['gallons'] - prev_gallons
                         
                         # Log if change exceeds threshold (positive or negative)

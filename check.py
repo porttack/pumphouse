@@ -17,6 +17,7 @@ TANK_CAPACITY_GALLONS = 1400  # Capacity at 58 inches
 
 # GPIO Configuration
 FLOAT_PIN = 21  # BCM pin 21 for float sensor
+PRESSURE_PIN = 17  # BCM pin 17 for pressure sensor
 
 def calculate_gallons(depth_inches):
     """
@@ -86,9 +87,42 @@ def read_float_sensor():
         # HIGH = Float switch OPEN = Tank is FULL
         # LOW = Float switch CLOSED = Tank NOT full (calling for water)
         if state == GPIO.HIGH:
-            return 'OPEN/FULL'
+            return 'OPEN/FULL (no water needed)'
         else:
             return 'CLOSED/CALLING'
+            
+    except Exception as e:
+        # GPIO conflict or error
+        return 'UNKNOWN'
+
+def read_pressure_sensor():
+    """
+    Read the pressure sensor state
+    
+    Returns:
+        str: 'HIGH' (>10 PSI), 'LOW' (<10 PSI), or 'UNKNOWN'
+    """
+    if not GPIO_AVAILABLE:
+        return 'UNKNOWN'
+    
+    try:
+        # Setup GPIO if not already done
+        if GPIO.getmode() is None:
+            GPIO.setmode(GPIO.BCM)
+        
+        # Setup the pin with pull-up resistor
+        GPIO.setup(PRESSURE_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+        
+        # Read the state
+        state = GPIO.input(PRESSURE_PIN)
+        
+        # NC pressure switch:
+        # HIGH = Switch OPEN = Pressure >= 10 PSI
+        # LOW = Switch CLOSED = Pressure < 10 PSI
+        if state == GPIO.HIGH:
+            return 'HIGH (> 10 PSI) - WATER AVAILABLE'
+        else:
+            return 'LOW (< 10 PSI) - NO WATER PRESSURE'
             
     except Exception as e:
         # GPIO conflict or error
@@ -147,8 +181,9 @@ def get_tank_data(url):
             percentage = round(percentage, 1)
             gallons = calculate_gallons(depth_inches)
         
-        # Read float sensor
+        # Read sensors
         float_state = read_float_sensor()
+        pressure_state = read_pressure_sensor()
         
         return {
             'percentage': percentage,
@@ -158,6 +193,7 @@ def get_tank_data(url):
             'current_timestamp': current_timestamp,
             'last_updated': last_updated_timestamp,
             'float_state': float_state,
+            'pressure_state': pressure_state,
             'status': 'success'
         }
         
@@ -170,6 +206,7 @@ def get_tank_data(url):
             'current_timestamp': datetime.now(),
             'last_updated': None,
             'float_state': read_float_sensor(),
+            'pressure_state': read_pressure_sensor(),
             'status': 'error',
             'error_message': str(e)
         }
@@ -182,6 +219,7 @@ def get_tank_data(url):
             'current_timestamp': datetime.now(),
             'last_updated': None,
             'float_state': read_float_sensor(),
+            'pressure_state': read_pressure_sensor(),
             'status': 'error',
             'error_message': f"Could not parse value: {e}"
         }
@@ -199,6 +237,7 @@ if __name__ == "__main__":
         print(f"PT Percentage: {data['pt_percentage']}%")
         print(f"Gallons: {data['gallons']:.0f} gal")
         print(f"Float State: {data['float_state']}")
+        print(f"Pressure State: {data['pressure_state']}")
         if data['last_updated']:
             print(f"Last Updated: {data['last_updated'].isoformat()}")
         
@@ -207,6 +246,8 @@ if __name__ == "__main__":
             print(f"⚠️  Warning: Water level is {data['depth'] - TANK_HEIGHT_INCHES:.2f} inches above normal tank height")
     else:
         print(f"\nError: {data['error_message']}")
+        print(f"Float State: {data['float_state']}")
+        print(f"Pressure State: {data['pressure_state']}")
     
     # Clean up GPIO if it was used
     if GPIO_AVAILABLE:
