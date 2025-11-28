@@ -159,7 +159,7 @@ The system uses simplified event-based logging:
 
 ### Default Formula
 - Last 30 seconds of pressure = residual (not pumping)
-- Effective pumping time = duration - 30 seconds  
+- Effective pumping time = duration - 30 seconds
 - Gallons = effective time / 71.43 seconds per gallon
 - Based on: 10 seconds = 0.14 gallons (2 clicks of Dosatron at 0.08 gal/click)
 
@@ -169,6 +169,23 @@ The system uses simplified event-based logging:
 2. Note `duration_seconds` from CSV
 3. Calculate: `SECONDS_PER_GALLON = (duration - 30) / actual_gallons`
 4. Update in config file or `monitor/config.py`
+
+## Manual Filter Purging
+
+You can manually purge the spindown sediment filter:
+
+```bash
+# Basic purge (default 10 seconds)
+python -m monitor.purge
+
+# Custom duration with debug output
+python -m monitor.purge --duration 30 --debug
+
+# Help
+python -m monitor.purge --help
+```
+
+**Note:** Auto-purge can be enabled with `--enable-purge` flag when running the monitor.
 
 ## Project Structure
 ```
@@ -185,7 +202,7 @@ pumphouse/
 │   ├── relay.py              # Relay control (optional)
 │   ├── logger.py             # CSV logging (events + snapshots)
 │   ├── main.py               # Entry point
-│   └── spin_purge.py         # Standalone purge script
+│   └── purge.py              # Standalone purge script
 ├── requirements.txt
 ├── README.md
 └── CHANGELOG.md
