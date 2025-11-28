@@ -1,5 +1,5 @@
 """
-Tank level monitoring via web scraping and float sensor
+Tank level monitoring via web scraping
 """
 import re
 from datetime import datetime, timedelta
@@ -36,9 +36,9 @@ def get_tank_data(url, timeout=10):
     try:
         response = requests.get(url, timeout=timeout)
         response.raise_for_status()
-        
+
         soup = BeautifulSoup(response.content, 'html.parser')
-        
+
         # Find PT percentage
         pt_percentage = None
         script_tags = soup.find_all('script')
@@ -48,20 +48,20 @@ def get_tank_data(url, timeout=10):
                 if match:
                     pt_percentage = int(match.group(1))
                     break
-        
+
         # Find depth
         depth_inches = None
         inch_level_span = soup.find('span', class_='inchLevel')
         if inch_level_span:
             depth_inches = float(inch_level_span.get_text(strip=True))
-        
-        # Find last updated time
+
+        # Find last updated timestamp
         last_updated_timestamp = None
         updated_on_span = soup.find('span', class_='updated_on')
         if updated_on_span:
             last_updated_text = updated_on_span.get_text(strip=True)
             last_updated_timestamp = parse_last_updated(last_updated_text)
-        
+
         # Calculate percentage and gallons
         percentage = None
         gallons = None
@@ -69,10 +69,10 @@ def get_tank_data(url, timeout=10):
             percentage = (depth_inches / TANK_HEIGHT_INCHES) * 100
             percentage = round(percentage, 1)
             gallons = calculate_gallons(depth_inches)
-        
+
         # Read float sensor
         float_state = read_float_sensor()
-        
+
         return {
             'percentage': percentage,
             'pt_percentage': pt_percentage,
@@ -83,50 +83,6 @@ def get_tank_data(url, timeout=10):
             'status': 'success'
         }
         
-    except requests.Timeout:
-        return {
-            'percentage': None,
-            'pt_percentage': None,
-            'depth': None,
-            'gallons': None,
-            'last_updated': None,
-            'float_state': read_float_sensor(),
-            'status': 'error',
-            'error_message': f"Timeout after {timeout}s"
-        }
-    except requests.ConnectionError as e:
-        return {
-            'percentage': None,
-            'pt_percentage': None,
-            'depth': None,
-            'gallons': None,
-            'last_updated': None,
-            'float_state': read_float_sensor(),
-            'status': 'error',
-            'error_message': f"Connection error: {str(e)}"
-        }
-    except requests.HTTPError as e:
-        return {
-            'percentage': None,
-            'pt_percentage': None,
-            'depth': None,
-            'gallons': None,
-            'last_updated': None,
-            'float_state': read_float_sensor(),
-            'status': 'error',
-            'error_message': f"HTTP {e.response.status_code}: {str(e)}"
-        }
-    except ValueError as e:
-        return {
-            'percentage': None,
-            'pt_percentage': None,
-            'depth': None,
-            'gallons': None,
-            'last_updated': None,
-            'float_state': read_float_sensor(),
-            'status': 'error',
-            'error_message': f"Parse error: {str(e)}"
-        }
     except Exception as e:
         return {
             'percentage': None,
@@ -136,5 +92,5 @@ def get_tank_data(url, timeout=10):
             'last_updated': None,
             'float_state': read_float_sensor(),
             'status': 'error',
-            'error_message': f"Unexpected error: {str(e)}"
+            'error_message': str(e)
         }

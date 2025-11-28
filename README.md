@@ -1,17 +1,17 @@
 # Pumphouse Monitor
 
-Comprehensive pressure and tank level monitoring system for remote water treatment facilities. Monitors pressure events, tracks water usage, and correlates pumped water with actual tank level changes.
+Simplified event-based monitoring system for remote water treatment facilities. Monitors pressure events, tracks water usage with periodic snapshots, and provides accurate tank data age tracking.
 
 ## Features
 
-- **Pressure Monitoring**: Continuous monitoring of 10 PSI pressure switch with event detection
+- **Simplified Event-Based Logging**: Clean event logging on all state changes (no artifacts, no grace periods)
+- **Periodic Snapshots**: Aggregated data snapshots at exact clock boundaries (15, 5, or 2 minute intervals)
+- **Accurate Tank Data Age**: Tracks actual PT website update time (not fetch time) showing data staleness
+- **Smart Gallons Estimation**: Handles both completed pump cycles and in-progress cycles across snapshot boundaries
+- **Pressure Monitoring**: Continuous monitoring of 10 PSI pressure switch with retry logic for coastal environment noise
 - **Tank Level Monitoring**: Periodic scraping of PT sensor data with depth, percentage, and gallons
-- **Float Sensor Integration**: Monitors tank float switch state (80%/95% hysteresis)
-- **Smart Logging**: Only logs events when tank data actually changes
-- **Water Usage Tracking**: Estimates gallons pumped and compares to actual tank level changes
-- **Graceful Degradation**: Pressure monitoring continues even if tank monitoring fails
-- **Thread-Safe Architecture**: Ready for web dashboard integration
-- **GPIO Management**: Properly releases GPIO between readings to avoid conflicts
+- **Float Sensor Integration**: Monitors tank float switch state (HIGH=CLOSED/CALLING, LOW=OPEN/FULL)
+- **Relay Control**: Optional automatic spindown filter purging after water delivery
 - **Background Operation**: Runs reliably via nohup with SSH disconnect survival
 
 ## Installation
@@ -28,17 +28,24 @@ pip install -r requirements.txt
 
 ## Quick Start
 ```bash
-# Run with debug output
-python -m monitor --changes events.csv --debug
+# Run with debug output (15-minute snapshots)
+python -m monitor --debug
+
+# Run with debug and 2-minute snapshots
+python -m monitor --debug --snapshot-interval 2
+
+# Run with auto-purge enabled
+python -m monitor --debug --enable-purge
 
 # Run in background
-nohup venv/bin/python -m monitor --changes events.csv --debug > output.txt 2>&1 &
+nohup python -m monitor > output.txt 2>&1 &
 
 # Check if running
 ps aux | grep monitor
 
 # View logs
 tail -f events.csv
+tail -f snapshots.csv
 
 # Stop
 pkill -f "python -m monitor"
@@ -49,13 +56,14 @@ pkill -f "python -m monitor"
 python -m monitor [OPTIONS]
 
 Options:
-  --log FILE              Main log file (default: pressure_log.txt)
-  --changes FILE          CSV file for pressure events
+  --events FILE           Events CSV file (default: events.csv)
+  --snapshots FILE        Snapshots CSV file (default: snapshots.csv)
   --debug                 Enable console output
-  --debug-interval N      Console logging interval in debug mode (default: 60s)
-  --poll-interval N       Pressure sensor poll interval (default: 5s)
-  --tank-interval N       Tank check interval in minutes (default: 1m)
+  --poll-interval N       Pressure sensor poll interval in seconds (default: 5)
+  --tank-interval N       Tank check interval in minutes (default: 1)
+  --snapshot-interval N   Snapshot interval: 15, 5, or 2 minutes (default: 15)
   --tank-url URL          Tank monitoring URL
+  --enable-purge          Enable automatic filter purging after water delivery
   --version               Show version and exit
   -h, --help              Show help message
 ```
@@ -107,43 +115,45 @@ MAX_PRESSURE_LOG_INTERVAL=1800
 
 ## Output Files
 
-### Events CSV (pressure_events.csv)
+### Events CSV (events.csv)
 
-Complete pressure events with tank correlation:
+All state change events:
 ```csv
-pressure_on_time,pressure_off_time,duration_seconds,estimated_gallons,event_type,float_state,float_last_change,tank_gallons,tank_depth,tank_percentage,tank_pt_percentage,gallons_changed
-2025-01-27 14:23:15.123,2025-01-27 14:28:45.456,330.333,13.21,NORMAL,CLOSED/CALLING,2025-01-27 14:15:30,850,35.12,60.6,61,12.5
-2025-01-27 15:45:20.789,2025-01-27 16:52:10.234,4009.445,167.68,NORMAL,OPEN/FULL,2025-01-27 16:50:15,1375,79.74,137.5,95,525.0
+timestamp,event_type,pressure_state,float_state,tank_gallons,tank_depth,tank_percentage,estimated_gallons,relay_bypass,relay_supply_override,notes
+2025-11-28 10:15:00.123,INIT,HIGH,CLOSED/CALLING,1185,49.09,84.6,,,OFF,OFF,System startup
+2025-11-28 10:23:15.456,PRESSURE_LOW,HIGH,CLOSED/CALLING,1185,49.09,84.6,1.20,OFF,OFF,Duration: 330.3s
+2025-11-28 10:28:45.789,TANK_LEVEL,LOW,CLOSED/CALLING,1203,49.82,85.9,,OFF,OFF,Changed by +17.6 gal
+2025-11-28 10:45:20.234,SHUTDOWN,HIGH,CLOSED/CALLING,1208,50.06,86.3,,OFF,OFF,Clean shutdown
 ```
 
 ### Event Types
 
-- **NORMAL**: Pressure cycle completed normally (pressure dropped below 10 PSI)
-- **SHUTDOWN**: Program stopped while pressure was still high (Ctrl+C or kill signal)
-- **STARTUP**: Pressure was already high when program started (logs when it drops)
-- **MAXTIME**: Pressure has been high for 30+ minutes, checkpoint logged (only if tank data changed)
+- **INIT**: System startup
+- **PRESSURE_HIGH**: Pressure went ≥10 PSI (pump started)
+- **PRESSURE_LOW**: Pressure went <10 PSI (pump stopped), includes estimated gallons
+- **TANK_LEVEL**: Tank level changed (scraped from PT website)
+- **FLOAT_CALLING**: Float sensor changed to CLOSED/CALLING (tank needs water)
+- **FLOAT_FULL**: Float sensor changed to OPEN/FULL (tank full)
+- **PURGE**: Automatic spindown filter purge triggered
+- **SHUTDOWN**: Clean shutdown
 
-### Main Log (pressure_log.txt)
+### Snapshots CSV (snapshots.csv)
 
-Text file with all events and status updates:
-```
-=== Monitor v2.0.0 Started at 2025-01-27 14:15:00 ===
-2025-01-27 14:15:00.123 - <10 PSI (NC CLOSED)
-2025-01-27 14:23:15.456 - >>> CHANGE: ≥10 PSI (NC OPEN)
-2025-01-27 14:28:45.789 - >>> CHANGE: <10 PSI (NC CLOSED)
+Periodic aggregated summaries at exact clock boundaries:
+```csv
+timestamp,duration_seconds,tank_gallons,tank_data_age_seconds,float_state,float_ever_calling,float_always_full,pressure_high_seconds,pressure_high_percent,estimated_gallons_pumped,purge_count,relay_bypass,relay_supply_override
+2025-11-28 10:15:00.000,900,1185,450,CLOSED/CALLING,Yes,No,330,36.7,4.20,0,OFF,OFF
+2025-11-28 10:30:00.000,900,1203,120,CLOSED/CALLING,Yes,No,0,0.0,0.00,0,OFF,OFF
 ```
 
 ## Logging Behavior
 
-The system uses smart logging to correlate pressure events with actual tank level changes:
+The system uses simplified event-based logging:
 
-1. **Pressure Activated**: Starts timer, clears tank change flag
-2. **Pressure Deactivated**: Waits up to 2 minutes for fresh tank data
-3. **Tank Data Updates**: Logs event immediately with current tank state
-4. **Timeout**: If no tank update within 2 minutes, logs with current data
-5. **Long Events (30+ min)**: Only logs MAXTIME checkpoint if tank data has changed
-
-This ensures accurate correlation between estimated gallons pumped and actual `gallons_changed` in the tank.
+1. **Events**: Logs every state change immediately to events.csv
+2. **Snapshots**: Aggregates data over interval (15/5/2 min), logs at exact clock boundaries
+3. **Tank Data Age**: Tracks actual PT website "last updated" time, shows data staleness
+4. **Gallons Estimation**: Uses completed pump cycles when available, falls back to accumulated HIGH time for in-progress cycles
 
 ## Water Volume Estimation
 
@@ -165,15 +175,17 @@ This ensures accurate correlation between estimated gallons pumped and actual `g
 pumphouse/
 ├── venv/                      # Virtual environment
 ├── monitor/                   # Main package
-│   ├── __init__.py           # Package initialization
+│   ├── __init__.py           # Package initialization (version: 2.1.0)
 │   ├── __main__.py           # Entry point for python -m
 │   ├── config.py             # Configuration constants
-│   ├── gpio_helpers.py       # GPIO access functions
-│   ├── state.py              # Thread-safe shared state
-│   ├── tank.py               # Tank monitoring
-│   ├── pressure.py           # Pressure monitoring
-│   ├── logger.py             # CSV/file logging
-│   └── main.py               # Argument parsing & main loop
+│   ├── gpio_helpers.py       # GPIO access with retry logic
+│   ├── state.py              # Simple state tracking
+│   ├── tank.py               # Web scraping (with timestamp parsing)
+│   ├── poll.py               # Simplified polling loop
+│   ├── relay.py              # Relay control (optional)
+│   ├── logger.py             # CSV logging (events + snapshots)
+│   ├── main.py               # Entry point
+│   └── spin_purge.py         # Standalone purge script
 ├── requirements.txt
 ├── README.md
 └── CHANGELOG.md
@@ -181,23 +193,22 @@ pumphouse/
 
 ## Architecture
 
-### Threading Model
-- **Main Thread**: Pressure monitoring (polls every 5 seconds)
-- **Tank Thread**: Tank monitoring (polls every 1 minute)
-- **Shared State**: Thread-safe SystemState object for coordination
+### Simplified Design
+- **Single-threaded**: Simple polling loop, no threading complexity
+- **Event-based**: Logs all state changes to events.csv
+- **Snapshot-based**: Periodic summaries to snapshots.csv
+- **No artifacts**: No grace periods, no complex heuristics
 
 ### Error Handling
-- Tank monitoring failures don't stop pressure monitoring
-- Consecutive errors are tracked and logged
-- After 5 consecutive tank errors, warning is displayed but operation continues
-- GPIO conflicts are handled gracefully with retry logic
+- GPIO retry logic filters coastal environment noise (3 reads with 1s pauses)
+- Tank scraping continues even if PT website is slow
+- Relay control is optional and fails gracefully
 
 ### Future Expansion
-The architecture is designed to easily add:
-- Web dashboard (reads from SystemState)
-- REST API (exposes SystemState via HTTP)
-- Additional sensors (add to SystemState and create monitor threads)
-- Alerts/notifications (subscribe to state changes)
+The simplified architecture makes it easy to add:
+- Web dashboard for remote monitoring
+- Additional sensors (flow meter, leak detection)
+- Alert notifications
 
 ## Troubleshooting
 
@@ -252,6 +263,6 @@ Internal use only - Pumphouse monitoring system
 
 ## Version
 
-Current version: **2.0.0**
+Current version: **2.1.0**
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.
