@@ -50,7 +50,7 @@ def log_event(timestamp, pressure_state, duration, gallons_pumped, event_type,
         pressure_state: Current pressure state (GPIO.HIGH/LOW or None)
         duration: Duration in seconds (or None for non-pressure events)
         gallons_pumped: Estimated gallons pumped (or None for non-pressure events)
-        event_type: 'NORMAL', 'SHUTDOWN', 'STARTUP', 'MAXTIME', 'TANK_CHANGE', 'INIT'
+        event_type: 'NORMAL', 'SHUTDOWN', 'STARTUP', 'MAXTIME', 'TANK_CHANGE', 'INIT', 'PRESSURE_ARTIFACT'
         change_log_file: Path to CSV file
         system_state: SystemState object
         debug: Whether to print debug info
@@ -128,7 +128,7 @@ def log_pressure_event(start_time, end_time, duration, gallons_pumped, event_typ
         end_time: Unix timestamp when pressure deactivated  
         duration: Duration in seconds
         gallons_pumped: Estimated gallons pumped
-        event_type: 'NORMAL', 'SHUTDOWN', 'STARTUP', 'MAXTIME'
+        event_type: 'NORMAL', 'SHUTDOWN', 'STARTUP', 'MAXTIME', 'PRESSURE_ARTIFACT'
         change_log_file: Path to CSV
         system_state: SystemState object
         debug: Whether to print debug info
