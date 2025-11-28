@@ -7,14 +7,14 @@ from datetime import datetime
 from monitor import __version__
 from monitor.config import (
     POLL_INTERVAL, TANK_POLL_INTERVAL, TANK_URL, TANK_CHANGE_THRESHOLD,
-    DEFAULT_LOG_FILE, DEFAULT_EVENTS_FILE,
+    DEFAULT_LOG_FILE, DEFAULT_EVENTS_FILE, ARTIFACT_LOW_GRACE_PERIOD,
     load_config_file
 )
 from monitor.state import SystemState
-from monitor.tank import TankMonitor, get_tank_data
-from monitor.pressure import PressureMonitor
+from monitor.tank import get_tank_data
+from monitor.poll import UnifiedMonitor
 from monitor.logger import initialize_csv, log_startup
-from monitor.gpio_helpers import read_pressure
+from monitor.gpio_helpers import init_gpio, cleanup_gpio, read_pressure
 
 def main():
     """Main entry point"""
@@ -29,16 +29,13 @@ def main():
         epilog='''
 Examples:
   python -m monitor --changes events.csv
-      Monitor pressure and tank, log events to CSV when tank data changes
+      Monitor pressure and tank, log events when data changes
   
   python -m monitor --changes events.csv --debug
       Debug mode with console output
   
   python -m monitor --tank-interval 5
-      Check tank level every 5 minutes instead of default 1 minute
-  
-  python -m monitor --tank-threshold 5.0
-      Log tank changes when ≥5 gallons instead of default 2 gallons
+      Check tank every 5 minutes instead of default 1 minute
 
 Running in Background:
   nohup venv/bin/python -m monitor --changes events.csv --debug > output.txt 2>&1 &
@@ -49,23 +46,14 @@ Running in Background:
   # Stop
   pkill -f "python -m monitor"
 
-Logging Behavior:
-  - Logs startup state (INIT event)
-  - Logs when pressure drops AND tank level data has been updated
-  - Logs when tank changes by ≥threshold gallons (usage/filling detection)
-  - Waits up to 2 minutes after pressure drop for fresh tank data
-  - For long pressure events (30+ min), only logs if tank data changed
-  - Fetches final tank reading on shutdown if pressure is active
-  - Continues pressure monitoring even if tank monitoring fails
-  - Ignores pressure when float is OPEN/FULL (prevents false logging)
-
 Event Types:
-  INIT        - System startup state
-  NORMAL      - Pressure cycle completed normally
-  STARTUP     - Pressure was already high at startup (logged when it drops)
-  SHUTDOWN    - Program stopped while pressure was high
-  MAXTIME     - Pressure checkpoint after 30 minutes (if tank changed)
-  TANK_CHANGE - Tank level changed by ≥threshold gallons (usage detection)
+  INIT             - System startup state
+  NORMAL           - Pressure cycle completed
+  STARTUP          - Pressure was high at startup
+  SHUTDOWN         - Program stopped during pressure
+  MAXTIME          - 30-minute checkpoint during long events
+  TANK_CHANGE      - Tank level changed by ≥threshold gallons
+  PRESSURE_ARTIFACT - Neighbor had pressure but our tank was full
 
 CSV Columns:
   timestamp, event_type, pressure_state, duration_seconds, estimated_gallons,
@@ -76,7 +64,7 @@ CSV Columns:
     parser.add_argument('--log', default=file_config.get('LOG_FILE', DEFAULT_LOG_FILE),
                        help='Main log file (default: pressure_log.txt)')
     parser.add_argument('--changes', default=file_config.get('EVENTS_FILE', None),
-                       help='CSV file for pressure events')
+                       help='CSV file for events')
     parser.add_argument('--debug', action='store_true',
                        help='Enable console output')
     parser.add_argument('--debug-interval', type=int, 
@@ -91,6 +79,9 @@ CSV Columns:
     parser.add_argument('--tank-threshold', type=float,
                        default=file_config.get('TANK_CHANGE_THRESHOLD', TANK_CHANGE_THRESHOLD),
                        help='Log tank changes ≥ this many gallons (default: 2.0)')
+    parser.add_argument('--artifact-grace-period', type=int,
+                       default=file_config.get('ARTIFACT_LOW_GRACE_PERIOD', ARTIFACT_LOW_GRACE_PERIOD),
+                       help='Seconds to wait before confirming artifact ended (default: 300)')
     parser.add_argument('--tank-url', 
                        default=file_config.get('TANK_URL', TANK_URL),
                        help='Tank monitoring URL')
@@ -98,7 +89,11 @@ CSV Columns:
     
     args = parser.parse_args()
     
-    # Initialize CSV with headers if needed
+    # Initialize GPIO once
+    if not init_gpio():
+        print("Warning: Could not initialize GPIO, sensor readings will not work")
+    
+    # Initialize CSV
     if args.changes:
         if initialize_csv(args.changes):
             if args.debug:
@@ -110,6 +105,7 @@ CSV Columns:
         print(f"Pressure poll: {args.poll_interval}s")
         print(f"Tank poll: {args.tank_interval}m")
         print(f"Tank threshold: {args.tank_threshold}gal")
+        print(f"Artifact grace: {args.artifact_grace_period}s")
         print("\nFetching initial tank level...")
     
     startup_msg = f"=== Monitor v{__version__} Started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ==="
@@ -119,7 +115,7 @@ CSV Columns:
     # Create shared state
     system_state = SystemState()
     
-    # Fetch initial tank level before starting monitoring
+    # Fetch initial tank level
     initial_tank_data = get_tank_data(args.tank_url)
     if initial_tank_data['status'] == 'success':
         system_state.update_tank(
@@ -132,7 +128,6 @@ CSV Columns:
         )
         system_state.record_tank_success()
         
-        # Set initial logged gallons so first event can calculate delta
         if initial_tank_data['gallons'] is not None:
             system_state.set_last_logged_gallons(initial_tank_data['gallons'])
         
@@ -142,8 +137,7 @@ CSV Columns:
     else:
         system_state.record_tank_error(initial_tank_data.get('error_message', 'Unknown'))
         if args.debug:
-            print(f"Warning: Could not fetch initial tank data: {initial_tank_data.get('error_message')}")
-            print("Continuing with pressure monitoring...\n")
+            print(f"Warning: Could not fetch initial tank data")
     
     # Get initial pressure state
     initial_pressure = read_pressure()
@@ -155,37 +149,30 @@ CSV Columns:
     if args.debug:
         print("Press Ctrl+C to stop\n")
     
-    # Clear the changed flag since we just initialized
+    # Clear tank changed flag
     system_state.clear_tank_changed_flag()
     
-    # Start tank monitoring thread
-    tank_monitor = TankMonitor(
-        system_state, 
-        args.tank_url, 
-        args.tank_interval * 60,  # Convert minutes to seconds
-        change_log_file=args.changes,
-        debug=args.debug,
-        change_threshold=args.tank_threshold
-    )
-    tank_monitor.start()
-    
-    # Run pressure monitor in main thread
-    monitor = PressureMonitor(
-        args.log, 
-        args.changes, 
+    # Run unified monitor (single-threaded)
+    monitor = UnifiedMonitor(
+        args.log,
+        args.changes,
         system_state,
-        tank_monitor,
-        args.debug, 
-        args.debug_interval, 
-        args.poll_interval
+        args.tank_url,
+        args.debug,
+        args.debug_interval,
+        args.poll_interval,
+        args.tank_interval * 60,  # Convert to seconds
+        args.tank_threshold,
+        args.artifact_grace_period
     )
+    
+    # Optionally enable relay control (comment out if not using relays yet)
+    # monitor.enable_relay_control()
     
     try:
         monitor.run()
     finally:
-        # Stop tank monitor thread
-        tank_monitor.stop()
-        tank_monitor.join(timeout=2)
+        cleanup_gpio()
 
 if __name__ == "__main__":
     main()
