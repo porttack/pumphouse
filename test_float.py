@@ -23,8 +23,8 @@ def test_float_continuous():
     print("\n=== Float Sensor Test ===")
     print("GPIO 21 with internal pull-up resistor")
     print("Expected behavior:")
-    print("  - HIGH (1) = Float switch OPEN (tank IS FULL)")
-    print("  - LOW  (0) = Float switch CLOSED (tank NOT full / override enabled)")
+    print("  - HIGH (1) = Float switch OPEN/FULL")
+    print("  - LOW  (0) = Float switch CLOSED/CALLING (tank NOT full OR override enabled)")
     print("\nMonitoring float sensor... Press Ctrl+C to exit\n")
     
     last_state = None
