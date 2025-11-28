@@ -7,8 +7,8 @@ from datetime import datetime, timedelta
 import requests
 from bs4 import BeautifulSoup
 
-from monitor.config import TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS
-from monitor.gpio_helpers import read_float_sensor
+from monitor.config import TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS, TANK_CHANGE_THRESHOLD
+from monitor.gpio_helpers import read_float_sensor, read_pressure
 
 def calculate_gallons(depth_inches):
     """
@@ -100,7 +100,7 @@ def get_tank_data(url, timeout=10):
             'status': 'success'
         }
         
-    except requests.RequestException as e:
+    except requests.Timeout:
         return {
             'percentage': None,
             'pt_percentage': None,
@@ -109,7 +109,29 @@ def get_tank_data(url, timeout=10):
             'last_updated': None,
             'float_state': read_float_sensor(),
             'status': 'error',
-            'error_message': f"Network error: {str(e)}"
+            'error_message': f"Timeout after {timeout}s"
+        }
+    except requests.ConnectionError as e:
+        return {
+            'percentage': None,
+            'pt_percentage': None,
+            'depth': None,
+            'gallons': None,
+            'last_updated': None,
+            'float_state': read_float_sensor(),
+            'status': 'error',
+            'error_message': f"Connection error: {str(e)}"
+        }
+    except requests.HTTPError as e:
+        return {
+            'percentage': None,
+            'pt_percentage': None,
+            'depth': None,
+            'gallons': None,
+            'last_updated': None,
+            'float_state': read_float_sensor(),
+            'status': 'error',
+            'error_message': f"HTTP {e.response.status_code}: {str(e)}"
         }
     except ValueError as e:
         return {
@@ -137,13 +159,16 @@ def get_tank_data(url, timeout=10):
 class TankMonitor(threading.Thread):
     """Thread for monitoring tank level periodically"""
     
-    def __init__(self, system_state, url, interval, debug=False, max_consecutive_errors=5):
+    def __init__(self, system_state, url, interval, change_log_file=None, 
+                 debug=False, max_consecutive_errors=10, change_threshold=TANK_CHANGE_THRESHOLD):
         super().__init__(daemon=True)
         self.system_state = system_state
         self.url = url
         self.interval = interval
+        self.change_log_file = change_log_file
         self.debug = debug
         self.max_consecutive_errors = max_consecutive_errors
+        self.change_threshold = change_threshold
         self.running = True
     
     def stop(self):
@@ -152,6 +177,8 @@ class TankMonitor(threading.Thread):
     
     def run(self):
         """Periodically fetch tank data and update system state"""
+        from monitor.logger import log_tank_change
+        
         consecutive_errors = 0
         
         while self.running:
@@ -159,9 +186,18 @@ class TankMonitor(threading.Thread):
                 data = get_tank_data(self.url)
                 
                 if data['status'] == 'success':
+                    # Reset error counter on success
+                    if consecutive_errors > 0:
+                        if self.debug:
+                            print(f"\n✓ Tank monitoring recovered after {consecutive_errors} errors")
                     consecutive_errors = 0
                     self.system_state.record_tank_success()
                     
+                    # Get previous gallons before update
+                    prev_state = self.system_state.get_snapshot()
+                    prev_gallons = prev_state['last_logged_gallons']
+                    
+                    # Update tank state
                     changed = self.system_state.update_tank(
                         data['depth'],
                         data['percentage'],
@@ -171,9 +207,28 @@ class TankMonitor(threading.Thread):
                         data['float_state']
                     )
                     
+                    # Check for significant change (usage detection)
+                    if (self.change_log_file and 
+                        prev_gallons is not None and 
+                        data['gallons'] is not None):
+                        delta = data['gallons'] - prev_gallons
+                        
+                        # Log if change exceeds threshold (positive or negative)
+                        if abs(delta) >= self.change_threshold:
+                            if self.debug:
+                                action = "gained" if delta > 0 else "lost"
+                                print(f"\n💧 Significant tank change detected: {action} {abs(delta):.1f}gal")
+                            
+                            # Get current pressure state for logging
+                            pressure_state = read_pressure()
+                            log_tank_change(self.change_log_file, self.system_state, 
+                                          pressure_state, self.debug)
+                    
                     if self.debug:
                         change_indicator = " [CHANGED]" if changed else ""
-                        print(f"\n[Tank Update{change_indicator}] {data['gallons']:.0f}gal ({data['percentage']:.1f}%), "
+                        gallons_str = f"{data['gallons']:.0f}gal" if data['gallons'] else "??gal"
+                        pct_str = f"({data['percentage']:.1f}%)" if data['percentage'] else "(??%)"
+                        print(f"\n[Tank Update{change_indicator}] {gallons_str} {pct_str}, "
                               f"Float: {data['float_state']}")
                 else:
                     consecutive_errors += 1
@@ -184,14 +239,17 @@ class TankMonitor(threading.Thread):
                         print(f"\n[Tank Error {consecutive_errors}/{self.max_consecutive_errors}] {error_msg}")
                     
                     # If too many consecutive errors, log a warning but continue
-                    if consecutive_errors >= self.max_consecutive_errors and self.debug:
+                    if consecutive_errors == self.max_consecutive_errors and self.debug:
                         print(f"\n⚠️  Warning: Tank monitoring has failed {consecutive_errors} times consecutively")
                         print(f"   Pressure monitoring will continue, but tank data may be stale")
+                        print(f"   Last successful fetch: {self.system_state.get_snapshot()['tank_last_success']}")
                 
             except Exception as e:
                 consecutive_errors += 1
                 if self.debug:
                     print(f"\n[Tank Monitor Exception {consecutive_errors}/{self.max_consecutive_errors}] {e}")
+                    import traceback
+                    traceback.print_exc()
             
             # Sleep in small increments to allow faster shutdown
             for _ in range(self.interval):

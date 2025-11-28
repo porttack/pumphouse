@@ -23,6 +23,7 @@ SECONDS_PER_GALLON = 10 / 0.14   # 10 seconds = 0.14 gallons
 
 # Logging Configuration
 MAX_PRESSURE_LOG_INTERVAL = 1800  # Log at least every 30 minutes when pressure is high
+TANK_CHANGE_THRESHOLD = 2.0  # Log when tank changes by this many gallons (usage detection)
 
 # Default file paths
 DEFAULT_LOG_FILE = 'pressure_log.txt'
@@ -97,6 +98,7 @@ SECONDS_PER_GALLON=71.43
 
 # Logging
 MAX_PRESSURE_LOG_INTERVAL=1800
+TANK_CHANGE_THRESHOLD=2.0
 """
     
     try:
