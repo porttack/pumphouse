@@ -130,7 +130,10 @@ class SimplifiedMonitor:
         self.last_tank_check = 0
         self.tank_last_updated = None
         self.next_snapshot_time = None
-        
+
+        # Tank tracking for delta
+        self.last_snapshot_tank_gallons = None
+
         # Relay control
         self.relay_control_enabled = False
         
@@ -330,11 +333,17 @@ class SimplifiedMonitor:
                         self.state.float_state,
                         self.get_relay_status()
                     )
-                    
+
+                    # Calculate tank gallons delta
+                    tank_gallons_delta = None
+                    if self.state.tank_gallons is not None and self.last_snapshot_tank_gallons is not None:
+                        tank_gallons_delta = self.state.tank_gallons - self.last_snapshot_tank_gallons
+
                     log_snapshot(
                         self.snapshots_file,
                         snapshot_data['duration'],
                         snapshot_data['tank_gallons'],
+                        tank_gallons_delta,
                         snapshot_data['tank_data_age'],
                         snapshot_data['float_state'],
                         snapshot_data['float_ever_calling'],
@@ -345,6 +354,9 @@ class SimplifiedMonitor:
                         snapshot_data['purge_count'],
                         snapshot_data['relay_status']
                     )
+
+                    # Update last snapshot tank gallons for next delta calculation
+                    self.last_snapshot_tank_gallons = self.state.tank_gallons
                     
                     if self.debug:
                         print(f"\n{datetime.now().strftime('%H:%M:%S')} - SNAPSHOT")

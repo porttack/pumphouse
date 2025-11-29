@@ -141,10 +141,13 @@ timestamp,event_type,pressure_state,float_state,tank_gallons,tank_depth,tank_per
 
 Periodic aggregated summaries at exact clock boundaries:
 ```csv
-timestamp,duration_seconds,tank_gallons,tank_data_age_seconds,float_state,float_ever_calling,float_always_full,pressure_high_seconds,pressure_high_percent,estimated_gallons_pumped,purge_count,relay_bypass,relay_supply_override
-2025-11-28 10:15:00.000,900,1185,450,CLOSED/CALLING,Yes,No,330,36.7,4.20,0,OFF,OFF
-2025-11-28 10:30:00.000,900,1203,120,CLOSED/CALLING,Yes,No,0,0.0,0.00,0,OFF,OFF
+timestamp,duration_seconds,tank_gallons,tank_gallons_delta,tank_data_age_seconds,float_state,float_ever_calling,float_always_full,pressure_high_seconds,pressure_high_percent,estimated_gallons_pumped,purge_count,relay_bypass,relay_supply_override
+2025-11-28 10:15:00.000,900,1185,,450,CLOSED/CALLING,Yes,No,330,36.7,4.20,0,OFF,OFF
+2025-11-28 10:30:00.000,900,1203,+18,120,CLOSED/CALLING,Yes,No,0,0.0,0.00,0,OFF,OFF
+2025-11-28 10:45:00.000,900,1198,-5,300,CLOSED/CALLING,Yes,No,45,5.0,0.21,0,OFF,OFF
 ```
+
+**Note:** `tank_gallons_delta` shows change since last snapshot with explicit sign (+18, -5, +0) for easy visual scanning.
 
 ## Logging Behavior
 
@@ -192,7 +195,7 @@ python -m monitor.purge --help
 pumphouse/
 ├── venv/                      # Virtual environment
 ├── monitor/                   # Main package
-│   ├── __init__.py           # Package initialization (version: 2.1.0)
+│   ├── __init__.py           # Package initialization (version: 2.1.1)
 │   ├── __main__.py           # Entry point for python -m
 │   ├── config.py             # Configuration constants
 │   ├── gpio_helpers.py       # GPIO access with retry logic
@@ -280,6 +283,6 @@ Internal use only - Pumphouse monitoring system
 
 ## Version
 
-Current version: **2.1.0**
+Current version: **2.1.1**
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.

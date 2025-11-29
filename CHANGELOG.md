@@ -6,6 +6,17 @@ All notable changes to the pressure monitoring system.
 
 ## [2.1.0] - 2025-11-28
 
+## [2.1.1] - 2025-11-28
+
+### Added
+- **Snapshot tank delta**: Added `tank_gallons_delta` column to snapshots.csv showing change since last snapshot with explicit sign (+18, -5, +0) for easy visual scanning
+
+### Changed
+- `logger.py`: Updated snapshots CSV header and logging to include tank_gallons_delta
+- `poll.py`: Track last snapshot tank gallons and calculate delta for each snapshot
+- README.md: Updated snapshots CSV example to show tank_gallons_delta column
+
+
 ### Fixed
 - **Tank data age calculation**: Now correctly uses the actual timestamp from PT website "last updated" field instead of fetch time, so age increases from ~5-20 minutes before resetting (was incorrectly counting down)
 - **Snapshot gallons estimation**: Snapshots now estimate gallons from accumulated pressure HIGH time when no completed pump cycles occurred during the interval (prevents 0.00 gallons when pressure stays HIGH across snapshot boundaries)
