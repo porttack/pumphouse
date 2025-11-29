@@ -85,7 +85,7 @@ def log_snapshot(filepath, duration, tank_gallons, tank_gallons_delta, tank_data
             'Yes' if float_always_full else 'No',
             f'{pressure_high_seconds:.0f}',
             f'{pressure_high_percent:.1f}',
-            f'{estimated_gallons:.2f}',
+            f'{estimated_gallons:+.2f}',  # Always includes sign
             purge_count,
             relay_status.get('bypass', ''),
             relay_status.get('supply_override', '')
