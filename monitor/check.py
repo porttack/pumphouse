@@ -105,7 +105,7 @@ def main():
         if data['depth'] is not None:
             depth_line = f"Depth:       {data['depth']:.2f}\" / {TANK_HEIGHT_INCHES}\" ({data['percentage']:.1f}%)"
             if data['pt_percentage']:
-                depth_line += f" (PT: {data['pt_percentage']}% {args.url})"
+                depth_line += f" (PT: {data['pt_percentage']}%)"
             print(depth_line)
 
             print(f"Gallons:     {data['gallons']:.0f} / {TANK_CAPACITY_GALLONS} gal")
@@ -114,6 +114,7 @@ def main():
                 age_seconds = (datetime.now() - data['last_updated']).total_seconds()
                 age_minutes = int(age_seconds / 60)
                 print(f"Data Age:    {age_minutes} min (updated {data['last_updated'].strftime('%H:%M')})")
+                print(f"PT URL:      {args.url}")
 
             # Warnings
             if data['depth'] > TANK_HEIGHT_INCHES:
