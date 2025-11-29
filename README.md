@@ -13,6 +13,7 @@ Simplified event-based monitoring system for remote water treatment facilities. 
 - **Float Sensor Integration**: Monitors tank float switch state (HIGH=CLOSED/CALLING, LOW=OPEN/FULL)
 - **Relay Control**: Optional automatic spindown filter purging after water delivery
 - **Background Operation**: Runs reliably via nohup with SSH disconnect survival
+- **Web Dashboard**: HTTPS web interface on port 6443 for real-time status and historical data
 
 ## Installation
 ```bash
@@ -173,6 +174,65 @@ The system uses simplified event-based logging:
 3. Calculate: `SECONDS_PER_GALLON = (duration - 30) / actual_gallons`
 4. Update in config file or `monitor/config.py`
 
+## Web Dashboard
+
+View real-time status and historical data via HTTPS web interface:
+
+### Initial Setup
+
+```bash
+# Generate self-signed SSL certificate (one-time)
+./generate_cert.sh
+```
+
+### Running the Web Server
+
+```bash
+# Start web server (HTTPS on port 6443)
+python -m monitor.web
+
+# Run in background
+nohup python -m monitor.web > web.log 2>&1 &
+
+# Run without SSL (HTTP only)
+python -m monitor.web --no-ssl
+
+# Custom port
+python -m monitor.web --port 8443
+
+# Stop
+pkill -f "python -m monitor.web"
+```
+
+### Access
+
+- URL: `https://your-pi-ip:6443/`
+- Default username: `admin`
+- Default password: `pumphouse`
+
+Your browser will warn about the self-signed certificate - click "Advanced" and proceed.
+
+### Custom Credentials
+
+Set environment variables before starting:
+
+```bash
+export PUMPHOUSE_USER=yourusername
+export PUMPHOUSE_PASS=yourpassword
+python -m monitor.web
+```
+
+### Features
+
+- Live sensor readings (pressure, float, temperature, humidity)
+- Tank level with visual progress bar
+- Recent snapshots (last 10)
+- Recent events (last 20)
+- Auto-refresh every 60 seconds
+- Dark theme optimized for monitoring
+
+**Note:** The web server runs independently from the monitor daemon. Run both processes to collect data and view it.
+
 ## Manual Filter Purging
 
 You can manually purge the spindown sediment filter:
@@ -195,7 +255,7 @@ python -m monitor.purge --help
 pumphouse/
 ├── venv/                      # Virtual environment
 ├── monitor/                   # Main package
-│   ├── __init__.py           # Package initialization (version: 2.1.1)
+│   ├── __init__.py           # Package initialization (version: 2.2.0)
 │   ├── __main__.py           # Entry point for python -m
 │   ├── config.py             # Configuration constants
 │   ├── gpio_helpers.py       # GPIO access with retry logic
@@ -205,7 +265,14 @@ pumphouse/
 │   ├── relay.py              # Relay control (optional)
 │   ├── logger.py             # CSV logging (events + snapshots)
 │   ├── main.py               # Entry point
-│   └── purge.py              # Standalone purge script
+│   ├── check.py              # Status checker command
+│   ├── purge.py              # Standalone purge script
+│   ├── web.py                # HTTPS web dashboard server
+│   └── templates/
+│       └── status.html       # Web dashboard template
+├── generate_cert.sh           # SSL certificate generator
+├── cert.pem                   # SSL certificate (generated)
+├── key.pem                    # SSL private key (generated)
 ├── requirements.txt
 ├── README.md
 └── CHANGELOG.md
@@ -226,7 +293,7 @@ pumphouse/
 
 ### Future Expansion
 The simplified architecture makes it easy to add:
-- Web dashboard for remote monitoring
+- MRTG-style graphs for time-series visualization
 - Additional sensors (flow meter, leak detection)
 - Alert notifications
 
@@ -283,6 +350,6 @@ Internal use only - Pumphouse monitoring system
 
 ## Version
 
-Current version: **2.1.1**
+Current version: **2.2.0**
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.
