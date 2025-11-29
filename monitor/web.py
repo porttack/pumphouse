@@ -64,6 +64,136 @@ def read_csv_tail(filepath, max_rows=20):
     except Exception as e:
         return [], []
 
+def get_snapshots_stats(filepath='snapshots.csv'):
+    """Calculate aggregate stats from snapshots.csv for 1hr and 24hr windows"""
+    if not os.path.exists(filepath):
+        return None
+
+    try:
+        with open(filepath, 'r') as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+        if len(rows) == 0:
+            return None
+
+        now = datetime.now()
+        one_hour_ago = now.timestamp() - 3600
+        twenty_four_hours_ago = now.timestamp() - 86400
+
+        stats = {
+            'tank_change_1hr': None,
+            'tank_change_24hr': None,
+            'pressure_high_pct_1hr': None,
+            'pressure_high_min_24hr': None,
+            'last_refill_50_days': None,
+            'last_refill_50_timestamp': None
+        }
+
+        # Parse timestamps and filter rows
+        rows_1hr = []
+        rows_24hr = []
+
+        for row in rows:
+            try:
+                ts = datetime.fromisoformat(row['timestamp']).timestamp()
+                if ts >= one_hour_ago:
+                    rows_1hr.append(row)
+                if ts >= twenty_four_hours_ago:
+                    rows_24hr.append(row)
+            except:
+                continue
+
+        # Calculate tank level changes
+        if len(rows_1hr) >= 2:
+            try:
+                first_gallons = float(rows_1hr[0]['tank_gallons'])
+                last_gallons = float(rows_1hr[-1]['tank_gallons'])
+                stats['tank_change_1hr'] = last_gallons - first_gallons
+            except:
+                pass
+
+        if len(rows_24hr) >= 2:
+            try:
+                first_gallons = float(rows_24hr[0]['tank_gallons'])
+                last_gallons = float(rows_24hr[-1]['tank_gallons'])
+                stats['tank_change_24hr'] = last_gallons - first_gallons
+            except:
+                pass
+
+        # Calculate pressure HIGH percentages/minutes
+        if len(rows_1hr) > 0:
+            try:
+                total_seconds = 0
+                high_seconds = 0
+                for row in rows_1hr:
+                    duration = float(row['duration_seconds'])
+                    high = float(row['pressure_high_seconds'])
+                    total_seconds += duration
+                    high_seconds += high
+                if total_seconds > 0:
+                    stats['pressure_high_pct_1hr'] = (high_seconds / total_seconds) * 100
+            except:
+                pass
+
+        if len(rows_24hr) > 0:
+            try:
+                total_high_seconds = 0
+                for row in rows_24hr:
+                    high = float(row['pressure_high_seconds'])
+                    total_high_seconds += high
+                stats['pressure_high_min_24hr'] = total_high_seconds / 60
+            except:
+                pass
+
+        # Find last time tank increased by 50+ gallons
+        # Scan forward through all snapshots looking for cumulative gain of 50+
+        if len(rows) >= 2:
+            try:
+                cumulative_gain = 0
+                refill_start_idx = None
+                last_refill_idx = None
+                last_refill_gain = 0
+
+                for i in range(1, len(rows)):
+                    try:
+                        prev_gallons = float(rows[i - 1]['tank_gallons'])
+                        curr_gallons = float(rows[i]['tank_gallons'])
+                        delta = curr_gallons - prev_gallons
+
+                        if delta > 0:
+                            # Tank increased
+                            if cumulative_gain == 0:
+                                refill_start_idx = i  # Mark where refill started
+                            cumulative_gain += delta
+
+                            # Check if we hit 50+ gallons
+                            if cumulative_gain >= 50:
+                                last_refill_idx = refill_start_idx
+                                last_refill_gain = cumulative_gain
+                        else:
+                            # Tank decreased or stayed same, reset
+                            cumulative_gain = 0
+                            refill_start_idx = None
+                    except (ValueError, KeyError):
+                        # Skip rows with invalid data
+                        continue
+
+                # Use the most recent 50+ gallon refill we found
+                if last_refill_idx is not None:
+                    refill_time = datetime.fromisoformat(rows[last_refill_idx]['timestamp'])
+                    days_ago = (now - refill_time).total_seconds() / 86400
+                    stats['last_refill_50_days'] = days_ago
+                    stats['last_refill_50_timestamp'] = refill_time
+            except Exception as e:
+                # Silently ignore errors in refill calculation
+                pass
+
+        return stats
+
+    except Exception as e:
+        return None
+
 def get_sensor_data():
     """Read current sensor states"""
     gpio_available = init_gpio()
@@ -110,16 +240,21 @@ def index():
     snapshot_headers, snapshot_rows = read_csv_tail('snapshots.csv', max_rows=10)
     event_headers, event_rows = read_csv_tail('events.csv', max_rows=20)
 
+    # Get aggregate stats from snapshots
+    stats = get_snapshots_stats('snapshots.csv')
+
     return render_template('status.html',
                          sensor_data=sensor_data,
                          tank_data=tank_data,
                          tank_age_minutes=tank_age_minutes,
                          tank_height=TANK_HEIGHT_INCHES,
                          tank_capacity=TANK_CAPACITY_GALLONS,
+                         tank_url=TANK_URL,
                          snapshot_headers=snapshot_headers,
                          snapshot_rows=snapshot_rows,
                          event_headers=event_headers,
                          event_rows=event_rows,
+                         stats=stats,
                          format_pressure_state=format_pressure_state,
                          format_float_state=format_float_state,
                          now=datetime.now())
