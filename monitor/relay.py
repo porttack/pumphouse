@@ -17,8 +17,8 @@ RESERVED_PIN = 6           # Channel 4 - Reserved for future use
 
 # Relay configuration
 # Relays are ACTIVE LOW - writing LOW (0) activates the relay
-RELAY_ON = GPIO.LOW
-RELAY_OFF = GPIO.HIGH
+RELAY_ON = GPIO.LOW if RELAY_AVAILABLE else 0
+RELAY_OFF = GPIO.HIGH if RELAY_AVAILABLE else 1
 
 # Purge duration (seconds)
 DEFAULT_PURGE_DURATION = 10
@@ -39,6 +39,9 @@ def init_relays():
         return True
     
     try:
+        # Suppress warnings about pins already in use
+        GPIO.setwarnings(False)
+        
         # Check if GPIO is already set up
         if GPIO.getmode() is None:
             GPIO.setmode(GPIO.BCM)
@@ -116,67 +119,6 @@ def purge_spindown_filter(duration=DEFAULT_PURGE_DURATION, debug=False):
             pass
         return False
 
-def open_bypass_valve(debug=False):
-    """Open bypass valve (emergency bypass - water flows without filtration)"""
-    if not RELAY_AVAILABLE or not _relays_initialized:
-        return False
-    
-    try:
-        GPIO.output(BYPASS_VALVE_PIN, RELAY_ON)
-        if debug:
-            print("Bypass valve OPENED")
-        return True
-    except Exception as e:
-        print(f"Error opening bypass valve: {e}")
-        return False
-
-def close_bypass_valve(debug=False):
-    """Close bypass valve"""
-    if not RELAY_AVAILABLE or not _relays_initialized:
-        return False
-    
-    try:
-        GPIO.output(BYPASS_VALVE_PIN, RELAY_OFF)
-        if debug:
-            print("Bypass valve CLOSED")
-        return True
-    except Exception as e:
-        print(f"Error closing bypass valve: {e}")
-        return False
-
-def override_supply_valve_open(debug=False):
-    """
-    Override supply valve to OPEN (force water flow even if float is full).
-    Note: Float switch will still close valve when tank reaches ~95%.
-    """
-    if not RELAY_AVAILABLE or not _relays_initialized:
-        return False
-    
-    try:
-        GPIO.output(SUPPLY_VALVE_PIN, RELAY_ON)
-        if debug:
-            print("Supply valve override - FORCED OPEN")
-        return True
-    except Exception as e:
-        print(f"Error opening supply valve: {e}")
-        return False
-
-def release_supply_valve_override(debug=False):
-    """
-    Release supply valve override (return control to float switch).
-    """
-    if not RELAY_AVAILABLE or not _relays_initialized:
-        return False
-    
-    try:
-        GPIO.output(SUPPLY_VALVE_PIN, RELAY_OFF)
-        if debug:
-            print("Supply valve override RELEASED - float switch controls")
-        return True
-    except Exception as e:
-        print(f"Error releasing supply valve: {e}")
-        return False
-
 def get_relay_status():
     """
     Get current status of all relays.
@@ -184,19 +126,18 @@ def get_relay_status():
     """
     if not RELAY_AVAILABLE or not _relays_initialized:
         return {
-            'bypass': 'UNKNOWN',
-            'supply': 'UNKNOWN',
-            'spin_purge': 'UNKNOWN',
-            'reserved': 'UNKNOWN'
+            'bypass': 'OFF',
+            'supply_override': 'OFF'
         }
     
     try:
         return {
-            'bypass': 'OPEN' if GPIO.input(BYPASS_VALVE_PIN) == RELAY_ON else 'CLOSED',
-            'supply': 'OVERRIDE' if GPIO.input(SUPPLY_VALVE_PIN) == RELAY_ON else 'FLOAT_CONTROL',
-            'spin_purge': 'OPEN' if GPIO.input(SPIN_PURGE_VALVE_PIN) == RELAY_ON else 'CLOSED',
-            'reserved': 'ON' if GPIO.input(RESERVED_PIN) == RELAY_ON else 'OFF'
+            'bypass': 'ON' if GPIO.input(BYPASS_VALVE_PIN) == RELAY_ON else 'OFF',
+            'supply_override': 'ON' if GPIO.input(SUPPLY_VALVE_PIN) == RELAY_ON else 'OFF'
         }
     except Exception as e:
         print(f"Error reading relay status: {e}")
-        return None
+        return {
+            'bypass': 'UNKNOWN',
+            'supply_override': 'UNKNOWN'
+        }

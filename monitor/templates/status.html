@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="refresh" content="60">
+    <title>Pumphouse Monitor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #4CAF50;
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+        .timestamp {
+            color: #888;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        .section {
+            background: #2a2a2a;
+            border: 1px solid #444;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+        .section h2 {
+            color: #4CAF50;
+            margin-bottom: 15px;
+            font-size: 18px;
+            border-bottom: 1px solid #444;
+            padding-bottom: 8px;
+        }
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        .status-item {
+            background: #1a1a1a;
+            padding: 12px;
+            border-radius: 4px;
+            border-left: 3px solid #4CAF50;
+        }
+        .status-label {
+            color: #888;
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+        .status-value {
+            color: #e0e0e0;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        .status-value.high {
+            color: #4CAF50;
+        }
+        .status-value.low {
+            color: #ff9800;
+        }
+        .status-value.calling {
+            color: #ff9800;
+        }
+        .status-value.full {
+            color: #4CAF50;
+        }
+        .tank-bar {
+            background: #1a1a1a;
+            height: 40px;
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+            margin-top: 10px;
+        }
+        .tank-fill {
+            background: linear-gradient(to right, #2196F3, #4CAF50);
+            height: 100%;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+        .tank-label {
+            position: absolute;
+            width: 100%;
+            text-align: center;
+            line-height: 40px;
+            color: #e0e0e0;
+            font-weight: bold;
+            z-index: 1;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+            background: #1a1a1a;
+        }
+        th {
+            background: #333;
+            color: #4CAF50;
+            padding: 10px 8px;
+            text-align: left;
+            border-bottom: 2px solid #444;
+            position: sticky;
+            top: 0;
+        }
+        td {
+            padding: 8px;
+            border-bottom: 1px solid #333;
+        }
+        tr:hover {
+            background: #2a2a2a;
+        }
+        .table-container {
+            overflow-x: auto;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .warning {
+            background: #ff9800;
+            color: #000;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+        .error {
+            background: #f44336;
+            color: white;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .positive {
+            color: #4CAF50;
+        }
+        .negative {
+            color: #ff9800;
+        }
+        .url {
+            color: #2196F3;
+            font-size: 12px;
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>PUMPHOUSE SYSTEM STATUS</h1>
+        <div class="timestamp">Last Updated: {{ now.strftime('%Y-%m-%d %H:%M:%S') }} (auto-refresh: 60s)</div>
+
+        <!-- Sensors Section -->
+        {% if sensor_data.gpio_available %}
+        <div class="section">
+            <h2>SENSORS</h2>
+            <div class="status-grid">
+                <div class="status-item">
+                    <div class="status-label">Pressure</div>
+                    <div class="status-value {{ 'high' if sensor_data.pressure else 'low' }}">
+                        {{ format_pressure_state(sensor_data.pressure) }}
+                    </div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Float Switch</div>
+                    <div class="status-value {{ 'full' if sensor_data.float == 'OPEN/FULL' else 'calling' }}">
+                        {{ format_float_state(sensor_data.float) }}
+                    </div>
+                </div>
+                {% if sensor_data.temp is not none %}
+                <div class="status-item">
+                    <div class="status-label">Temperature</div>
+                    <div class="status-value">{{ "%.1f"|format(sensor_data.temp) }}°F</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Humidity</div>
+                    <div class="status-value">{{ "%.1f"|format(sensor_data.humidity) }}%</div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Tank Level Section -->
+        <div class="section">
+            <h2>TANK LEVEL</h2>
+            {% if tank_data.status == 'success' and tank_data.depth is not none %}
+            <div class="status-grid">
+                <div class="status-item">
+                    <div class="status-label">Depth</div>
+                    <div class="status-value">
+                        {{ "%.2f"|format(tank_data.depth) }}" / {{ tank_height }}" ({{ "%.1f"|format(tank_data.percentage) }}%)
+                        {% if tank_data.pt_percentage %}
+                            <span style="color: #888; font-size: 14px;">(PT: {{ tank_data.pt_percentage }}%)</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Gallons</div>
+                    <div class="status-value">{{ "%.0f"|format(tank_data.gallons) }} / {{ tank_capacity }} gal</div>
+                </div>
+                {% if tank_age_minutes is not none %}
+                <div class="status-item">
+                    <div class="status-label">Data Age</div>
+                    <div class="status-value">{{ tank_age_minutes }} min (updated {{ tank_data.last_updated.strftime('%H:%M') }})</div>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Tank level bar -->
+            <div class="tank-bar">
+                <div class="tank-label">{{ "%.1f"|format(tank_data.percentage) }}% ({{ "%.0f"|format(tank_data.gallons) }} gal)</div>
+                <div class="tank-fill" style="width: {{ "%.1f"|format(tank_data.percentage) }}%;"></div>
+            </div>
+
+            {% if tank_data.depth > tank_height %}
+            <div class="warning">
+                ⚠️ WARNING: Water level is {{ "%.2f"|format(tank_data.depth - tank_height) }}" above normal tank height!
+            </div>
+            {% endif %}
+
+            <div class="url" style="margin-top: 15px;">PT URL: {{ TANK_URL }}</div>
+            {% else %}
+            <div class="error">
+                ❌ Error: {{ tank_data.get('error_message', 'Could not fetch tank data') }}
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Snapshots Section -->
+        {% if snapshot_headers %}
+        <div class="section">
+            <h2>RECENT SNAPSHOTS (Last 10)</h2>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            {% for header in snapshot_headers %}
+                            <th>{{ header }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in snapshot_rows|reverse %}
+                        <tr>
+                            {% for cell in row %}
+                            <td>
+                                {% if cell.startswith('+') %}
+                                <span class="positive">{{ cell }}</span>
+                                {% elif cell.startswith('-') %}
+                                <span class="negative">{{ cell }}</span>
+                                {% else %}
+                                {{ cell }}
+                                {% endif %}
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Events Section -->
+        {% if event_headers %}
+        <div class="section">
+            <h2>RECENT EVENTS (Last 20)</h2>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            {% for header in event_headers %}
+                            <th>{{ header }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in event_rows|reverse %}
+                        <tr>
+                            {% for cell in row %}
+                            <td>{{ cell }}</td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>
