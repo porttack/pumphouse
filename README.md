@@ -226,9 +226,11 @@ python -m monitor.web
 
 - Live sensor readings (pressure, float, temperature, humidity)
 - Tank level with visual progress bar
+- Interactive time-series chart with selectable time ranges (6h, 12h, 24h, 3d, 7d, 14d)
+- Aggregate statistics: tank level changes (1hr/24hr), pressure HIGH percentages, last 50+ gallon refill
 - Recent snapshots (last 10)
 - Recent events (last 20)
-- Auto-refresh every 60 seconds
+- Auto-refresh every 5 minutes
 - Dark theme optimized for monitoring
 
 **Note:** The web server runs independently from the monitor daemon. Run both processes to collect data and view it.
