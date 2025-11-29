@@ -14,19 +14,22 @@ All notable changes to the pressure monitoring system.
 - **Web Dashboard**: HTTPS web interface on port 6443 for real-time monitoring
   - Live sensor readings (pressure, float, temperature, humidity)
   - Tank level visualization with progress bar
+  - Interactive Chart.js graph with selectable time ranges (6h, 12h, 24h, 3d, 7d, 14d)
+  - Aggregate statistics: tank level changes (1hr/24hr), pressure HIGH percentages, last 50+ gallon refill detection
   - Recent snapshots (last 10) displayed above events
   - Recent events (last 20)
-  - Auto-refresh every 60 seconds
+  - Auto-refresh every 5 minutes
   - Dark theme optimized for monitoring
   - Basic authentication with configurable credentials
-- `monitor/web.py`: Flask-based HTTPS server with basic auth
-- `monitor/templates/status.html`: Web dashboard template
+- `monitor/web.py`: Flask-based HTTPS server with basic auth and `/api/chart_data` endpoint
+- `monitor/templates/status.html`: Web dashboard template with Chart.js integration
 - `generate_cert.sh`: SSL certificate generation script
 - Flask dependency to requirements.txt
 
 ### Changed
 - README.md: Added comprehensive web dashboard documentation
 - Project structure now includes web server components
+- Dashboard layout optimized with progress bar at top, consolidated stats boxes, prioritized sensor ordering
 
 ### Added
 - **Snapshot tank delta**: Added `tank_gallons_delta` column to snapshots.csv showing change since last snapshot with explicit sign (+18, -5, +0) for easy visual scanning

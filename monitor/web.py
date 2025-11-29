@@ -7,7 +7,7 @@ import os
 import csv
 import argparse
 from datetime import datetime
-from flask import Flask, render_template, request, Response
+from flask import Flask, render_template, request, Response, jsonify
 from functools import wraps
 
 from monitor.config import TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS
@@ -219,6 +219,43 @@ def get_sensor_data():
     cleanup_gpio()
 
     return data
+
+@app.route('/api/chart_data')
+@requires_auth
+def chart_data():
+    """API endpoint to serve chart data as JSON"""
+    hours = request.args.get('hours', 24, type=int)
+
+    try:
+        with open('snapshots.csv', 'r') as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+        if len(rows) == 0:
+            return jsonify({'timestamps': [], 'gallons': []})
+
+        # Filter by time range
+        now = datetime.now()
+        cutoff = now.timestamp() - (hours * 3600)
+
+        timestamps = []
+        gallons = []
+
+        for row in rows:
+            try:
+                ts = datetime.fromisoformat(row['timestamp'])
+                if ts.timestamp() >= cutoff:
+                    timestamps.append(ts.strftime('%Y-%m-%d %H:%M'))
+                    gallons.append(float(row['tank_gallons']))
+            except:
+                continue
+
+        return jsonify({
+            'timestamps': timestamps,
+            'gallons': gallons
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/')
 @requires_auth

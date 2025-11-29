@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="refresh" content="60">
+    <meta http-equiv="refresh" content="300">
     <title>Pumphouse Monitor</title>
     <style>
         * {
@@ -161,6 +161,28 @@
             font-size: 12px;
             word-break: break-all;
         }
+        .time-btn {
+            background: #333;
+            color: #e0e0e0;
+            border: 1px solid #555;
+            padding: 8px 16px;
+            margin-right: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        .time-btn:hover {
+            background: #444;
+            border-color: #4CAF50;
+        }
+        .time-btn.active {
+            background: #4CAF50;
+            border-color: #4CAF50;
+            color: #000;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -264,6 +286,22 @@
         </div>
         {% endif %}
 
+        <!-- Tank Level History Chart -->
+        <div class="section">
+            <h2>TANK LEVEL HISTORY</h2>
+            <div style="margin-bottom: 15px;">
+                <button class="time-btn active" data-hours="6">6h</button>
+                <button class="time-btn" data-hours="12">12h</button>
+                <button class="time-btn" data-hours="24">24h</button>
+                <button class="time-btn" data-hours="72">3d</button>
+                <button class="time-btn" data-hours="168">7d</button>
+                <button class="time-btn" data-hours="336">14d</button>
+            </div>
+            <div style="position: relative; height: 300px;">
+                <canvas id="tankChart"></canvas>
+            </div>
+        </div>
+
         <!-- Snapshots Section -->
         {% if snapshot_headers %}
         <div class="section">
@@ -326,5 +364,112 @@
         </div>
         {% endif %}
     </div>
+
+    <!-- Chart.js Library -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script>
+        let tankChart = null;
+        let currentHours = 6;
+
+        // Initialize chart with default data
+        async function loadChart(hours) {
+            currentHours = hours;
+
+            // Update button states
+            document.querySelectorAll('.time-btn').forEach(btn => {
+                if (parseInt(btn.dataset.hours) === hours) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
+
+            // Fetch data from API
+            const response = await fetch(`/api/chart_data?hours=${hours}`);
+            const data = await response.json();
+
+            // Destroy existing chart if it exists
+            if (tankChart) {
+                tankChart.destroy();
+            }
+
+            // Create new chart
+            const ctx = document.getElementById('tankChart').getContext('2d');
+            tankChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.timestamps,
+                    datasets: [{
+                        label: 'Tank Level (gallons)',
+                        data: data.gallons,
+                        borderColor: '#4CAF50',
+                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.1,
+                        pointRadius: 2,
+                        pointHoverRadius: 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: '#2a2a2a',
+                            titleColor: '#4CAF50',
+                            bodyColor: '#e0e0e0',
+                            borderColor: '#444',
+                            borderWidth: 1
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: {
+                                color: '#888',
+                                maxRotation: 45,
+                                minRotation: 45
+                            },
+                            grid: {
+                                color: '#333'
+                            }
+                        },
+                        y: {
+                            ticks: {
+                                color: '#888'
+                            },
+                            grid: {
+                                color: '#333'
+                            },
+                            suggestedMin: 1000,
+                            suggestedMax: 1400
+                        }
+                    },
+                    interaction: {
+                        mode: 'nearest',
+                        axis: 'x',
+                        intersect: false
+                    }
+                }
+            });
+        }
+
+        // Set up button click handlers
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('.time-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    loadChart(parseInt(this.dataset.hours));
+                });
+            });
+
+            // Load initial chart (6 hours)
+            loadChart(6);
+        });
+    </script>
 </body>
 </html>
