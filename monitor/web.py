@@ -147,44 +147,34 @@ def get_snapshots_stats(filepath='snapshots.csv'):
                 pass
 
         # Find last time tank increased by 50+ gallons
-        # Scan forward through all snapshots looking for cumulative gain of 50+
-        if len(rows) >= 2:
+        # New logic: Find the last 24-hour window with a net gain of 50+ gallons.
+        if len(rows) > 1:
             try:
-                cumulative_gain = 0
-                refill_start_idx = None
-                last_refill_idx = None
-                last_refill_gain = 0
-
-                for i in range(1, len(rows)):
+                # Ensure rows are sorted by timestamp, just in case
+                parsed_rows = []
+                for row in rows:
                     try:
-                        prev_gallons = float(rows[i - 1]['tank_gallons'])
-                        curr_gallons = float(rows[i]['tank_gallons'])
-                        delta = curr_gallons - prev_gallons
-
-                        if delta > 0:
-                            # Tank increased
-                            if cumulative_gain == 0:
-                                refill_start_idx = i  # Mark where refill started
-                            cumulative_gain += delta
-
-                            # Check if we hit 50+ gallons
-                            if cumulative_gain >= 50:
-                                last_refill_idx = refill_start_idx
-                                last_refill_gain = cumulative_gain
-                        else:
-                            # Tank decreased or stayed same, reset
-                            cumulative_gain = 0
-                            refill_start_idx = None
+                        parsed_rows.append({
+                            'ts': datetime.fromisoformat(row['timestamp']),
+                            'gallons': float(row['tank_gallons'])
+                        })
                     except (ValueError, KeyError):
-                        # Skip rows with invalid data
                         continue
+                
+                parsed_rows.sort(key=lambda x: x['ts'])
 
-                # Use the most recent 50+ gallon refill we found
-                if last_refill_idx is not None:
-                    refill_time = datetime.fromisoformat(rows[last_refill_idx]['timestamp'])
-                    days_ago = (now - refill_time).total_seconds() / 86400
-                    stats['last_refill_50_days'] = days_ago
-                    stats['last_refill_50_timestamp'] = refill_time
+                # Iterate backwards from the most recent snapshot
+                for i in range(len(parsed_rows) - 1, 0, -1):
+                    current_snapshot = parsed_rows[i]
+                    cutoff_ts = current_snapshot['ts'].timestamp() - 86400
+
+                    # Find the closest snapshot from ~24 hours ago
+                    past_snapshot = next((s for s in reversed(parsed_rows[:i]) if s['ts'].timestamp() <= cutoff_ts), None)
+
+                    if past_snapshot and (current_snapshot['gallons'] - past_snapshot['gallons']) >= 50:
+                        stats['last_refill_50_timestamp'] = current_snapshot['ts']
+                        stats['last_refill_50_days'] = (now - current_snapshot['ts']).total_seconds() / 86400
+                        break # Found the most recent one, so we can stop
             except Exception as e:
                 # Silently ignore errors in refill calculation
                 pass
@@ -221,7 +211,7 @@ def get_sensor_data():
     return data
 
 @app.route('/api/chart_data')
-@requires_auth
+# @requires_auth
 def chart_data():
     """API endpoint to serve chart data as JSON"""
     hours = request.args.get('hours', 24, type=int)
@@ -245,7 +235,7 @@ def chart_data():
             try:
                 ts = datetime.fromisoformat(row['timestamp'])
                 if ts.timestamp() >= cutoff:
-                    timestamps.append(ts.strftime('%Y-%m-%d %H:%M'))
+                    timestamps.append(ts.strftime('%a %H:%M')) # Format as Day HH:MM
                     gallons.append(float(row['tank_gallons']))
             except:
                 continue
@@ -258,7 +248,7 @@ def chart_data():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/')
-@requires_auth
+# @requires_auth
 def index():
     """Main status page"""
     # Get sensor data
