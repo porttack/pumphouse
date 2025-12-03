@@ -18,12 +18,19 @@ def test_is_prime():
     print("Testing is_prime function...")
     
     # Test known primes
-    primes = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97]
+    primes = [
+        2, 3, 5, 7, 11, 13, 17, 19, 23, 29,
+        31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
+        73, 79, 83, 89, 97
+    ]
     for p in primes:
         assert is_prime(p), f"Failed: {p} should be prime"
     
     # Test known non-primes
-    non_primes = [0, 1, 4, 6, 8, 9, 10, 12, 14, 15, 16, 18, 20, 21, 22, 24, 25, 26, 27, 28, 30]
+    non_primes = [
+        0, 1, 4, 6, 8, 9, 10, 12, 14, 15,
+        16, 18, 20, 21, 22, 24, 25, 26, 27, 28, 30
+    ]
     for n in non_primes:
         assert not is_prime(n), f"Failed: {n} should not be prime"
     
