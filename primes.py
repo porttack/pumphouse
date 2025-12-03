@@ -6,6 +6,11 @@ Generates prime numbers using the Sieve of Eratosthenes algorithm.
 
 import sys
 import argparse
+import math
+
+# Constants for prime generation algorithm
+INITIAL_LIMIT_BUFFER = 100  # Buffer added to prime number theorem estimate
+LIMIT_EXPANSION_FACTOR = 2  # Factor to multiply limit when more primes needed
 
 
 def sieve_of_eratosthenes(limit):
@@ -57,15 +62,14 @@ def generate_n_primes(n):
     if n < 6:
         limit = 15
     else:
-        import math
-        limit = int(n * (math.log(n) + math.log(math.log(n)))) + 100
+        limit = int(n * (math.log(n) + math.log(math.log(n)))) + INITIAL_LIMIT_BUFFER
     
     # Generate primes and increase limit if needed
     while True:
         primes = sieve_of_eratosthenes(limit)
         if len(primes) >= n:
             return primes[:n]
-        limit *= 2
+        limit *= LIMIT_EXPANSION_FACTOR
 
 
 def is_prime(num):
