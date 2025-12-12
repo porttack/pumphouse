@@ -230,10 +230,13 @@ class SimplifiedMonitor:
     
     def run(self):
         """Main monitoring loop"""
+        # Enable relay control for status monitoring
+        self.enable_relay_control()
+
         # Initial state
         self.last_pressure_state = read_pressure()
         self.fetch_tank_data()
-        
+
         # Log initial state
         self.log_state_event('INIT', 'System startup')
         

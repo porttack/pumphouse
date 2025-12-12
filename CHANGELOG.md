@@ -2,6 +2,35 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.3.0] - 2025-12-09
+
+### Added
+- **Relay Status Monitoring**: Monitor now always reads and logs relay states to snapshots.csv
+  - Added `get_all_relay_status()` function to relay.py for comprehensive relay reporting
+  - Four relay channels: Bypass (BCM 26), Supply Override (BCM 19), Purge (BCM 13), Reserved (BCM 6)
+- **Relay Reporting in check.py**: New RELAYS section displays all four relay channel states
+  - Shows BCM pin numbers for easy hardware debugging
+  - Uses `gpio` command fallback for multi-process compatibility
+- **Multi-Process GPIO Support**: Implemented fallback mechanism using `gpio` command-line tool
+  - Allows check.py and web.py to read sensors/relays while monitor is running
+  - Prevents GPIO conflicts and "GPIO busy" errors
+  - Added `_read_pin_via_gpio_command()` helper to gpio_helpers.py and relay.py
+
+### Changed
+- **poll.py**: Monitor now calls `enable_relay_control()` at startup regardless of `--enable-purge` flag
+- **gpio_helpers.py**: `read_pressure()` and `read_float_sensor()` now fall back to `gpio` command when RPi.GPIO unavailable
+- **relay.py**: `get_all_relay_status()` attempts RPi.GPIO first, falls back to `gpio` command
+- **check.py**: Always displays SENSORS section even when GPIO init fails (uses fallback)
+
+### Fixed
+- **Critical Race Condition**: Fixed unreliable sensor readings caused by GPIO cleanup conflicts
+  - web.py was calling `cleanup_gpio()` on every page load, releasing ALL GPIO pins system-wide
+  - This would break the monitor's GPIO setup, causing intermittent sensor reading failures
+  - web.py now uses `gpio` command fallback instead of initializing/cleaning up GPIO
+- **Relay Status Reporting**: Fixed CSV logging showing "OFF" for all relays when bypass was actually ON
+  - Monitor was only enabling relay control when `--enable-purge` was specified
+  - Relay pins at 0 (LOW/ON) were being reported as OFF due to lack of GPIO access
+
 ## [2.0.0] - 2025-01-27
 
 ## [2.1.0] - 2025-11-28

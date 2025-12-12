@@ -8,6 +8,7 @@ from datetime import datetime
 from monitor.config import TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS
 from monitor.gpio_helpers import read_pressure, read_float_sensor, init_gpio, cleanup_gpio
 from monitor.tank import get_tank_data
+from monitor.relay import get_all_relay_status
 
 # Try to import temp/humidity sensor
 try:
@@ -34,6 +35,17 @@ def format_pressure_state(state):
         return "HIGH (≥10 PSI) - Water available"
     else:
         return "LOW (<10 PSI) - No water pressure"
+
+def format_relay_state(name, state):
+    """Format relay state with explanation"""
+    descriptions = {
+        'bypass': 'Emergency bypass valve (BCM 26)',
+        'supply_override': 'Supply valve override (BCM 19)',
+        'purge': 'Spindown filter purge (BCM 13)',
+        'reserved': 'Reserved channel'
+    }
+    desc = descriptions.get(name, name)
+    return f"{state:8s} - {desc}"
 
 def read_temp_humidity():
     """Read temperature and humidity from AHT20 sensor"""
@@ -76,24 +88,39 @@ def main():
     print("=" * 60)
     print(f"Checked at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
-    # Read GPIO sensors
+    # Read GPIO sensors (works even if GPIO init failed, uses gpio command fallback)
+    print("SENSORS:")
+    print("-" * 60)
+
+    pressure = read_pressure()
+    print(f"Pressure:  {format_pressure_state(pressure)} (BCM 17)")
+
+    float_state = read_float_sensor()
+    print(f"Float:     {format_float_state(float_state)} (BCM 27)")
+
+    # Read temp/humidity if available (only works with GPIO init)
     if gpio_available:
-        print("SENSORS:")
-        print("-" * 60)
-
-        pressure = read_pressure()
-        print(f"Pressure:  {format_pressure_state(pressure)}")
-
-        float_state = read_float_sensor()
-        print(f"Float:     {format_float_state(float_state)}")
-
-        # Read temp/humidity if available
         temp_f, humidity = read_temp_humidity()
         if temp_f is not None:
             print(f"Temp:      {temp_f:.1f}°F")
             print(f"Humidity:  {humidity:.1f}%")
 
-        print()
+    print()
+
+    # Read relay status (if pins are configured as outputs)
+    print("RELAYS:")
+    print("-" * 60)
+
+    relay_status = get_all_relay_status()
+    print(f"Bypass:    {format_relay_state('bypass', relay_status['bypass'])}")
+    print(f"Override:  {format_relay_state('supply_override', relay_status['supply_override'])}")
+    print(f"Purge:     {format_relay_state('purge', relay_status['purge'])}")
+    print(f"Reserved:  {format_relay_state('reserved', relay_status['reserved'])}")
+
+    if relay_status['bypass'] == 'N/A':
+        print("Note:      Relay pins not configured (monitor not running)")
+
+    print()
 
     # Fetch tank data
     print("TANK LEVEL:")
