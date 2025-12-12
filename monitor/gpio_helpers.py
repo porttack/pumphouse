@@ -4,6 +4,7 @@ GPIO helper functions for sensor access with thread safety
 import sys
 import threading
 import time
+import subprocess
 
 try:
     import RPi.GPIO as GPIO
@@ -43,73 +44,96 @@ def init_gpio():
         print(f"Error initializing GPIO: {e}", file=sys.stderr)
         return False
 
+def _read_pin_via_gpio_command(pin):
+    """Read pin value using gpio command-line tool (works with multiple processes)"""
+    try:
+        result = subprocess.run(['gpio', '-g', 'read', str(pin)],
+                              capture_output=True, text=True, check=True, timeout=1)
+        value = int(result.stdout.strip())
+        return value
+    except:
+        return None
+
 def read_pressure():
     """
     Read pressure sensor with retry logic when state changes.
     Returns 1 (HIGH) or 0 (LOW), or None if failed.
-    
+
     If reading changes from previous state, retry 2 more times with 1 second pauses
     to confirm it's not a glitch.
-    
+
     HIGH (1) = Pressure >= 10 PSI (NC switch open)
     LOW (0) = Pressure < 10 PSI (NC switch closed)
     """
     global _last_pressure_state
-    
-    if not GPIO_AVAILABLE or not _gpio_initialized:
+
+    if not GPIO_AVAILABLE:
         return None
-    
-    with _gpio_lock:
-        try:
-            state = GPIO.input(PRESSURE_PIN)
-            
-            # If state changed from last known state, verify with retries
-            if _last_pressure_state is not None and state != _last_pressure_state:
-                # Try 2 more times with 1 second pauses
-                retry_states = [state]
-                for retry in range(2):
-                    time.sleep(1)
-                    retry_state = GPIO.input(PRESSURE_PIN)
-                    retry_states.append(retry_state)
-                
-                # Check if all 3 readings agree
-                if all(s == state for s in retry_states):
-                    # All agree - this is a real state change
-                    _last_pressure_state = state
-                    return state
+
+    # Try RPi.GPIO first
+    if _gpio_initialized:
+        with _gpio_lock:
+            try:
+                state = GPIO.input(PRESSURE_PIN)
+
+                # If state changed from last known state, verify with retries
+                if _last_pressure_state is not None and state != _last_pressure_state:
+                    # Try 2 more times with 1 second pauses
+                    retry_states = [state]
+                    for retry in range(2):
+                        time.sleep(1)
+                        retry_state = GPIO.input(PRESSURE_PIN)
+                        retry_states.append(retry_state)
+
+                    # Check if all 3 readings agree
+                    if all(s == state for s in retry_states):
+                        # All agree - this is a real state change
+                        _last_pressure_state = state
+                        return state
+                    else:
+                        # Readings don't agree - probably a glitch, return last known state
+                        return _last_pressure_state
                 else:
-                    # Readings don't agree - probably a glitch, return last known state
-                    return _last_pressure_state
-            else:
-                # No state change, or first reading
-                if _last_pressure_state is None:
-                    _last_pressure_state = state
-                return state
-            
-        except Exception as e:
-            print(f"Error reading pressure: {e}", file=sys.stderr)
-            return None
+                    # No state change, or first reading
+                    if _last_pressure_state is None:
+                        _last_pressure_state = state
+                    return state
+
+            except Exception as e:
+                print(f"Error reading pressure: {e}", file=sys.stderr)
+                # Fall through to gpio command
+
+    # Fallback to gpio command (no retry logic for now)
+    return _read_pin_via_gpio_command(PRESSURE_PIN)
 
 def read_float_sensor():
     """
     Read float sensor with thread-safe access.
     Returns 'OPEN/FULL', 'CLOSED/CALLING', or 'UNKNOWN'.
-    
+
     HARDWARE: Float switch is normally CLOSED when calling for water
     HIGH (1) = Float switch CLOSED = Tank NOT full (calling for water)
     LOW (0) = Float switch OPEN = Tank is FULL
     """
-    if not GPIO_AVAILABLE or not _gpio_initialized:
+    if not GPIO_AVAILABLE:
         return 'UNKNOWN'
-    
-    with _gpio_lock:
-        try:
-            state = GPIO.input(FLOAT_PIN)
-            # FIXED: HIGH means CALLING, LOW means FULL
-            return 'CLOSED/CALLING' if state else 'OPEN/FULL'
-        except Exception as e:
-            print(f"Error reading float sensor: {e}", file=sys.stderr)
-            return 'UNKNOWN'
+
+    # Try RPi.GPIO first
+    if _gpio_initialized:
+        with _gpio_lock:
+            try:
+                state = GPIO.input(FLOAT_PIN)
+                # FIXED: HIGH means CALLING, LOW means FULL
+                return 'CLOSED/CALLING' if state else 'OPEN/FULL'
+            except Exception as e:
+                print(f"Error reading float sensor: {e}", file=sys.stderr)
+                # Fall through to gpio command
+
+    # Fallback to gpio command
+    state = _read_pin_via_gpio_command(FLOAT_PIN)
+    if state is None:
+        return 'UNKNOWN'
+    return 'CLOSED/CALLING' if state else 'OPEN/FULL'
 
 def cleanup_gpio():
     """Clean up GPIO on shutdown"""

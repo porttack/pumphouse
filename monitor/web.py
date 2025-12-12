@@ -186,27 +186,25 @@ def get_snapshots_stats(filepath='snapshots.csv'):
 
 def get_sensor_data():
     """Read current sensor states"""
-    gpio_available = init_gpio()
+    # Note: We don't call init_gpio() here because the monitor process may be using GPIO.
+    # The read functions now have fallback logic using the gpio command-line tool.
 
     data = {
         'pressure': None,
         'float': None,
         'temp': None,
         'humidity': None,
-        'gpio_available': gpio_available
+        'gpio_available': False  # Web server doesn't own GPIO
     }
 
-    if gpio_available:
-        data['pressure'] = read_pressure()
-        data['float'] = read_float_sensor()
+    # Read sensors - will use gpio command fallback if monitor is running
+    data['pressure'] = read_pressure()
+    data['float'] = read_float_sensor()
 
-    # Read temp/humidity
+    # Read temp/humidity (requires I2C, not GPIO)
     temp_f, humidity = read_temp_humidity()
     data['temp'] = temp_f
     data['humidity'] = humidity
-
-    # Cleanup GPIO after reading
-    cleanup_gpio()
 
     return data
 
