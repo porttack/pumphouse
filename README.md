@@ -11,7 +11,8 @@ Simplified event-based monitoring system for remote water treatment facilities. 
 - **Pressure Monitoring**: Continuous monitoring of 10 PSI pressure switch with retry logic for coastal environment noise
 - **Tank Level Monitoring**: Periodic scraping of PT sensor data with depth, percentage, and gallons
 - **Float Sensor Integration**: Monitors tank float switch state (HIGH=CLOSED/CALLING, LOW=OPEN/FULL)
-- **Relay Control**: Optional automatic spindown filter purging after water delivery
+- **Relay Control**: Optional automatic spindown filter purging after water delivery (config file setting)
+- **Safe Relay Control Script**: `control.sh` for manual relay operations without Python GPIO conflicts
 - **Background Operation**: Runs reliably via nohup with SSH disconnect survival
 - **Web Dashboard**: HTTPS web interface on port 6443 for real-time status and historical data
 
@@ -34,9 +35,6 @@ python -m monitor --debug
 
 # Run with debug and 2-minute snapshots
 python -m monitor --debug --snapshot-interval 2
-
-# Run with auto-purge enabled
-python -m monitor --debug --enable-purge
 
 # Run in background
 nohup python -m monitor > output.txt 2>&1 &
@@ -64,10 +62,11 @@ Options:
   --tank-interval N       Tank check interval in minutes (default: 1)
   --snapshot-interval N   Snapshot interval: 15, 5, or 2 minutes (default: 15)
   --tank-url URL          Tank monitoring URL
-  --enable-purge          Enable automatic filter purging after water delivery
   --version               Show version and exit
   -h, --help              Show help message
 ```
+
+**Note:** Automatic purging is now configured in config.py, not via command line.
 
 ## Configuration File (Optional)
 
@@ -77,7 +76,12 @@ Create `~/.config/pumphouse/monitor.conf`:
 
 # GPIO Pins
 PRESSURE_PIN=17
-FLOAT_PIN=27
+FLOAT_PIN=21
+
+# Purge Configuration
+ENABLE_PURGE=False
+MIN_PURGE_INTERVAL=3600
+PURGE_DURATION=10
 
 # Polling intervals (seconds)
 POLL_INTERVAL=5
@@ -235,22 +239,42 @@ python -m monitor.web
 
 **Note:** The web server runs independently from the monitor daemon. Run both processes to collect data and view it.
 
-## Manual Filter Purging
+## Relay Control
 
-You can manually purge the spindown sediment filter:
+Use the `control.sh` script for safe relay control without GPIO conflicts:
 
 ```bash
-# Basic purge (default 10 seconds)
-python -m monitor.purge
+# Purge spindown filter (default 10 seconds)
+./control.sh purge
 
-# Custom duration with debug output
-python -m monitor.purge --duration 30 --debug
+# Purge with custom duration
+./control.sh purge 15
 
-# Help
-python -m monitor.purge --help
+# Enable/disable bypass valve
+./control.sh bypass on
+./control.sh bypass off
+
+# Enable/disable supply override
+./control.sh override on
+./control.sh override off
+
+# Show current relay states
+./control.sh status
 ```
 
-**Note:** Auto-purge can be enabled with `--enable-purge` flag when running the monitor.
+This script uses the `gpio` command instead of Python GPIO, so it's safe to run while the monitor is active.
+
+### Automatic Purging
+
+To enable automatic purging after water delivery, edit `monitor/config.py`:
+
+```python
+ENABLE_PURGE = True  # Enable automatic purging
+MIN_PURGE_INTERVAL = 3600  # Minimum 1 hour between purges
+PURGE_DURATION = 10  # Purge for 10 seconds
+```
+
+Or set in your config file at `~/.config/pumphouse/monitor.conf`.
 
 ## Project Structure
 ```

@@ -10,6 +10,8 @@ except (ImportError, RuntimeError):
     RELAY_AVAILABLE = False
     print("Warning: RPi.GPIO not available for relay control")
 
+from monitor.config import PURGE_DURATION
+
 # Relay pin assignments (BCM numbering)
 BYPASS_VALVE_PIN = 26      # Channel 1 - Emergency bypass
 SUPPLY_VALVE_PIN = 19      # Channel 2 - Primary inlet with float override
@@ -20,9 +22,6 @@ RESERVED_PIN = 6           # Channel 4 - Reserved for future use
 # Relays are ACTIVE LOW - writing LOW (0) activates the relay
 RELAY_ON = GPIO.LOW if RELAY_AVAILABLE else 0
 RELAY_OFF = GPIO.HIGH if RELAY_AVAILABLE else 1
-
-# Purge duration (seconds)
-DEFAULT_PURGE_DURATION = 10
 
 _relays_initialized = False
 
@@ -116,29 +115,32 @@ def cleanup_relays():
         finally:
             _relays_initialized = False
 
-def purge_spindown_filter(duration=DEFAULT_PURGE_DURATION, debug=False):
+def purge_spindown_filter(duration=None, debug=False):
     """
     Activate spindown filter purge valve for specified duration.
-    
+
     Args:
-        duration: How long to keep purge valve open (seconds)
+        duration: How long to keep purge valve open (seconds), defaults to config PURGE_DURATION
         debug: Print debug messages
-    
+
     Returns:
         True if successful, False otherwise
     """
+    if duration is None:
+        duration = PURGE_DURATION
+
     if not RELAY_AVAILABLE or not _relays_initialized:
         if debug:
             print("Relay control not available - cannot purge filter")
         return False
-    
+
     try:
         if debug:
             print(f"Opening spindown purge valve for {duration} seconds...")
-        
+
         # Open purge valve (ACTIVE LOW - write LOW to turn on)
         GPIO.output(SPIN_PURGE_VALVE_PIN, RELAY_ON)
-        
+
         # Wait for purge duration
         time.sleep(duration)
         

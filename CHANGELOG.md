@@ -2,6 +2,20 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.3.3] - 2025-12-12
+
+### Added
+- **Relay Control Script**: New `control.sh` script for safe relay control without Python GPIO conflicts
+  - Uses `gpio` command-line tool instead of RPi.GPIO library
+  - Commands: purge, bypass on/off, override on/off, status
+  - Safe to use while monitor is running
+  - Example: `./control.sh purge 15` or `./control.sh bypass on`
+- **PURGE_DURATION Configuration**: Added configurable purge duration in config.py (default: 10 seconds)
+
+### Changed
+- **Purge Duration**: relay.py now uses PURGE_DURATION from config instead of hardcoded DEFAULT_PURGE_DURATION
+- **purge_spindown_filter()**: Now defaults to config PURGE_DURATION when duration parameter is None
+
 ## [2.3.2] - 2025-12-12
 
 ### Fixed
