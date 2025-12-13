@@ -172,6 +172,7 @@
             word-break: break-all;
         }
         .time-btn {
+            display: inline-block;
             background: #333;
             color: #e0e0e0;
             border: 1px solid #555;
@@ -182,6 +183,7 @@
             font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
             font-size: 14px;
             transition: all 0.2s;
+            text-decoration: none;
         }
         .time-btn:hover {
             background: #444;
@@ -306,12 +308,12 @@
         <div class="section">
             <h2>TANK LEVEL HISTORY</h2>
             <div style="margin-bottom: 15px;">
-                <button class="time-btn active" data-hours="6">6h</button>
-                <button class="time-btn" data-hours="12">12h</button>
-                <button class="time-btn" data-hours="24">24h</button>
-                <button class="time-btn" data-hours="72">3d</button>
-                <button class="time-btn" data-hours="168">7d</button>
-                <button class="time-btn" data-hours="336">14d</button>
+                <a href="?hours=6" class="time-btn" data-hours="6">6h</a>
+                <a href="?hours=12" class="time-btn" data-hours="12">12h</a>
+                <a href="?hours=24" class="time-btn" data-hours="24">24h</a>
+                <a href="?hours=72" class="time-btn" data-hours="72">3d</a>
+                <a href="?hours=168" class="time-btn" data-hours="168">7d</a>
+                <a href="?hours=336" class="time-btn" data-hours="336">14d</a>
             </div>
             <div style="position: relative; height: 300px;">
                 <canvas id="tankChart"></canvas>
@@ -385,21 +387,16 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script>
         let tankChart = null;
-        let currentHours = 6;
+
+        // Get hours from URL parameter or default to 6
+        function getHoursFromURL() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const hours = parseInt(urlParams.get('hours'));
+            return hours && !isNaN(hours) ? hours : 6;
+        }
 
         // Initialize chart with default data
         async function loadChart(hours) {
-            currentHours = hours;
-
-            // Update button states
-            document.querySelectorAll('.time-btn').forEach(btn => {
-                if (parseInt(btn.dataset.hours) === hours) {
-                    btn.classList.add('active');
-                } else {
-                    btn.classList.remove('active');
-                }
-            });
-
             // Fetch data from API
             const response = await fetch(`/api/chart_data?hours=${hours}`);
             const data = await response.json();
@@ -475,16 +472,22 @@
             });
         }
 
-        // Set up button click handlers
+        // Initialize on page load
         document.addEventListener('DOMContentLoaded', function() {
+            // Get hours from URL parameter
+            const hours = getHoursFromURL();
+
+            // Update button states based on URL parameter
             document.querySelectorAll('.time-btn').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    loadChart(parseInt(this.dataset.hours));
-                });
+                if (parseInt(btn.dataset.hours) === hours) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
             });
 
-            // Load initial chart (6 hours)
-            loadChart(6);
+            // Load chart with selected duration
+            loadChart(hours);
         });
     </script>
 </body>
