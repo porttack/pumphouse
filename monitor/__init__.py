@@ -1,4 +1,4 @@
 """
 Pumphouse Monitor - Simplified event-based monitoring system
 """
-__version__ = '2.4.0'
+__version__ = '2.5.0'
