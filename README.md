@@ -29,6 +29,34 @@ pip install -r requirements.txt
 ```
 
 ## Quick Start
+
+### Running as systemd services (recommended)
+
+Install and enable the services to run automatically on boot:
+
+```bash
+# Install services
+./install-services.sh
+
+# Enable and start both services
+sudo systemctl enable --now pumphouse-monitor pumphouse-web
+
+# Check status
+sudo systemctl status pumphouse-monitor
+sudo systemctl status pumphouse-web
+
+# View live logs
+sudo journalctl -u pumphouse-monitor -f
+sudo journalctl -u pumphouse-web -f
+
+# Stop/start/restart
+sudo systemctl stop pumphouse-monitor
+sudo systemctl start pumphouse-monitor
+sudo systemctl restart pumphouse-web
+```
+
+### Running manually (for testing)
+
 ```bash
 # Run with debug output (15-minute snapshots)
 python -m monitor --debug

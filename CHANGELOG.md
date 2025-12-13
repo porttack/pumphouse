@@ -2,6 +2,24 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.4.0] - 2025-12-12
+
+### Added
+- **systemd Service Files**: Production-ready service configurations for monitor and web dashboard
+  - `pumphouse-monitor.service` - Monitor daemon with auto-restart
+  - `pumphouse-web.service` - Web dashboard service
+  - Auto-start on boot, auto-restart on failure
+  - Proper logging via journalctl
+  - Runs in virtual environment from project directory
+- **Installation Script**: `install-services.sh` for easy service installation
+  - Copies service files to /etc/systemd/system/
+  - Provides clear instructions for enabling and managing services
+
+### Changed
+- **README**: Added systemd services as recommended deployment method
+  - Documented service installation and management
+  - Separated manual running into testing section
+
 ## [2.3.3] - 2025-12-12
 
 ### Added
