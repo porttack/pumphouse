@@ -2,6 +2,24 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.3.2] - 2025-12-12
+
+### Fixed
+- **Critical Purge Bug**: Fixed unwanted automatic purging on every water delivery
+  - Purging was enabled by default because relay_control_enabled was set for status monitoring
+  - Now separates relay monitoring (always on) from purge control (config setting)
+  - Purge now respects ENABLE_PURGE config setting (default: False)
+  - Added MIN_PURGE_INTERVAL to prevent excessive purging (default: 3600s = 1 hour)
+
+### Changed
+- **Purge Configuration**: Moved purge control from command-line flag to config file
+  - Removed `--enable-purge` command-line argument
+  - Added `ENABLE_PURGE` config setting (default: False)
+  - Added `MIN_PURGE_INTERVAL` config setting (default: 3600 seconds)
+  - Set ENABLE_PURGE=True in monitor.conf or config.py to enable purging
+  - Purge now enforces minimum interval between purges
+- **Startup Messages**: Debug mode now shows purge status and minimum interval
+
 ## [2.3.1] - 2025-12-12
 
 ### Fixed
