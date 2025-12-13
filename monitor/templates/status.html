@@ -80,6 +80,16 @@
         .status-value.full {
             color: #4CAF50;
         }
+        .relay-warning {
+            background: #f44336;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-top: 8px;
+            display: inline-block;
+        }
         .tank-bar {
             background: #1a1a1a;
             height: 40px;
@@ -263,12 +273,18 @@
                     <div class="status-value {{ 'full' if sensor_data.float == 'OPEN/FULL' else 'calling' }}">
                         {{ format_float_state(sensor_data.float) }}
                     </div>
+                    {% if relay_status.supply_override == 'ON' %}
+                    <div class="relay-warning">⚠ OVERRIDE ON</div>
+                    {% endif %}
                 </div>
                 <div class="status-item">
                     <div class="status-label">Pressure</div>
                     <div class="status-value {{ 'high' if sensor_data.pressure else 'low' }}">
                         {{ format_pressure_state(sensor_data.pressure) }}
                     </div>
+                    {% if relay_status.bypass == 'ON' %}
+                    <div class="relay-warning">⚠ BYPASS ON</div>
+                    {% endif %}
                 </div>
                 {% if stats and stats.pressure_high_pct_1hr is not none and stats.pressure_high_min_24hr is not none %}
                 <div class="status-item">

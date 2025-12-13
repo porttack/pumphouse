@@ -14,6 +14,7 @@ from monitor.config import TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS
 from monitor.gpio_helpers import read_pressure, read_float_sensor, init_gpio, cleanup_gpio
 from monitor.tank import get_tank_data
 from monitor.check import read_temp_humidity, format_pressure_state, format_float_state
+from monitor.relay import get_all_relay_status
 
 app = Flask(__name__)
 
@@ -194,7 +195,7 @@ def get_sensor_data():
         'float': None,
         'temp': None,
         'humidity': None,
-        'gpio_available': False  # Web server doesn't own GPIO
+        'gpio_available': True  # Sensors readable via gpio command fallback
     }
 
     # Read sensors - will use gpio command fallback if monitor is running
@@ -268,6 +269,9 @@ def index():
     # Get aggregate stats from snapshots
     stats = get_snapshots_stats('snapshots.csv')
 
+    # Get relay status
+    relay_status = get_all_relay_status()
+
     return render_template('status.html',
                          sensor_data=sensor_data,
                          tank_data=tank_data,
@@ -280,6 +284,7 @@ def index():
                          event_headers=event_headers,
                          event_rows=event_rows,
                          stats=stats,
+                         relay_status=relay_status,
                          format_pressure_state=format_pressure_state,
                          format_float_state=format_float_state,
                          now=datetime.now())

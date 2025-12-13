@@ -96,7 +96,7 @@ def main():
     print(f"Pressure:  {format_pressure_state(pressure)} (BCM 17)")
 
     float_state = read_float_sensor()
-    print(f"Float:     {format_float_state(float_state)} (BCM 27)")
+    print(f"Float:     {format_float_state(float_state)} (BCM 21)")
 
     # Read temp/humidity if available (only works with GPIO init)
     if gpio_available:

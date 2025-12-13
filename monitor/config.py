@@ -6,7 +6,7 @@ from pathlib import Path
 
 # GPIO Pin Configuration
 PRESSURE_PIN = 17
-FLOAT_PIN = 27
+FLOAT_PIN = 21
 
 # Polling Intervals
 POLL_INTERVAL = 5  # Seconds between pressure sensor readings

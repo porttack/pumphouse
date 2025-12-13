@@ -2,6 +2,27 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.3.1] - 2025-12-12
+
+### Fixed
+- **Float Pin Configuration**: Corrected FLOAT_PIN from BCM 27 to BCM 21 in monitor/config.py
+  - BCM 21 is the actual wired float sensor pin
+  - BCM 27 was incorrectly configured and goes nowhere
+- **Float Sensor Logic**: Fixed inverted float sensor logic in monitor/gpio_helpers.py
+  - HIGH (1) now correctly means OPEN/FULL (tank is full)
+  - LOW (0) now correctly means CLOSED/CALLING (tank needs water)
+  - Logic now matches check.py behavior
+- **Web Dashboard Sensors**: Fixed missing SENSORS section on web dashboard
+  - Changed gpio_available from False to True in web.py
+  - Sensors are readable via gpio command fallback even when monitor owns GPIO
+  - Dashboard now displays Float Switch, Pressure, Pressure HIGH stats, and Temp/Humidity
+
+### Added
+- **Relay Status Warnings on Dashboard**: Web dashboard now displays relay warnings in sensor boxes
+  - "⚠ OVERRIDE ON" appears in Float Switch box when supply override relay is active
+  - "⚠ BYPASS ON" appears in Pressure box when bypass relay is active
+  - Red warning badges provide immediate visibility of relay states
+
 ## [2.3.0] - 2025-12-09
 
 ### Added
