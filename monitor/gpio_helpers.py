@@ -48,10 +48,12 @@ def _read_pin_via_gpio_command(pin):
     """Read pin value using gpio command-line tool (works with multiple processes)"""
     try:
         result = subprocess.run(['gpio', '-g', 'read', str(pin)],
-                              capture_output=True, text=True, check=True, timeout=1)
+                              capture_output=True, text=True, check=False, timeout=1)
+        if result.returncode != 0:
+            return None
         value = int(result.stdout.strip())
         return value
-    except:
+    except Exception as e:
         return None
 
 def read_pressure():

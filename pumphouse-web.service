@@ -19,7 +19,8 @@ StandardError=journal
 SyslogIdentifier=pumphouse-web
 
 # Security hardening (optional but recommended)
-NoNewPrivileges=true
+# Note: NoNewPrivileges disabled to allow SUID gpio command to work
+# NoNewPrivileges=true
 PrivateTmp=true
 
 [Install]
