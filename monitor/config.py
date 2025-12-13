@@ -27,6 +27,10 @@ ENABLE_PURGE = False  # Enable automatic filter purging after water delivery
 MIN_PURGE_INTERVAL = 3600  # Minimum seconds between purges (default: 3600 = 1 hour)
 PURGE_DURATION = 10  # Duration of purge in seconds
 
+# Override Shutoff Configuration
+ENABLE_OVERRIDE_SHUTOFF = True  # Enable automatic override shutoff to prevent tank overflow
+OVERRIDE_SHUTOFF_THRESHOLD = 1450  # Gallons at which to turn off override valve
+
 # Logging Configuration
 MAX_PRESSURE_LOG_INTERVAL = 1800  # Log at least every 30 minutes when pressure is high
 

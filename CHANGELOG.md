@@ -2,6 +2,22 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.5.0] - 2025-12-12
+
+### Added
+- **Automatic Override Shutoff**: Overflow protection to prevent tank overflow when override valve is enabled
+  - Automatically turns off override valve when tank reaches configurable threshold
+  - Default threshold: 1450 gallons (configurable via `OVERRIDE_SHUTOFF_THRESHOLD`)
+  - Continuous enforcement: checks every 60 seconds during tank polling
+  - Runtime threshold changes: reloads config on each check (no restart needed)
+  - Uses gpio command for relay control to avoid multi-process GPIO conflicts
+  - Logs all automatic shutoff events with tank level for audit trail
+  - Enabled by default (disable via `ENABLE_OVERRIDE_SHUTOFF = False`)
+
+### Changed
+- **Config**: Added `ENABLE_OVERRIDE_SHUTOFF` and `OVERRIDE_SHUTOFF_THRESHOLD` settings
+- **Relay Module**: Added `set_supply_override()` function using gpio command for safe multi-process relay control
+
 ## [2.4.0] - 2025-12-12
 
 ### Added

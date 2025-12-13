@@ -134,6 +134,10 @@ ENABLE_PURGE=False
 MIN_PURGE_INTERVAL=3600
 PURGE_DURATION=10
 
+# Override Shutoff Configuration (overflow protection)
+ENABLE_OVERRIDE_SHUTOFF=True
+OVERRIDE_SHUTOFF_THRESHOLD=1450
+
 # Polling intervals (seconds)
 POLL_INTERVAL=5
 TANK_POLL_INTERVAL=60
@@ -191,6 +195,7 @@ timestamp,event_type,pressure_state,float_state,tank_gallons,tank_depth,tank_per
 - **FLOAT_CALLING**: Float sensor changed to CLOSED/CALLING (tank needs water)
 - **FLOAT_FULL**: Float sensor changed to OPEN/FULL (tank full)
 - **PURGE**: Automatic spindown filter purge triggered
+- **OVERRIDE_SHUTOFF**: Automatic override valve shutoff due to tank overflow protection
 - **SHUTDOWN**: Clean shutdown
 
 ### Snapshots CSV (snapshots.csv)
@@ -326,6 +331,31 @@ PURGE_DURATION = 10  # Purge for 10 seconds
 ```
 
 Or set in your config file at `~/.config/pumphouse/monitor.conf`.
+
+### Automatic Override Shutoff (Overflow Protection)
+
+The monitor automatically turns off the override valve when the tank reaches a configurable threshold to prevent overflow. This is enabled by default.
+
+**How it works:**
+- Checks tank level every 60 seconds during tank polling
+- If override valve is ON and tank >= threshold, automatically turns it off
+- Logs shutoff event with tank level to events.csv
+- Continuous enforcement: even if you manually turn override back on, it will be shut off again on next check
+- Reloads config on each check, so threshold can be changed without restarting the service
+
+**Configuration** (`monitor/config.py`):
+```python
+ENABLE_OVERRIDE_SHUTOFF = True  # Enable overflow protection (default: True)
+OVERRIDE_SHUTOFF_THRESHOLD = 1450  # Gallons at which to turn off override
+```
+
+**Example:** If you set threshold to 1425 gallons and turn on the override valve manually, the system will let it run until the tank hits 1425 gallons, then automatically turn it off to prevent overflow.
+
+**Disabling:** If you need to fill past the threshold, temporarily disable in config.py:
+```python
+ENABLE_OVERRIDE_SHUTOFF = False
+```
+Then restart the service: `sudo systemctl restart pumphouse-monitor`
 
 ## Project Structure
 ```

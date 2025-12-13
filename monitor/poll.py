@@ -8,7 +8,8 @@ import signal
 from monitor.config import (
     POLL_INTERVAL, TANK_POLL_INTERVAL, SNAPSHOT_INTERVAL,
     RESIDUAL_PRESSURE_SECONDS, SECONDS_PER_GALLON,
-    ENABLE_PURGE, MIN_PURGE_INTERVAL
+    ENABLE_PURGE, MIN_PURGE_INTERVAL,
+    ENABLE_OVERRIDE_SHUTOFF, OVERRIDE_SHUTOFF_THRESHOLD
 )
 from monitor.gpio_helpers import read_pressure, read_float_sensor
 from monitor.tank import get_tank_data
@@ -142,6 +143,10 @@ class SimplifiedMonitor:
         self.enable_purge = ENABLE_PURGE
         self.min_purge_interval = MIN_PURGE_INTERVAL
         self.last_purge_time = 0
+
+        # Override shutoff control
+        self.enable_override_shutoff = ENABLE_OVERRIDE_SHUTOFF
+        self.override_shutoff_threshold = OVERRIDE_SHUTOFF_THRESHOLD
 
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
@@ -336,7 +341,28 @@ class SimplifiedMonitor:
                                     print(f"{datetime.now().strftime('%H:%M:%S')} - "
                                          f"Float: Tank full")
                             last_float_state = self.state.float_state
-                    
+
+                        # Check for override shutoff (continuous enforcement)
+                        if self.enable_override_shutoff and self.relay_control_enabled:
+                            # Re-read config to allow runtime threshold changes
+                            from monitor import config
+                            import importlib
+                            importlib.reload(config)
+                            self.override_shutoff_threshold = config.OVERRIDE_SHUTOFF_THRESHOLD
+
+                            relay_status = self.get_relay_status()
+                            if (relay_status['supply_override'] == 'ON' and
+                                self.state.tank_gallons is not None and
+                                self.state.tank_gallons >= self.override_shutoff_threshold):
+
+                                if self.debug:
+                                    print(f"  → Tank at {self.state.tank_gallons} gal (>= {self.override_shutoff_threshold}), turning off override...")
+
+                                from monitor.relay import set_supply_override
+                                if set_supply_override('OFF', debug=self.debug):
+                                    self.log_state_event('OVERRIDE_SHUTOFF',
+                                        f'Auto-shutoff: tank at {self.state.tank_gallons:.0f} gal (threshold: {self.override_shutoff_threshold})')
+
                     self.last_tank_check = current_time
                 
                 # SNAPSHOT

@@ -264,3 +264,44 @@ def get_all_relay_status():
             'purge': 'UNKNOWN',
             'reserved': 'UNKNOWN'
         }
+
+def set_supply_override(state, debug=False):
+    """
+    Turn supply override valve ON or OFF using gpio command.
+
+    This function uses the gpio command-line tool instead of RPi.GPIO to avoid
+    multi-process conflicts when the monitor is running.
+
+    Args:
+        state: 'ON' or 'OFF'
+        debug: Print debug messages
+
+    Returns:
+        True if successful, False otherwise
+    """
+    import sys
+
+    if state not in ['ON', 'OFF']:
+        if debug:
+            print(f"Invalid state '{state}', must be 'ON' or 'OFF'", file=sys.stderr)
+        return False
+
+    # Active-low relay: 0=ON, 1=OFF
+    value = '0' if state == 'ON' else '1'
+
+    try:
+        # Use gpio command to avoid multi-process conflicts
+        result = subprocess.run(['gpio', '-g', 'write', str(SUPPLY_VALVE_PIN), value],
+                              capture_output=True, text=True, check=True, timeout=2)
+        if debug:
+            print(f"Supply override turned {state}")
+        return True
+    except subprocess.TimeoutExpired:
+        print(f"Timeout setting supply override to {state}", file=sys.stderr)
+        return False
+    except subprocess.CalledProcessError as e:
+        print(f"Error setting supply override to {state}: {e.stderr}", file=sys.stderr)
+        return False
+    except Exception as e:
+        print(f"Error setting supply override to {state}: {e}", file=sys.stderr)
+        return False
