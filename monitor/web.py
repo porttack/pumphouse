@@ -10,6 +10,7 @@ from datetime import datetime
 from flask import Flask, render_template, request, Response, jsonify
 from functools import wraps
 
+from monitor import __version__
 from monitor.config import TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS
 from monitor.gpio_helpers import read_pressure, read_float_sensor, init_gpio, cleanup_gpio
 from monitor.tank import get_tank_data
@@ -273,6 +274,7 @@ def index():
     relay_status = get_all_relay_status()
 
     return render_template('status.html',
+                         version=__version__,
                          sensor_data=sensor_data,
                          tank_data=tank_data,
                          tank_age_minutes=tank_age_minutes,
