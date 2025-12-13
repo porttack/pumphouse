@@ -1,0 +1,26 @@
+[Unit]
+Description=Pumphouse Web Dashboard
+After=network.target pumphouse-monitor.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/src/pumphouse
+Environment="PATH=/home/pi/src/pumphouse/venv/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PUMPHOUSE_USER=admin"
+Environment="PUMPHOUSE_PASS=pumphouse"
+ExecStart=/home/pi/src/pumphouse/venv/bin/python -m monitor.web
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pumphouse-web
+
+# Security hardening (optional but recommended)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

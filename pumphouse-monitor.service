@@ -1,0 +1,24 @@
+[Unit]
+Description=Pumphouse Water System Monitor
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/src/pumphouse
+Environment="PATH=/home/pi/src/pumphouse/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/pi/src/pumphouse/venv/bin/python -m monitor
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pumphouse-monitor
+
+# Security hardening (optional but recommended)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
