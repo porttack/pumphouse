@@ -22,6 +22,10 @@ TANK_URL = "https://www.mypt.in/s/oyd95OEj/qbbBE9Loxo"
 RESIDUAL_PRESSURE_SECONDS = 30  # Last N seconds are residual pressure (not pumping)
 SECONDS_PER_GALLON = 10 / 0.14   # 10 seconds = 0.14 gallons
 
+# Purge Configuration
+ENABLE_PURGE = False  # Enable automatic filter purging after water delivery
+MIN_PURGE_INTERVAL = 3600  # Minimum seconds between purges (default: 3600 = 1 hour)
+
 # Logging Configuration
 MAX_PRESSURE_LOG_INTERVAL = 1800  # Log at least every 30 minutes when pressure is high
 

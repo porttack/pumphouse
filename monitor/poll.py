@@ -7,7 +7,8 @@ import signal
 
 from monitor.config import (
     POLL_INTERVAL, TANK_POLL_INTERVAL, SNAPSHOT_INTERVAL,
-    RESIDUAL_PRESSURE_SECONDS, SECONDS_PER_GALLON
+    RESIDUAL_PRESSURE_SECONDS, SECONDS_PER_GALLON,
+    ENABLE_PURGE, MIN_PURGE_INTERVAL
 )
 from monitor.gpio_helpers import read_pressure, read_float_sensor
 from monitor.tank import get_tank_data
@@ -136,7 +137,12 @@ class SimplifiedMonitor:
 
         # Relay control
         self.relay_control_enabled = False
-        
+
+        # Purge control
+        self.enable_purge = ENABLE_PURGE
+        self.min_purge_interval = MIN_PURGE_INTERVAL
+        self.last_purge_time = 0
+
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
     
@@ -282,16 +288,22 @@ class SimplifiedMonitor:
                             if self.debug:
                                 print(f"{datetime.now().strftime('%H:%M:%S')} - Pressure LOW "
                                      f"(was HIGH for {duration:.1f}s, ~{estimated:.1f} gal)")
-                            
-                            # Trigger purge if enabled
-                            if self.relay_control_enabled and estimated > 0:
-                                if self.debug:
-                                    print("  → Triggering filter purge...")
-                                from monitor.relay import purge_spindown_filter
-                                if purge_spindown_filter(debug=self.debug):
-                                    self.log_state_event('PURGE', 'Auto-purge after water delivery')
-                                    self.snapshot_tracker.increment_purge()
-                        
+
+                            # Trigger purge if enabled AND enough time has passed
+                            if self.enable_purge and self.relay_control_enabled and estimated > 0:
+                                time_since_last_purge = current_time - self.last_purge_time
+                                if time_since_last_purge >= self.min_purge_interval:
+                                    if self.debug:
+                                        print("  → Triggering filter purge...")
+                                    from monitor.relay import purge_spindown_filter
+                                    if purge_spindown_filter(debug=self.debug):
+                                        self.log_state_event('PURGE', 'Auto-purge after water delivery')
+                                        self.snapshot_tracker.increment_purge()
+                                        self.last_purge_time = current_time
+                                elif self.debug:
+                                    mins_to_wait = int((self.min_purge_interval - time_since_last_purge) / 60)
+                                    print(f"  → Skipping purge (min interval not met, wait {mins_to_wait} more min)")
+
                         self.pressure_high_start = None
                     
                     self.last_pressure_state = current_pressure

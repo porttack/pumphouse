@@ -6,7 +6,8 @@ import argparse
 from monitor import __version__
 from monitor.config import (
     POLL_INTERVAL, TANK_POLL_INTERVAL, TANK_URL, SNAPSHOT_INTERVAL,
-    DEFAULT_EVENTS_FILE, DEFAULT_SNAPSHOTS_FILE, load_config_file
+    DEFAULT_EVENTS_FILE, DEFAULT_SNAPSHOTS_FILE, ENABLE_PURGE, MIN_PURGE_INTERVAL,
+    load_config_file
 )
 from monitor.poll import SimplifiedMonitor
 from monitor.logger import initialize_events_csv, initialize_snapshots_csv
@@ -42,9 +43,7 @@ def main():
     parser.add_argument('--tank-url',
                        default=file_config.get('TANK_URL', TANK_URL),
                        help='Tank monitoring URL')
-    parser.add_argument('--enable-purge', action='store_true',
-                       help='Enable automatic filter purging')
-    parser.add_argument('--version', action='version', 
+    parser.add_argument('--version', action='version',
                        version=f'%(prog)s {__version__}')
     
     args = parser.parse_args()
@@ -66,9 +65,12 @@ def main():
         print(f"Events: {args.events}")
         print(f"Snapshots: {args.snapshots}")
         print(f"Snapshot interval: {args.snapshot_interval} min")
-        print(f"Purge: {'Enabled' if args.enable_purge else 'Disabled'}")
+        if ENABLE_PURGE:
+            print(f"Purge: Enabled (min interval: {MIN_PURGE_INTERVAL // 60} min)")
+        else:
+            print(f"Purge: Disabled (set ENABLE_PURGE=True in config to enable)")
         print()
-    
+
     # Create and run monitor
     monitor = SimplifiedMonitor(
         args.events,
@@ -79,10 +81,7 @@ def main():
         args.tank_interval * 60,
         args.snapshot_interval
     )
-    
-    if args.enable_purge:
-        monitor.enable_relay_control()
-    
+
     try:
         monitor.run()
     finally:
