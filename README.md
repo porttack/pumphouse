@@ -53,7 +53,30 @@ sudo journalctl -u pumphouse-web -f
 sudo systemctl stop pumphouse-monitor
 sudo systemctl start pumphouse-monitor
 sudo systemctl restart pumphouse-web
+
+# Restart both services (useful after code changes)
+sudo systemctl restart pumphouse-monitor pumphouse-web
 ```
+
+**After making code changes:**
+1. No need to reinstall - services run from the project directory
+2. Simply restart the affected service(s):
+   ```bash
+   sudo systemctl restart pumphouse-monitor pumphouse-web
+   ```
+3. Check logs to verify everything started correctly:
+   ```bash
+   sudo journalctl -u pumphouse-monitor -n 20
+   sudo journalctl -u pumphouse-web -n 20
+   ```
+
+**If you modify service files** (`.service` files):
+1. Copy updated files to systemd:
+   ```bash
+   sudo cp pumphouse-*.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl restart pumphouse-monitor pumphouse-web
+   ```
 
 ### Running manually (for testing)
 
