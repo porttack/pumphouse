@@ -138,6 +138,11 @@ PURGE_DURATION=10
 ENABLE_OVERRIDE_SHUTOFF=True
 OVERRIDE_SHUTOFF_THRESHOLD=1450
 
+# Notification Configuration
+ENABLE_NOTIFICATIONS=True
+NTFY_TOPIC=pumphouse-yourname-randomnumber
+NTFY_SERVER=https://ntfy.sh
+
 # Polling intervals (seconds)
 POLL_INTERVAL=5
 TANK_POLL_INTERVAL=60
@@ -295,6 +300,106 @@ python -m monitor.web
 
 **Note:** The web server runs independently from the monitor daemon. Run both processes to collect data and view it.
 
+## Push Notifications
+
+Get real-time alerts on your phone for important tank events using ntfy.sh push notifications.
+
+### Setup
+
+1. **Install ntfy app on your phone:**
+   - iOS: Download "ntfy" from the App Store
+   - Android: Download "ntfy" from Google Play Store
+   - Web: Visit https://ntfy.sh in your browser
+
+2. **Choose a unique topic name:**
+   - Pick something unique like `pumphouse-yourname-randomnumber`
+   - Example: `pumphouse-smith-89234`
+   - This prevents others from seeing your notifications
+
+3. **Configure in monitor/config.py:**
+   ```python
+   ENABLE_NOTIFICATIONS = True  # Enable push notifications
+   NTFY_TOPIC = "pumphouse-yourname-randomnumber"  # Your unique topic
+   NTFY_SERVER = "https://ntfy.sh"  # Public server (or self-hosted)
+   ```
+
+4. **Customize notification rules (optional):**
+   ```python
+   # Tank level thresholds (gallons)
+   NOTIFY_TANK_DECREASING = [1000, 750, 500, 250]  # Alert when dropping
+   NOTIFY_TANK_INCREASING = [500, 750, 1000, 1200]  # Alert when filling
+
+   # Well monitoring
+   NOTIFY_WELL_RECOVERY_THRESHOLD = 50  # Gallons gained in 24hr
+   NOTIFY_WELL_DRY_DAYS = 4  # Days without refill before alert
+
+   # Float sensor confirmation
+   NOTIFY_FLOAT_CONFIRMATIONS = 3  # Consecutive OPEN readings
+
+   # Other alerts
+   NOTIFY_OVERRIDE_SHUTOFF = True  # Alert on auto-shutoff
+
+   # Spam prevention
+   MIN_NOTIFICATION_INTERVAL = 300  # Minimum 5 min between same alerts
+   ```
+
+5. **Subscribe to your topic in the ntfy app:**
+   - Open the ntfy app
+   - Tap "+" to add a subscription
+   - Enter your topic name (e.g., `pumphouse-smith-89234`)
+   - Done! You'll now receive notifications
+
+6. **Test the integration:**
+   ```bash
+   python -m monitor.check --test-notification
+   ```
+   You should receive a test notification on your phone!
+
+7. **Restart the monitor to enable notifications:**
+   ```bash
+   sudo systemctl restart pumphouse-monitor
+   ```
+
+### Notification Events
+
+The system sends notifications for:
+
+1. **Tank Level Thresholds** - Alerts when crossing configured levels
+   - Going DOWN: "Tank Dropping - crossed 1000 gallons down"
+   - Going UP: "Tank Filling - crossed 750 gallons up"
+   - Bounce protection: won't re-alert if water fluctuates
+
+2. **Well Recovery** - Detects when well starts producing water again
+   - "Well Recovery Detected - Tank gained 50+ gallons in last 24 hours!"
+
+3. **Well Dry** - Warns if no significant refill in several days
+   - "Well May Be Dry - No 50+ gallon refill in 4.2 days"
+
+4. **Float Confirmation** - Tank full confirmation
+   - "Tank Full Confirmed - Float sensor confirmed FULL for 3+ readings"
+
+5. **Override Shutoff** - Overflow protection triggered
+   - "Override Auto-Shutoff - Tank reached 1410 gal, override turned off"
+
+### Self-Hosting ntfy (Optional)
+
+You can run your own ntfy server instead of using the public service:
+
+```bash
+# On a server with Docker
+docker run -d --name ntfy -p 8080:80 binwiederhier/ntfy serve
+
+# Update config.py
+NTFY_SERVER = "http://your-server-ip:8080"
+```
+
+Benefits of self-hosting:
+- Complete privacy (notifications don't go through public server)
+- No rate limits
+- Full control
+
+Note: Self-hosting requires port forwarding if monitoring from outside your network.
+
 ## Relay Control
 
 Use the `control.sh` script for safe relay control without GPIO conflicts:
@@ -362,7 +467,7 @@ Then restart the service: `sudo systemctl restart pumphouse-monitor`
 pumphouse/
 ├── venv/                      # Virtual environment
 ├── monitor/                   # Main package
-│   ├── __init__.py           # Package initialization (version: 2.2.0)
+│   ├── __init__.py           # Package initialization (version: 2.6.0)
 │   ├── __main__.py           # Entry point for python -m
 │   ├── config.py             # Configuration constants
 │   ├── gpio_helpers.py       # GPIO access with retry logic
@@ -375,6 +480,9 @@ pumphouse/
 │   ├── check.py              # Status checker command
 │   ├── purge.py              # Standalone purge script
 │   ├── web.py                # HTTPS web dashboard server
+│   ├── ntfy.py               # ntfy.sh notification sender
+│   ├── notifications.py      # Notification rule engine
+│   ├── stats.py              # Shared statistics module
 │   └── templates/
 │       └── status.html       # Web dashboard template
 ├── generate_cert.sh           # SSL certificate generator
@@ -402,7 +510,7 @@ pumphouse/
 The simplified architecture makes it easy to add:
 - MRTG-style graphs for time-series visualization
 - Additional sensors (flow meter, leak detection)
-- Alert notifications
+- Web Push notifications (notification infrastructure is already modular)
 
 ## Troubleshooting
 
@@ -457,6 +565,6 @@ Internal use only - Pumphouse monitoring system
 
 ## Version
 
-Current version: **2.2.0**
+Current version: **2.6.0**
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.

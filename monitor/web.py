@@ -6,8 +6,9 @@ Serves HTTPS on port 6443 with basic authentication
 import os
 import csv
 import argparse
-from datetime import datetime
-from flask import Flask, render_template, request, Response, jsonify
+import io
+from datetime import datetime, timedelta
+from flask import Flask, render_template, request, Response, jsonify, send_file
 from functools import wraps
 
 from monitor import __version__
@@ -16,6 +17,13 @@ from monitor.gpio_helpers import read_pressure, read_float_sensor, init_gpio, cl
 from monitor.tank import get_tank_data
 from monitor.check import read_temp_humidity, format_pressure_state, format_float_state
 from monitor.relay import get_all_relay_status
+from monitor.stats import find_last_refill
+
+# Matplotlib imports for chart generation
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 app = Flask(__name__)
 
@@ -148,38 +156,11 @@ def get_snapshots_stats(filepath='snapshots.csv'):
             except:
                 pass
 
-        # Find last time tank increased by 50+ gallons
-        # New logic: Find the last 24-hour window with a net gain of 50+ gallons.
-        if len(rows) > 1:
-            try:
-                # Ensure rows are sorted by timestamp, just in case
-                parsed_rows = []
-                for row in rows:
-                    try:
-                        parsed_rows.append({
-                            'ts': datetime.fromisoformat(row['timestamp']),
-                            'gallons': float(row['tank_gallons'])
-                        })
-                    except (ValueError, KeyError):
-                        continue
-                
-                parsed_rows.sort(key=lambda x: x['ts'])
-
-                # Iterate backwards from the most recent snapshot
-                for i in range(len(parsed_rows) - 1, 0, -1):
-                    current_snapshot = parsed_rows[i]
-                    cutoff_ts = current_snapshot['ts'].timestamp() - 86400
-
-                    # Find the closest snapshot from ~24 hours ago
-                    past_snapshot = next((s for s in reversed(parsed_rows[:i]) if s['ts'].timestamp() <= cutoff_ts), None)
-
-                    if past_snapshot and (current_snapshot['gallons'] - past_snapshot['gallons']) >= 50:
-                        stats['last_refill_50_timestamp'] = current_snapshot['ts']
-                        stats['last_refill_50_days'] = (now - current_snapshot['ts']).total_seconds() / 86400
-                        break # Found the most recent one, so we can stop
-            except Exception as e:
-                # Silently ignore errors in refill calculation
-                pass
+        # Find last time tank increased by 50+ gallons using shared stats module
+        refill_ts, days_ago = find_last_refill(filepath, threshold_gallons=50)
+        if refill_ts and days_ago is not None:
+            stats['last_refill_50_timestamp'] = refill_ts
+            stats['last_refill_50_days'] = days_ago
 
         return stats
 
@@ -246,6 +227,104 @@ def chart_data():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/chart.png')
+def chart_image():
+    """
+    Generate and serve tank level chart as PNG image (unauthenticated for ntfy)
+    Uses matplotlib to generate a chart matching the Chart.js dashboard style
+    """
+    hours = request.args.get('hours', 24, type=int)
+
+    try:
+        # Get chart data
+        with open('snapshots.csv', 'r') as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+        if len(rows) == 0:
+            return Response('No data', status=404)
+
+        # Filter by time range
+        now = datetime.now()
+        cutoff = now - timedelta(hours=hours)
+
+        timestamps = []
+        gallons = []
+
+        for row in rows:
+            try:
+                ts = datetime.fromisoformat(row['timestamp'])
+                if ts >= cutoff:
+                    timestamps.append(ts)
+                    gallons.append(float(row['tank_gallons']))
+            except:
+                continue
+
+        if len(timestamps) < 2:
+            return Response('Insufficient data', status=404)
+
+        # Create figure with dark theme matching Chart.js dashboard
+        plt.style.use('dark_background')
+        fig, ax = plt.subplots(figsize=(10, 6), dpi=100)
+        fig.patch.set_facecolor('#1a1a1a')
+        ax.set_facecolor('#1a1a1a')
+
+        # Plot data - line with fill to match Chart.js look
+        ax.plot(timestamps, gallons, color='#4CAF50', linewidth=2, zorder=2)
+        ax.fill_between(timestamps, gallons, alpha=0.3, color='#4CAF50', zorder=1)
+
+        # Title
+        if hours <= 24:
+            title = f'Tank Level - Last {hours} Hours'
+        elif hours <= 168:
+            title = f'Tank Level - Last {hours // 24} Days'
+        else:
+            title = f'Tank Level - Last {hours} Hours'
+        ax.set_title(title, color='#e0e0e0', fontsize=16, pad=20)
+
+        # Labels
+        ax.set_xlabel('Time', color='#888', fontsize=12)
+        ax.set_ylabel('Gallons', color='#888', fontsize=12)
+
+        # Grid (matching Chart.js grid)
+        ax.grid(True, alpha=0.2, color='#333', linewidth=0.8)
+
+        # Format x-axis based on time window
+        if hours <= 24:
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+            ax.xaxis.set_major_locator(mdates.HourLocator(interval=max(1, hours // 6)))
+        elif hours <= 72:
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
+            ax.xaxis.set_major_locator(mdates.HourLocator(interval=12))
+        else:
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+            ax.xaxis.set_major_locator(mdates.DayLocator())
+
+        plt.xticks(rotation=45, ha='right')
+
+        # Tick colors (matching Chart.js)
+        ax.tick_params(colors='#888', labelsize=10)
+
+        # Spine colors
+        for spine in ax.spines.values():
+            spine.set_color('#444')
+            spine.set_linewidth(1)
+
+        # Adjust layout to prevent label cutoff
+        plt.tight_layout()
+
+        # Save to BytesIO
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', facecolor='#1a1a1a', edgecolor='none',
+                   bbox_inches='tight', dpi=100)
+        buf.seek(0)
+        plt.close(fig)
+
+        return send_file(buf, mimetype='image/png')
+
+    except Exception as e:
+        return Response(f'Error: {str(e)}', status=500)
 
 @app.route('/')
 # @requires_auth

@@ -5,7 +5,7 @@ System status checker - displays current sensor states and tank level
 import argparse
 from datetime import datetime
 
-from monitor.config import TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS
+from monitor.config import TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS, NTFY_TOPIC
 from monitor.gpio_helpers import read_pressure, read_float_sensor, init_gpio, cleanup_gpio
 from monitor.tank import get_tank_data
 from monitor.relay import get_all_relay_status
@@ -62,6 +62,33 @@ def read_temp_humidity():
     except Exception:
         return None, None
 
+def test_notification():
+    """Test ntfy.sh notification"""
+    from monitor.ntfy import test_ping
+
+    print("=" * 60)
+    print("NTFY.SH NOTIFICATION TEST")
+    print("=" * 60)
+    print(f"Topic: {NTFY_TOPIC}")
+    print(f"Sending test notification...\n")
+
+    if test_ping(debug=True):
+        print("\n✓ Test notification sent successfully!")
+        print(f"\nCheck your ntfy.sh app for topic: {NTFY_TOPIC}")
+        print("  - iOS: Download 'ntfy' from App Store")
+        print("  - Android: Download 'ntfy' from Play Store")
+        print("  - Web: Open https://ntfy.sh in your browser")
+        print(f"\nSubscribe to topic: {NTFY_TOPIC}")
+    else:
+        print("\n✗ Failed to send test notification")
+        print("\nPossible issues:")
+        print("  1. NTFY_TOPIC is not configured (still set to 'pumphouse-CHANGE-ME')")
+        print("  2. No internet connection")
+        print("  3. ntfy.sh server is down")
+        print("\nCheck NTFY_TOPIC and NTFY_SERVER settings in config.py")
+
+    print("=" * 60)
+
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
@@ -72,8 +99,15 @@ def main():
                        help=f'Tank monitoring URL (default: config)')
     parser.add_argument('--no-gpio', action='store_true',
                        help='Skip GPIO sensor readings')
+    parser.add_argument('--test-notification', action='store_true',
+                       help='Send a test notification to ntfy.sh')
 
     args = parser.parse_args()
+
+    # Handle test notification command
+    if args.test_notification:
+        test_notification()
+        return
 
     # Initialize GPIO unless disabled
     gpio_available = False
