@@ -20,6 +20,12 @@ All notable changes to the pressure monitoring system.
   - Documented service installation and management
   - Separated manual running into testing section
 
+### Fixed
+- **systemd Service GPIO Access**: Fixed web dashboard unable to read sensors when running as service
+  - Disabled `NoNewPrivileges=true` in both service files to allow SUID gpio command to work
+  - gpio command requires root privileges via SUID to access GPIO pins
+  - Web dashboard sensors now display correctly when services are running
+
 ## [2.3.3] - 2025-12-12
 
 ### Added
