@@ -111,9 +111,8 @@ def read_float_sensor():
     Read float sensor with thread-safe access.
     Returns 'OPEN/FULL', 'CLOSED/CALLING', or 'UNKNOWN'.
 
-    HARDWARE: Float switch is normally CLOSED when calling for water
-    HIGH (1) = Float switch CLOSED = Tank NOT full (calling for water)
-    LOW (0) = Float switch OPEN = Tank is FULL
+    HIGH (1) = Float switch OPEN = Tank is FULL
+    LOW (0) = Float switch CLOSED = Tank NOT full (calling for water)
     """
     if not GPIO_AVAILABLE:
         return 'UNKNOWN'
@@ -123,8 +122,8 @@ def read_float_sensor():
         with _gpio_lock:
             try:
                 state = GPIO.input(FLOAT_PIN)
-                # FIXED: HIGH means CALLING, LOW means FULL
-                return 'CLOSED/CALLING' if state else 'OPEN/FULL'
+                # HIGH = OPEN/FULL, LOW = CLOSED/CALLING
+                return 'OPEN/FULL' if state else 'CLOSED/CALLING'
             except Exception as e:
                 print(f"Error reading float sensor: {e}", file=sys.stderr)
                 # Fall through to gpio command
@@ -133,7 +132,7 @@ def read_float_sensor():
     state = _read_pin_via_gpio_command(FLOAT_PIN)
     if state is None:
         return 'UNKNOWN'
-    return 'CLOSED/CALLING' if state else 'OPEN/FULL'
+    return 'OPEN/FULL' if state else 'CLOSED/CALLING'
 
 def cleanup_gpio():
     """Clean up GPIO on shutdown"""
