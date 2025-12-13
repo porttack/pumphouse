@@ -9,12 +9,16 @@ from monitor.config import (
     POLL_INTERVAL, TANK_POLL_INTERVAL, SNAPSHOT_INTERVAL,
     RESIDUAL_PRESSURE_SECONDS, SECONDS_PER_GALLON,
     ENABLE_PURGE, MIN_PURGE_INTERVAL,
-    ENABLE_OVERRIDE_SHUTOFF, OVERRIDE_SHUTOFF_THRESHOLD
+    ENABLE_OVERRIDE_SHUTOFF, OVERRIDE_SHUTOFF_THRESHOLD,
+    NOTIFY_OVERRIDE_SHUTOFF, NOTIFY_WELL_RECOVERY_THRESHOLD,
+    DASHBOARD_URL
 )
 from monitor.gpio_helpers import read_pressure, read_float_sensor
 from monitor.tank import get_tank_data
 from monitor.logger import log_event, log_snapshot
 from monitor.state import SystemState
+from monitor.notifications import NotificationManager
+from monitor.ntfy import send_notification
 
 def estimate_gallons(duration_seconds):
     """Estimate gallons pumped based on pressure duration"""
@@ -147,6 +151,12 @@ class SimplifiedMonitor:
         # Override shutoff control
         self.enable_override_shutoff = ENABLE_OVERRIDE_SHUTOFF
         self.override_shutoff_threshold = OVERRIDE_SHUTOFF_THRESHOLD
+
+        # Notification system
+        self.notification_manager = NotificationManager(
+            snapshots_file=self.snapshots_file,
+            debug=self.debug
+        )
 
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
@@ -321,12 +331,28 @@ class SimplifiedMonitor:
                         if prev_gallons and self.state.tank_gallons:
                             if abs(self.state.tank_gallons - prev_gallons) > 0.1:
                                 delta = self.state.tank_gallons - prev_gallons
-                                self.log_state_event('TANK_LEVEL', 
+                                self.log_state_event('TANK_LEVEL',
                                                     f'Changed by {delta:+.1f} gal')
                                 if self.debug:
                                     print(f"{datetime.now().strftime('%H:%M:%S')} - "
                                          f"Tank: {self.state.tank_gallons:.0f} gal "
                                          f"({delta:+.1f})")
+
+                                # Check for threshold crossings
+                                crossings = self.notification_manager.check_tank_threshold_crossing(
+                                    self.state.tank_gallons, prev_gallons
+                                )
+                                for direction, level in crossings:
+                                    if self.notification_manager.can_notify(f'tank_{direction}_{level}'):
+                                        send_notification(
+                                            title=f"🚰 Tank {'Dropping' if direction == 'decreasing' else 'Filling'}",
+                                            message=f"Tank crossed {level} gallons ({'down' if direction == 'decreasing' else 'up'}) - currently at {self.state.tank_gallons:.0f} gal",
+                                            priority='default' if direction == 'increasing' else 'high',
+                                            tags=['droplet', 'chart_with_downwards_trend' if direction == 'decreasing' else 'chart_with_upwards_trend'],
+                                            click_url=DASHBOARD_URL,
+                                            attach_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
+                                            debug=self.debug
+                                        )
                         
                         # Check for float state change
                         if self.state.float_state != last_float_state:
@@ -341,6 +367,19 @@ class SimplifiedMonitor:
                                     print(f"{datetime.now().strftime('%H:%M:%S')} - "
                                          f"Float: Tank full")
                             last_float_state = self.state.float_state
+
+                        # Check for float confirmation (CLOSED→OPEN for N consecutive times)
+                        if self.notification_manager.check_float_confirmation(self.state.float_state):
+                            if self.notification_manager.can_notify('float_full_confirmed'):
+                                send_notification(
+                                    title="💧 Tank Full Confirmed",
+                                    message="Float sensor confirmed FULL for 3+ readings",
+                                    priority='default',
+                                    tags=['droplet', 'white_check_mark'],
+                                    click_url=DASHBOARD_URL,
+                                    attach_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
+                                    debug=self.debug
+                                )
 
                         # Check for override shutoff (continuous enforcement)
                         if self.enable_override_shutoff and self.relay_control_enabled:
@@ -363,10 +402,47 @@ class SimplifiedMonitor:
                                     self.log_state_event('OVERRIDE_SHUTOFF',
                                         f'Auto-shutoff: tank at {self.state.tank_gallons:.0f} gal (threshold: {self.override_shutoff_threshold})')
 
+                                    # Send notification
+                                    if NOTIFY_OVERRIDE_SHUTOFF and self.notification_manager.can_notify('override_shutoff'):
+                                        send_notification(
+                                            title="⚠️ Override Auto-Shutoff",
+                                            message=f"Tank reached {self.state.tank_gallons:.0f} gal (threshold: {self.override_shutoff_threshold}), override turned off",
+                                            priority='high',
+                                            tags=['warning', 'rotating_light'],
+                                            click_url=DASHBOARD_URL,
+                                            attach_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
+                                            debug=self.debug
+                                        )
+
                     self.last_tank_check = current_time
                 
                 # SNAPSHOT
                 if current_time >= self.next_snapshot_time:
+                    # Check for well status (recovery or dry)
+                    refill_status = self.notification_manager.check_refill_status()
+                    if refill_status:
+                        status_type, value = refill_status
+                        if status_type == 'recovery' and self.notification_manager.can_notify('well_recovery'):
+                            send_notification(
+                                title="💧 Well Recovery Detected",
+                                message=f"Tank gained {NOTIFY_WELL_RECOVERY_THRESHOLD}+ gallons in last 24 hours!",
+                                priority='default',
+                                tags=['droplet', 'white_check_mark'],
+                                click_url=DASHBOARD_URL,
+                                attach_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
+                                debug=self.debug
+                            )
+                        elif status_type == 'dry' and self.notification_manager.can_notify('well_dry'):
+                            send_notification(
+                                title="⚠️ Well May Be Dry",
+                                message=f"No {NOTIFY_WELL_RECOVERY_THRESHOLD}+ gallon refill in {value:.1f} days",
+                                priority='urgent',
+                                tags=['warning', 'droplet'],
+                                click_url=DASHBOARD_URL,
+                                attach_url=f"{DASHBOARD_URL}api/chart.png?hours=168",
+                                debug=self.debug
+                            )
+
                     tank_data_age = self.get_tank_data_age()
                     snapshot_data = self.snapshot_tracker.get_snapshot_data(
                         self.state.tank_gallons,

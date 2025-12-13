@@ -29,7 +29,24 @@ PURGE_DURATION = 10  # Duration of purge in seconds
 
 # Override Shutoff Configuration
 ENABLE_OVERRIDE_SHUTOFF = True  # Enable automatic override shutoff to prevent tank overflow
-OVERRIDE_SHUTOFF_THRESHOLD = 1450  # Gallons at which to turn off override valve
+OVERRIDE_SHUTOFF_THRESHOLD = 1410  # Gallons at which to turn off override valve
+
+# Notification Configuration
+ENABLE_NOTIFICATIONS = True  # Master switch (default OFF for safety)
+NTFY_SERVER = "https://ntfy.sh"  # Can change to self-hosted later
+NTFY_TOPIC = "REDACTED-TOPIC"  # User must set unique topic!
+DASHBOARD_URL = "https://REDACTED-HOST:6443/"  # Dashboard URL to include in notifications
+
+# Notification Rules - Which events trigger notifications
+NOTIFY_TANK_DECREASING = [1000, 750, 500, 250]  # Alert when tank crosses these levels going DOWN
+NOTIFY_TANK_INCREASING = [500, 750, 1000, 1200]  # Alert when tank crosses these levels going UP
+NOTIFY_WELL_RECOVERY_THRESHOLD = 50  # Gallons gained in 24hr to count as recovery
+NOTIFY_FLOAT_CONFIRMATIONS = 3  # Number of consecutive OPEN readings before alert
+NOTIFY_WELL_DRY_DAYS = 4  # Days without refill before "well dry" alert
+NOTIFY_OVERRIDE_SHUTOFF = True  # Alert on automatic override shutoff
+
+# Notification Cooldowns (prevent spam)
+MIN_NOTIFICATION_INTERVAL = 300  # Minimum 5 minutes between same notification type
 
 # Logging Configuration
 MAX_PRESSURE_LOG_INTERVAL = 1800  # Log at least every 30 minutes when pressure is high

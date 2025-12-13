@@ -1,0 +1,16 @@
+nohup: ignoring input
+GPIO initialized successfully
+
+=== Monitor v2.2.0 ===
+Events: events.csv
+Snapshots: snapshots.csv
+Snapshot interval: 15 min
+Purge: Disabled
+
+First snapshot at: 21:15:00
+Monitoring started...
+
+
+Received signal 15, shutting down...
+
+✓ Monitor stopped

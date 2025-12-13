@@ -2,6 +2,67 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.6.0] - 2025-12-12
+
+### Added
+- **Push Notifications via ntfy.sh**: Real-time alerts on your phone for critical tank events
+  - Tank level threshold crossings (both increasing and decreasing) with bounce protection
+  - Well recovery detection (50+ gallon gain in 24 hours)
+  - Well dry alert (no refill in configurable days, default: 4)
+  - Float sensor confirmation (CLOSED→OPEN for 3+ consecutive readings)
+  - Override shutoff alerts (when automatic overflow protection triggers)
+  - Configurable notification rules and cooldown periods (default: 5 min between same alerts)
+  - Support for both public ntfy.sh and self-hosted ntfy servers
+  - Test command: `python -m monitor.check --test-notification`
+- **Shared Statistics Module**: New `monitor/stats.py` module for reusable analytics
+  - `find_last_refill()` function extracts refill detection logic from web.py
+  - Used by both web dashboard and notification system
+- **Notification Rule Engine**: New `monitor/notifications.py` with `NotificationManager` class
+  - Intelligent state tracking to prevent notification spam
+  - Bounce protection: won't re-alert if tank level fluctuates near thresholds
+  - Separation of concerns: rule evaluation separate from sending mechanism
+  - Designed for future expansion (Web Push, email, SMS, etc.)
+- **ntfy.sh Sender**: New `monitor/ntfy.py` module for ntfy.sh integration
+  - Simple HTTP POST client for push notifications
+  - Configurable server URL and topic
+  - `test_ping()` function for testing integration
+
+### Changed
+- **Config**: Added comprehensive notification configuration
+  - `ENABLE_NOTIFICATIONS` - Master switch (default: False for safety)
+  - `NTFY_SERVER` - Server URL (default: https://ntfy.sh)
+  - `NTFY_TOPIC` - Unique topic name (must be configured)
+  - `NOTIFY_TANK_DECREASING` - Alert levels when tank drops (default: [1000, 750, 500, 250])
+  - `NOTIFY_TANK_INCREASING` - Alert levels when tank fills (default: [500, 750, 1000, 1200])
+  - `NOTIFY_WELL_RECOVERY_THRESHOLD` - Gallons gained to count as recovery (default: 50)
+  - `NOTIFY_FLOAT_CONFIRMATIONS` - Consecutive OPEN readings before alert (default: 3)
+  - `NOTIFY_WELL_DRY_DAYS` - Days without refill before alert (default: 4)
+  - `NOTIFY_OVERRIDE_SHUTOFF` - Alert on auto-shutoff (default: True)
+  - `MIN_NOTIFICATION_INTERVAL` - Cooldown between same alerts (default: 300 seconds)
+- **Poll Module**: Integrated notification checks at key points
+  - After tank level changes: checks threshold crossings
+  - After float state changes: tracks confirmation pattern
+  - In snapshot cycle: checks well recovery/dry status
+  - After override shutoff: sends alert notification
+- **Web Dashboard**: Refactored to use shared stats module
+  - Removed duplicate refill detection code
+  - Now uses `find_last_refill()` from stats.py
+- **Check Command**: Added `--test-notification` flag
+  - Sends test notification to verify ntfy integration
+  - Provides helpful setup instructions if test fails
+- **README**: Extensive documentation for push notifications
+  - Setup instructions for ntfy app (iOS, Android, web)
+  - Configuration examples and customization options
+  - Notification event descriptions
+  - Self-hosting ntfy server instructions
+
+### Technical Details
+- Notification system runs in same process as monitor (no threading)
+- All notifications also logged to events.csv for audit trail
+- Notification failures don't crash monitoring loop
+- State tracking persists across notification manager lifecycle
+- Uses existing `requests` library (already dependency for tank scraping)
+
 ## [2.5.0] - 2025-12-12
 
 ### Added
