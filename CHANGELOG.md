@@ -2,6 +2,44 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.7.0] - 2025-12-14
+
+### Added
+- **Email Notifications**: Full HTML email alerts with comprehensive system status
+  - Rich HTML emails styled like the web dashboard with dark theme
+  - Includes tank level bar, current stats (depth, gallons, percentage)
+  - Shows 1-hour and 24-hour tank changes with color coding
+  - Displays sensor status (float switch, pressure) with visual indicators
+  - Embeds tank level history chart directly in email
+  - Link to full web dashboard
+  - Sent for all alert types: tank thresholds, well recovery, well dry, override shutoff, float confirmations
+  - Test command: `python -m monitor.check --test-email`
+- **Secure Credential Storage**: Email SMTP password stored in `~/.config/pumphouse/secrets.conf`
+  - Template file provided: `secrets.conf.template`
+  - Secrets file excluded from git via `.gitignore`
+  - Automatic loading from secure location
+- **Email Setup Guide**: New `EMAIL_SETUP.md` with Gmail App Password instructions
+  - Step-by-step Gmail configuration
+  - Support for other email providers (Outlook, Yahoo, custom)
+  - Troubleshooting tips
+
+### Changed
+- **Config**: Added email notification configuration
+  - `ENABLE_EMAIL_NOTIFICATIONS` - Enable email alerts (default: True)
+  - `EMAIL_TO` - Recipient email address
+  - `EMAIL_FROM` - Sender email address
+  - `EMAIL_SMTP_SERVER` - SMTP server (default: smtp.gmail.com)
+  - `EMAIL_SMTP_PORT` - SMTP port (default: 587 for TLS)
+  - `EMAIL_SMTP_USER` - SMTP username
+  - `EMAIL_SMTP_PASSWORD` - Now loaded from secrets file instead of being in config
+- **Notification System**: Improved well recovery alert logic
+  - Now tracks specific refill event timestamps
+  - Only sends alert once per recovery event (no hourly repeats)
+  - Prevents notification spam when recovery is detected
+
+### Fixed
+- Well recovery alerts no longer sent every hour for the same refill event
+
 ## [2.6.0] - 2025-12-12
 
 ### Added
