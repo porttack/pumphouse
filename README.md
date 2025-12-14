@@ -16,6 +16,7 @@ Simplified event-based monitoring system for remote water treatment facilities. 
 - **Background Operation**: Runs reliably via nohup with SSH disconnect survival
 - **Web Dashboard**: HTTPS web interface on port 6443 for real-time status and historical data
 - **Email Notifications**: Rich HTML email alerts with full system status, charts, and sensor readings
+- **Remote Control via Email**: One-click relay control buttons in email alerts using secret URLs
 - **Push Notifications**: Real-time phone alerts via ntfy.sh for critical tank events
 
 ## Installation
@@ -203,6 +204,12 @@ timestamp,event_type,pressure_state,float_state,tank_gallons,tank_depth,tank_per
 - **FLOAT_FULL**: Float sensor changed to OPEN/FULL (tank full)
 - **PURGE**: Automatic spindown filter purge triggered
 - **OVERRIDE_SHUTOFF**: Automatic override valve shutoff due to tank overflow protection
+- **REMOTE_CONTROL**: Remote relay control action via email secret URL
+- **NOTIFY_TANK_***: Email notification sent for tank threshold crossing
+- **NOTIFY_FLOAT_FULL**: Email notification sent for confirmed tank full
+- **NOTIFY_OVERRIDE_OFF**: Email notification sent for override auto-shutoff
+- **NOTIFY_WELL_RECOVERY**: Email notification sent for well recovery detection
+- **NOTIFY_WELL_DRY**: Email notification sent for potential well dry condition
 - **SHUTDOWN**: Clean shutdown
 
 ### Snapshots CSV (snapshots.csv)
@@ -360,6 +367,60 @@ Receive rich HTML email alerts with full system status, tank charts, and sensor 
 - Priority-based formatting (green/orange/red)
 
 See [EMAIL_SETUP.md](EMAIL_SETUP.md) for detailed setup instructions and troubleshooting.
+
+### Remote Control via Email
+
+Every email alert includes one-click action buttons for remote relay control - no command-line access needed!
+
+**Quick Setup:**
+
+1. **Generate secret tokens** (if not already done):
+   ```bash
+   # Generate 5 random tokens
+   python3 -c "import secrets; print('SECRET_OVERRIDE_ON_TOKEN=' + secrets.token_urlsafe(32))"
+   python3 -c "import secrets; print('SECRET_OVERRIDE_OFF_TOKEN=' + secrets.token_urlsafe(32))"
+   python3 -c "import secrets; print('SECRET_BYPASS_ON_TOKEN=' + secrets.token_urlsafe(32))"
+   python3 -c "import secrets; print('SECRET_BYPASS_OFF_TOKEN=' + secrets.token_urlsafe(32))"
+   python3 -c "import secrets; print('SECRET_PURGE_TOKEN=' + secrets.token_urlsafe(32))"
+   ```
+
+2. **Add tokens to secrets file:**
+   ```bash
+   nano ~/.config/pumphouse/secrets.conf
+   ```
+   Add the generated tokens:
+   ```
+   SECRET_OVERRIDE_ON_TOKEN=your-random-token-here
+   SECRET_OVERRIDE_OFF_TOKEN=your-random-token-here
+   SECRET_BYPASS_ON_TOKEN=your-random-token-here
+   SECRET_BYPASS_OFF_TOKEN=your-random-token-here
+   SECRET_PURGE_TOKEN=your-random-token-here
+   ```
+
+3. **Restart services:**
+   ```bash
+   sudo systemctl restart pumphouse-monitor pumphouse-web
+   ```
+
+4. **Done!** Every email alert will now include color-coded action buttons:
+   - **Override ON** (blue) - Turn on supply override valve
+   - **Override OFF** (orange) - Turn off supply override valve
+   - **Bypass ON** (blue) - Turn on bypass valve
+   - **Bypass OFF** (orange) - Turn off bypass valve
+   - **Purge Now** (purple) - Trigger one-time spindown filter purge
+
+**How it works:**
+- Secret URLs like `https://your-domain.com/control/<token>` provide unauthenticated access
+- Each action has a unique 256-bit random token (keep these secret!)
+- Clicking a button executes the action and logs it to events.csv
+- Success page redirects to dashboard after 2 seconds
+- All remote actions logged with `REMOTE_CONTROL` event type
+
+**Security:**
+- Tokens are stored in `~/.config/pumphouse/secrets.conf` (not in git)
+- Each token is cryptographically random (43 characters)
+- URLs are only known to you via email alerts
+- Optional feature - works without tokens configured
 
 ### Push Notifications
 
@@ -626,6 +687,6 @@ Internal use only - Pumphouse monitoring system
 
 ## Version
 
-Current version: **2.6.0**
+Current version: **2.8.0**
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.

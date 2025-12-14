@@ -58,8 +58,13 @@ NOTIFY_OVERRIDE_SHUTOFF = True  # Alert on automatic override shutoff
 # Notification Cooldowns (prevent spam)
 MIN_NOTIFICATION_INTERVAL = 300  # Minimum 5 minutes between same notification type
 
-# Logging Configuration
+## Logging Configuration
 MAX_PRESSURE_LOG_INTERVAL = 1800  # Log at least every 30 minutes when pressure is high
+
+# Web Dashboard Event Filtering
+# List of event types to EXCLUDE from the Recent Events table on the web dashboard
+# Common types: TANK_LEVEL, PRESSURE_HIGH, PRESSURE_LOW, INIT, SHUTDOWN, FLOAT_CALLING, FLOAT_FULL
+DASHBOARD_HIDE_EVENT_TYPES = ['TANK_LEVEL']  # Hide noisy tank level change events
 
 # Default file paths
 DEFAULT_LOG_FILE = 'pressure_log.txt'
@@ -106,18 +111,40 @@ def load_config_file():
         print(f"Warning: Could not load config file {CONFIG_FILE}: {e}")
         return {}
 
-# Load EMAIL_SMTP_PASSWORD from secrets file if not set
-if not EMAIL_SMTP_PASSWORD:
-    SECRETS_FILE = Path.home() / '.config' / 'pumphouse' / 'secrets.conf'
-    if SECRETS_FILE.exists():
-        try:
-            with open(SECRETS_FILE, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith('#'):
-                        continue
-                    if line.startswith('EMAIL_SMTP_PASSWORD='):
-                        EMAIL_SMTP_PASSWORD = line.split('=', 1)[1].strip()
-                        break
-        except Exception as e:
-            print(f"Warning: Could not load secrets file {SECRETS_FILE}: {e}")
+# Secret URL tokens for remote control (loaded from secrets file)
+SECRET_OVERRIDE_ON_TOKEN = ''
+SECRET_OVERRIDE_OFF_TOKEN = ''
+SECRET_BYPASS_ON_TOKEN = ''
+SECRET_BYPASS_OFF_TOKEN = ''
+SECRET_PURGE_TOKEN = ''
+
+# Load secrets from secrets file
+SECRETS_FILE = Path.home() / '.config' / 'pumphouse' / 'secrets.conf'
+if SECRETS_FILE.exists():
+    try:
+        with open(SECRETS_FILE, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+
+                if '=' in line:
+                    key, value = line.split('=', 1)
+                    key = key.strip()
+                    value = value.strip()
+
+                    # Load secrets into module-level variables
+                    if key == 'EMAIL_SMTP_PASSWORD' and not EMAIL_SMTP_PASSWORD:
+                        EMAIL_SMTP_PASSWORD = value
+                    elif key == 'SECRET_OVERRIDE_ON_TOKEN':
+                        SECRET_OVERRIDE_ON_TOKEN = value
+                    elif key == 'SECRET_OVERRIDE_OFF_TOKEN':
+                        SECRET_OVERRIDE_OFF_TOKEN = value
+                    elif key == 'SECRET_BYPASS_ON_TOKEN':
+                        SECRET_BYPASS_ON_TOKEN = value
+                    elif key == 'SECRET_BYPASS_OFF_TOKEN':
+                        SECRET_BYPASS_OFF_TOKEN = value
+                    elif key == 'SECRET_PURGE_TOKEN':
+                        SECRET_PURGE_TOKEN = value
+    except Exception as e:
+        print(f"Warning: Could not load secrets file {SECRETS_FILE}: {e}")

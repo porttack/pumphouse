@@ -21,7 +21,12 @@ from monitor.config import (
     DASHBOARD_URL,
     TANK_HEIGHT_INCHES,
     TANK_CAPACITY_GALLONS,
-    TANK_URL
+    TANK_URL,
+    SECRET_OVERRIDE_ON_TOKEN,
+    SECRET_OVERRIDE_OFF_TOKEN,
+    SECRET_BYPASS_ON_TOKEN,
+    SECRET_BYPASS_OFF_TOKEN,
+    SECRET_PURGE_TOKEN
 )
 
 
@@ -226,10 +231,11 @@ def get_snapshots_stats(filepath='snapshots.csv'):
 
 
 def fetch_system_status(debug=False):
-    """Fetch current system status (tank, sensors, stats)"""
+    """Fetch current system status (tank, sensors, stats, relays)"""
     try:
         from monitor.tank import get_tank_data
         from monitor.gpio_helpers import read_pressure, read_float_sensor
+        from monitor.relay import get_all_relay_status
 
         # Fetch tank data
         tank_data = get_tank_data(TANK_URL)
@@ -237,6 +243,9 @@ def fetch_system_status(debug=False):
         # Read sensors (will work even without GPIO init using command fallback)
         pressure = read_pressure()
         float_state = read_float_sensor()
+
+        # Get relay status
+        relay_status = get_all_relay_status()
 
         # Get stats from snapshots
         stats = None
@@ -250,6 +259,7 @@ def fetch_system_status(debug=False):
             'tank': tank_data,
             'pressure': pressure,
             'float': float_state,
+            'relay': relay_status,
             'stats': stats
         }
     except Exception as e:
@@ -295,6 +305,7 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
     tank_data = status_data.get('tank') if status_data else None
     pressure = status_data.get('pressure') if status_data else None
     float_state = status_data.get('float') if status_data else None
+    relay_status = status_data.get('relay') if status_data else None
     stats = status_data.get('stats') if status_data else None
 
     html = f"""<!DOCTYPE html>
@@ -450,6 +461,16 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
             font-size: 13px;
             z-index: 1;
         }}
+        .relay-warning {{
+            background: #f44336;
+            color: white;
+            padding: 12px;
+            margin: 15px 0;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 15px;
+            text-align: center;
+        }}
     </style>
 </head>
 <body>
@@ -463,6 +484,19 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
                 <p class="alert-message"><strong>{subject}</strong></p>
                 <p class="alert-message">{message}</p>
             </div>
+"""
+
+    # Add relay warnings if any are ON
+    if relay_status:
+        warnings = []
+        if relay_status.get('supply_override') == 'ON':
+            warnings.append("⚠️ SUPPLY OVERRIDE IS ON")
+        if relay_status.get('bypass') == 'ON':
+            warnings.append("⚠️ BYPASS IS ON")
+
+        for warning in warnings:
+            html += f"""
+            <div class="relay-warning">{warning}</div>
 """
 
     # Add tank level status if available
@@ -585,6 +619,29 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
         html += f"""
             <div style="text-align: center; margin: 20px 0;">
                 <a href="{dashboard_url}" class="button">View Full Dashboard</a>
+            </div>
+"""
+
+    # Add quick action buttons if secret tokens are configured
+    action_buttons = []
+    if SECRET_OVERRIDE_ON_TOKEN:
+        action_buttons.append(f'<a href="{dashboard_url}control/{SECRET_OVERRIDE_ON_TOKEN}" class="button" style="background: #2196F3;">Override ON</a>')
+    if SECRET_OVERRIDE_OFF_TOKEN:
+        action_buttons.append(f'<a href="{dashboard_url}control/{SECRET_OVERRIDE_OFF_TOKEN}" class="button" style="background: #ff9800;">Override OFF</a>')
+    if SECRET_BYPASS_ON_TOKEN:
+        action_buttons.append(f'<a href="{dashboard_url}control/{SECRET_BYPASS_ON_TOKEN}" class="button" style="background: #2196F3;">Bypass ON</a>')
+    if SECRET_BYPASS_OFF_TOKEN:
+        action_buttons.append(f'<a href="{dashboard_url}control/{SECRET_BYPASS_OFF_TOKEN}" class="button" style="background: #ff9800;">Bypass OFF</a>')
+    if SECRET_PURGE_TOKEN:
+        action_buttons.append(f'<a href="{dashboard_url}control/{SECRET_PURGE_TOKEN}" class="button" style="background: #9C27B0;">Purge Now</a>')
+
+    if action_buttons and dashboard_url:
+        html += f"""
+            <div style="text-align: center; margin: 20px 0;">
+                <p style="color: #888; font-size: 13px; margin-bottom: 10px;">Quick Actions:</p>
+                <div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;">
+                    {' '.join(action_buttons)}
+                </div>
             </div>
 """
 

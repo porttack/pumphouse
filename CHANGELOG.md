@@ -2,6 +2,45 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.8.0] - 2025-12-14
+
+### Added
+- **Remote Control via Email**: One-click control buttons in email alerts
+  - Secret URL tokens for unauthenticated access to relay controls
+  - Five quick action buttons in every email: Override ON/OFF, Bypass ON/OFF, Purge Now
+  - Secure 256-bit random tokens stored in `~/.config/pumphouse/secrets.conf`
+  - Web endpoint `/control/<token>` for executing actions
+  - All remote actions logged to events.csv with `REMOTE_CONTROL` event type
+  - Success page with auto-redirect to dashboard after action
+- **Enhanced Email Notifications**: Relay status warnings and full system status
+  - Prominent warning boxes when Override or Bypass is ON
+  - Full system status in all email alerts (tank, sensors, stats, relays)
+  - Fixed email alerts to include same rich content as test emails
+- **Dashboard Improvements**: Event filtering and startup time tracking
+  - `DASHBOARD_HIDE_EVENT_TYPES` config to filter noisy events from Recent Events table
+  - TANK_LEVEL events now hidden by default (can be configured)
+  - Web server startup time displayed at bottom of dashboard
+- **Event Logging**: All notifications now create events.csv entries
+  - New event types: `NOTIFY_TANK_*`, `NOTIFY_FLOAT_FULL`, `NOTIFY_OVERRIDE_OFF`, `NOTIFY_WELL_RECOVERY`, `NOTIFY_WELL_DRY`
+  - `REMOTE_CONTROL` event type for all secret URL actions
+  - Consolidated `send_alert()` helper ensures all alerts are logged
+
+### Changed
+- **Relay Control**: Added `set_bypass()` function matching `set_supply_override()` pattern
+  - Uses gpio command to avoid multi-process conflicts
+  - Includes debug logging and error handling
+- **Secrets Configuration**: Extended to include remote control tokens
+  - Five new optional secret tokens for relay/purge control
+  - Template updated with token generation instructions
+  - Tokens only loaded if configured (optional feature)
+- **Notification System**: Improved alert logging consistency
+  - All alerts logged before sending (prevents missed events)
+  - Full status data included in all email notifications via `include_status=True`
+
+### Fixed
+- Email alerts now include full system status (previously only test emails had this)
+- Dashboard Recent Events table respects event type filter configuration
+
 ## [2.7.0] - 2025-12-14
 
 ### Added

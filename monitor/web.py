@@ -12,11 +12,16 @@ from flask import Flask, render_template, request, Response, jsonify, send_file
 from functools import wraps
 
 from monitor import __version__
-from monitor.config import TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS
+from monitor.config import (
+    TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS, DASHBOARD_HIDE_EVENT_TYPES,
+    SECRET_OVERRIDE_ON_TOKEN, SECRET_OVERRIDE_OFF_TOKEN,
+    SECRET_BYPASS_ON_TOKEN, SECRET_BYPASS_OFF_TOKEN,
+    SECRET_PURGE_TOKEN
+)
 from monitor.gpio_helpers import read_pressure, read_float_sensor, init_gpio, cleanup_gpio
 from monitor.tank import get_tank_data
 from monitor.check import read_temp_humidity, format_pressure_state, format_float_state
-from monitor.relay import get_all_relay_status
+from monitor.relay import get_all_relay_status, set_supply_override, set_bypass
 from monitor.stats import find_last_refill
 
 # Matplotlib imports for chart generation
@@ -30,6 +35,7 @@ app = Flask(__name__)
 # Configuration
 USERNAME = os.environ.get('PUMPHOUSE_USER', 'admin')
 PASSWORD = os.environ.get('PUMPHOUSE_PASS', 'pumphouse')
+STARTUP_TIME = datetime.now()  # Track when web server started
 
 def check_auth(username, password):
     """Check if username/password is valid"""
@@ -346,6 +352,11 @@ def index():
     snapshot_headers, snapshot_rows = read_csv_tail('snapshots.csv', max_rows=10)
     event_headers, event_rows = read_csv_tail('events.csv', max_rows=20)
 
+    # Filter events based on DASHBOARD_HIDE_EVENT_TYPES
+    if event_headers and event_rows and 'event_type' in event_headers:
+        event_type_idx = event_headers.index('event_type')
+        event_rows = [row for row in event_rows if len(row) > event_type_idx and row[event_type_idx] not in DASHBOARD_HIDE_EVENT_TYPES]
+
     # Get aggregate stats from snapshots
     stats = get_snapshots_stats('snapshots.csv')
 
@@ -368,7 +379,81 @@ def index():
                          relay_status=relay_status,
                          format_pressure_state=format_pressure_state,
                          format_float_state=format_float_state,
-                         now=datetime.now())
+                         now=datetime.now(),
+                         startup_time=STARTUP_TIME)
+
+@app.route('/control/<token>')
+def control(token):
+    """
+    Unauthenticated control endpoint using secret tokens.
+    Allows remote control via email links without authentication.
+    """
+    action_taken = None
+    success = False
+
+    # Check which action to perform based on token
+    if token == SECRET_OVERRIDE_ON_TOKEN and SECRET_OVERRIDE_ON_TOKEN:
+        success = set_supply_override('ON', debug=False)
+        action_taken = "Supply Override turned ON"
+    elif token == SECRET_OVERRIDE_OFF_TOKEN and SECRET_OVERRIDE_OFF_TOKEN:
+        success = set_supply_override('OFF', debug=False)
+        action_taken = "Supply Override turned OFF"
+    elif token == SECRET_BYPASS_ON_TOKEN and SECRET_BYPASS_ON_TOKEN:
+        success = set_bypass('ON', debug=False)
+        action_taken = "Bypass turned ON"
+    elif token == SECRET_BYPASS_OFF_TOKEN and SECRET_BYPASS_OFF_TOKEN:
+        success = set_bypass('OFF', debug=False)
+        action_taken = "Bypass turned OFF"
+    elif token == SECRET_PURGE_TOKEN and SECRET_PURGE_TOKEN:
+        # Trigger one-time purge
+        from monitor.purge import trigger_purge
+        success = trigger_purge(debug=False)
+        action_taken = "Purge triggered"
+    else:
+        return Response('Invalid token', status=403)
+
+    if success:
+        # Log the action to events.csv
+        from monitor.logger import log_event
+        relay_status = get_all_relay_status()
+        log_event(
+            'events.csv',
+            'REMOTE_CONTROL',
+            read_pressure(),
+            read_float_sensor(),
+            None,  # tank_gallons
+            None,  # tank_depth
+            None,  # tank_percentage
+            None,  # duration
+            relay_status,
+            action_taken
+        )
+
+        # Return simple HTML with redirect
+        return f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Control Action</title>
+            <meta http-equiv="refresh" content="2;url=/" />
+            <style>
+                body {{ font-family: monospace; background: #1a1a1a; color: #4CAF50;
+                       display: flex; align-items: center; justify-content: center;
+                       height: 100vh; margin: 0; }}
+                .message {{ text-align: center; padding: 40px; background: #2a2a2a;
+                           border: 2px solid #4CAF50; border-radius: 8px; }}
+            </style>
+        </head>
+        <body>
+            <div class="message">
+                <h1>✓ {action_taken}</h1>
+                <p>Redirecting to dashboard...</p>
+            </div>
+        </body>
+        </html>
+        """
+    else:
+        return Response(f'Failed to execute: {action_taken}', status=500)
 
 def main():
     """Main entry point"""
