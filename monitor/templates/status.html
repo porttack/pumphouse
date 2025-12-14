@@ -381,6 +381,11 @@
             </div>
         </div>
         {% endif %}
+
+        <!-- Footer with startup time -->
+        <div style="text-align: center; padding: 20px 0 10px 0; color: #666; font-size: 12px; border-top: 1px solid #333; margin-top: 20px;">
+            Web server started: {{ startup_time.strftime('%Y-%m-%d %H:%M:%S') }}
+        </div>
     </div>
 
     <!-- Chart.js Library -->
