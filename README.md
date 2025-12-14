@@ -15,6 +15,8 @@ Simplified event-based monitoring system for remote water treatment facilities. 
 - **Safe Relay Control Script**: `control.sh` for manual relay operations without Python GPIO conflicts
 - **Background Operation**: Runs reliably via nohup with SSH disconnect survival
 - **Web Dashboard**: HTTPS web interface on port 6443 for real-time status and historical data
+- **Email Notifications**: Rich HTML email alerts with full system status, charts, and sensor readings
+- **Push Notifications**: Real-time phone alerts via ntfy.sh for critical tank events
 
 ## Installation
 ```bash
@@ -300,7 +302,66 @@ python -m monitor.web
 
 **Note:** The web server runs independently from the monitor daemon. Run both processes to collect data and view it.
 
-## Push Notifications
+## Notifications
+
+Get real-time alerts for important tank events via push notifications and email.
+
+### Email Notifications
+
+Receive rich HTML email alerts with full system status, tank charts, and sensor readings.
+
+**Quick Setup:**
+
+1. **Copy the secrets template:**
+   ```bash
+   cp secrets.conf.template ~/.config/pumphouse/secrets.conf
+   chmod 600 ~/.config/pumphouse/secrets.conf
+   ```
+
+2. **For Gmail (recommended):**
+   - Go to https://myaccount.google.com/apppasswords
+   - Create an App Password for "Mail"
+   - Copy the 16-character password
+
+3. **Edit the secrets file:**
+   ```bash
+   nano ~/.config/pumphouse/secrets.conf
+   ```
+   Add your App Password:
+   ```
+   EMAIL_SMTP_PASSWORD=your-16-char-app-password
+   ```
+
+4. **Configure email settings in monitor/config.py:**
+   ```python
+   ENABLE_EMAIL_NOTIFICATIONS = True
+   EMAIL_TO = "your-email@gmail.com"
+   EMAIL_FROM = "your-email@gmail.com"
+   EMAIL_SMTP_USER = "your-email@gmail.com"
+   ```
+
+5. **Test it:**
+   ```bash
+   python -m monitor.check --test-email
+   ```
+
+6. **Restart the monitor:**
+   ```bash
+   sudo systemctl restart pumphouse-monitor
+   ```
+
+**Email Features:**
+- HTML emails styled like the web dashboard
+- Tank level bar showing current percentage and gallons
+- Current sensor readings (float switch, pressure)
+- 1-hour and 24-hour tank change statistics
+- Embedded tank level history chart
+- Link to full web dashboard
+- Priority-based formatting (green/orange/red)
+
+See [EMAIL_SETUP.md](EMAIL_SETUP.md) for detailed setup instructions and troubleshooting.
+
+### Push Notifications
 
 Get real-time alerts on your phone for important tank events using ntfy.sh push notifications.
 

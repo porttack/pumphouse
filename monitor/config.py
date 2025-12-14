@@ -37,9 +37,19 @@ NTFY_SERVER = "https://ntfy.sh"  # Can change to self-hosted later
 NTFY_TOPIC = "blackberry_pumphouse"  # User must set unique topic!
 DASHBOARD_URL = "https://onblackberryhill2.tplinkdns.com:6443/"  # Dashboard URL to include in notifications
 
+# Email Notification Configuration
+ENABLE_EMAIL_NOTIFICATIONS = True  # Enable email alerts
+EMAIL_TO = "onblackberryhill@gmail.com"  # Recipient email address
+EMAIL_FROM = "onblackberryhill@gmail.com"  # Sender email (e.g., "alerts@yourdomain.com" or Gmail address)
+EMAIL_SMTP_SERVER = "smtp.gmail.com"  # SMTP server (Gmail default)
+EMAIL_SMTP_PORT = 587  # SMTP port (587 for TLS, 465 for SSL)
+EMAIL_SMTP_USER = "onblackberryhill@gmail.com"  # SMTP username (usually same as EMAIL_FROM for Gmail)
+EMAIL_SMTP_PASSWORD = ""  # SMTP password - stored in ~/.config/pumphouse/secrets.conf for security
+# To create Gmail App Password: Google Account → Security → 2-Step Verification → App passwords
+
 # Notification Rules - Which events trigger notifications
 NOTIFY_TANK_DECREASING = [1000, 750, 500, 250]  # Alert when tank crosses these levels going DOWN
-NOTIFY_TANK_INCREASING = [500, 750, 1000, 1200]  # Alert when tank crosses these levels going UP
+NOTIFY_TANK_INCREASING = [500, 750, 1000, 1200, 1400]  # Alert when tank crosses these levels going UP
 NOTIFY_WELL_RECOVERY_THRESHOLD = 50  # Gallons gained in 24hr to count as recovery
 NOTIFY_FLOAT_CONFIRMATIONS = 3  # Number of consecutive OPEN readings before alert
 NOTIFY_WELL_DRY_DAYS = 4  # Days without refill before "well dry" alert
@@ -66,7 +76,7 @@ def load_config_file():
     """
     if not CONFIG_FILE.exists():
         return {}
-    
+
     config = {}
     try:
         with open(CONFIG_FILE, 'r') as f:
@@ -74,12 +84,12 @@ def load_config_file():
                 line = line.strip()
                 if not line or line.startswith('#'):
                     continue
-                
+
                 if '=' in line:
                     key, value = line.split('=', 1)
                     key = key.strip()
                     value = value.strip()
-                    
+
                     # Convert to appropriate type
                     if value.lower() in ('true', 'false'):
                         config[key] = value.lower() == 'true'
@@ -90,8 +100,24 @@ def load_config_file():
                             config[key] = float(value)
                         except ValueError:
                             config[key] = value
-        
+
         return config
     except Exception as e:
         print(f"Warning: Could not load config file {CONFIG_FILE}: {e}")
         return {}
+
+# Load EMAIL_SMTP_PASSWORD from secrets file if not set
+if not EMAIL_SMTP_PASSWORD:
+    SECRETS_FILE = Path.home() / '.config' / 'pumphouse' / 'secrets.conf'
+    if SECRETS_FILE.exists():
+        try:
+            with open(SECRETS_FILE, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    if line.startswith('EMAIL_SMTP_PASSWORD='):
+                        EMAIL_SMTP_PASSWORD = line.split('=', 1)[1].strip()
+                        break
+        except Exception as e:
+            print(f"Warning: Could not load secrets file {SECRETS_FILE}: {e}")

@@ -32,6 +32,7 @@ class NotificationManager:
         self.float_state_history = []  # Last N float states for confirmation
         self.last_refill_check = 0
         self.well_dry_alerted = False
+        self.well_recovery_alerted_ts = None  # Timestamp of last recovery we alerted for
 
     def check_tank_threshold_crossing(self, current_gallons, previous_gallons):
         """
@@ -116,7 +117,11 @@ class NotificationManager:
         if refill_ts and days_ago is not None:
             # Check if this is a recent recovery (within last hour)
             if days_ago < (1/24):  # Less than 1 hour ago
-                return ('recovery', refill_ts)
+                # Only alert if we haven't already alerted for this specific refill event
+                if self.well_recovery_alerted_ts != refill_ts:
+                    self.well_recovery_alerted_ts = refill_ts
+                    self.well_dry_alerted = False  # Reset dry flag on recovery
+                    return ('recovery', refill_ts)
 
             # Check if well has been dry too long
             if days_ago >= NOTIFY_WELL_DRY_DAYS and not self.well_dry_alerted:

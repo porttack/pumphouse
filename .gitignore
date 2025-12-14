@@ -27,3 +27,8 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Secrets and credentials
+secrets.conf
+*.secret
+.env

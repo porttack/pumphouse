@@ -89,6 +89,77 @@ def test_notification():
 
     print("=" * 60)
 
+def test_email():
+    """Test email notification"""
+    from monitor.email_notifier import test_email
+    from monitor.config import (
+        ENABLE_EMAIL_NOTIFICATIONS,
+        EMAIL_TO,
+        EMAIL_FROM,
+        EMAIL_SMTP_SERVER,
+        EMAIL_SMTP_PORT,
+        EMAIL_SMTP_USER,
+        EMAIL_SMTP_PASSWORD
+    )
+
+    print("=" * 60)
+    print("EMAIL NOTIFICATION TEST")
+    print("=" * 60)
+    print(f"Enabled:      {ENABLE_EMAIL_NOTIFICATIONS}")
+    print(f"From:         {EMAIL_FROM if EMAIL_FROM else '(not configured)'}")
+    print(f"To:           {EMAIL_TO if EMAIL_TO else '(not configured)'}")
+    print(f"SMTP Server:  {EMAIL_SMTP_SERVER}:{EMAIL_SMTP_PORT}")
+    print(f"SMTP User:    {EMAIL_SMTP_USER if EMAIL_SMTP_USER else '(not configured)'}")
+    print(f"SMTP Pass:    {'(configured)' if EMAIL_SMTP_PASSWORD else '(not configured)'}")
+    print()
+
+    if not ENABLE_EMAIL_NOTIFICATIONS:
+        print("⚠️  Email notifications are disabled in config.py")
+        print("   Set ENABLE_EMAIL_NOTIFICATIONS = True to enable")
+        print("=" * 60)
+        return
+
+    if not all([EMAIL_FROM, EMAIL_TO, EMAIL_SMTP_USER, EMAIL_SMTP_PASSWORD]):
+        print("❌ Email not fully configured!")
+        print("\nPlease configure in config.py:")
+        if not EMAIL_FROM:
+            print("  - EMAIL_FROM")
+        if not EMAIL_TO:
+            print("  - EMAIL_TO")
+        if not EMAIL_SMTP_USER:
+            print("  - EMAIL_SMTP_USER")
+        if not EMAIL_SMTP_PASSWORD:
+            print("  - EMAIL_SMTP_PASSWORD")
+        print("\nFor Gmail, you need to create an App Password:")
+        print("  1. Go to https://myaccount.google.com/security")
+        print("  2. Enable 2-Step Verification (if not already enabled)")
+        print("  3. Go to https://myaccount.google.com/apppasswords")
+        print("  4. Create an App Password for 'Mail'")
+        print("  5. Copy the 16-character password to EMAIL_SMTP_PASSWORD")
+        print("=" * 60)
+        return
+
+    print("Sending test email...\n")
+
+    if test_email(debug=True):
+        print("\n✓ Test email sent successfully!")
+        print(f"\nCheck your inbox at: {EMAIL_TO}")
+        print("Note: Check spam folder if you don't see it")
+    else:
+        print("\n✗ Failed to send test email")
+        print("\nPossible issues:")
+        print("  1. Incorrect SMTP credentials")
+        print("  2. Using regular password instead of App Password (Gmail)")
+        print("  3. SMTP server or port is incorrect")
+        print("  4. No internet connection")
+        print("  5. Email blocked by server/firewall")
+        print("\nFor Gmail troubleshooting:")
+        print("  - Make sure you're using an App Password, not your Google password")
+        print("  - Check https://myaccount.google.com/apppasswords")
+        print("  - Verify 2-Step Verification is enabled")
+
+    print("=" * 60)
+
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
@@ -101,12 +172,19 @@ def main():
                        help='Skip GPIO sensor readings')
     parser.add_argument('--test-notification', action='store_true',
                        help='Send a test notification to ntfy.sh')
+    parser.add_argument('--test-email', action='store_true',
+                       help='Send a test email notification')
 
     args = parser.parse_args()
 
     # Handle test notification command
     if args.test_notification:
         test_notification()
+        return
+
+    # Handle test email command
+    if args.test_email:
+        test_email()
         return
 
     # Initialize GPIO unless disabled

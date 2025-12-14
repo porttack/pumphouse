@@ -19,6 +19,7 @@ from monitor.logger import log_event, log_snapshot
 from monitor.state import SystemState
 from monitor.notifications import NotificationManager
 from monitor.ntfy import send_notification
+from monitor.email_notifier import send_email_notification
 
 def estimate_gallons(duration_seconds):
     """Estimate gallons pumped based on pressure duration"""
@@ -344,13 +345,26 @@ class SimplifiedMonitor:
                                 )
                                 for direction, level in crossings:
                                     if self.notification_manager.can_notify(f'tank_{direction}_{level}'):
+                                        title = f"🚰 Tank {'Dropping' if direction == 'decreasing' else 'Filling'}"
+                                        msg = f"Tank crossed {level} gallons ({'down' if direction == 'decreasing' else 'up'}) - currently at {self.state.tank_gallons:.0f} gal"
+                                        priority = 'default' if direction == 'increasing' else 'high'
+
                                         send_notification(
-                                            title=f"🚰 Tank {'Dropping' if direction == 'decreasing' else 'Filling'}",
-                                            message=f"Tank crossed {level} gallons ({'down' if direction == 'decreasing' else 'up'}) - currently at {self.state.tank_gallons:.0f} gal",
-                                            priority='default' if direction == 'increasing' else 'high',
+                                            title=title,
+                                            message=msg,
+                                            priority=priority,
                                             tags=['droplet', 'chart_with_downwards_trend' if direction == 'decreasing' else 'chart_with_upwards_trend'],
                                             click_url=DASHBOARD_URL,
                                             attach_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
+                                            debug=self.debug
+                                        )
+
+                                        send_email_notification(
+                                            subject=title,
+                                            message=msg,
+                                            priority=priority,
+                                            dashboard_url=DASHBOARD_URL,
+                                            chart_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
                                             debug=self.debug
                                         )
                         
@@ -371,13 +385,25 @@ class SimplifiedMonitor:
                         # Check for float confirmation (CLOSED→OPEN for N consecutive times)
                         if self.notification_manager.check_float_confirmation(self.state.float_state):
                             if self.notification_manager.can_notify('float_full_confirmed'):
+                                title = "💧 Tank Full Confirmed"
+                                msg = "Float sensor confirmed FULL for 3+ readings"
+
                                 send_notification(
-                                    title="💧 Tank Full Confirmed",
-                                    message="Float sensor confirmed FULL for 3+ readings",
+                                    title=title,
+                                    message=msg,
                                     priority='default',
                                     tags=['droplet', 'white_check_mark'],
                                     click_url=DASHBOARD_URL,
                                     attach_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
+                                    debug=self.debug
+                                )
+
+                                send_email_notification(
+                                    subject=title,
+                                    message=msg,
+                                    priority='default',
+                                    dashboard_url=DASHBOARD_URL,
+                                    chart_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
                                     debug=self.debug
                                 )
 
@@ -404,13 +430,25 @@ class SimplifiedMonitor:
 
                                     # Send notification
                                     if NOTIFY_OVERRIDE_SHUTOFF and self.notification_manager.can_notify('override_shutoff'):
+                                        title = "⚠️ Override Auto-Shutoff"
+                                        msg = f"Tank reached {self.state.tank_gallons:.0f} gal (threshold: {self.override_shutoff_threshold}), override turned off"
+
                                         send_notification(
-                                            title="⚠️ Override Auto-Shutoff",
-                                            message=f"Tank reached {self.state.tank_gallons:.0f} gal (threshold: {self.override_shutoff_threshold}), override turned off",
+                                            title=title,
+                                            message=msg,
                                             priority='high',
                                             tags=['warning', 'rotating_light'],
                                             click_url=DASHBOARD_URL,
                                             attach_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
+                                            debug=self.debug
+                                        )
+
+                                        send_email_notification(
+                                            subject=title,
+                                            message=msg,
+                                            priority='high',
+                                            dashboard_url=DASHBOARD_URL,
+                                            chart_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
                                             debug=self.debug
                                         )
 
@@ -423,23 +461,48 @@ class SimplifiedMonitor:
                     if refill_status:
                         status_type, value = refill_status
                         if status_type == 'recovery' and self.notification_manager.can_notify('well_recovery'):
+                            title = "💧 Well Recovery Detected"
+                            msg = f"Tank gained {NOTIFY_WELL_RECOVERY_THRESHOLD}+ gallons in last 24 hours!"
+
                             send_notification(
-                                title="💧 Well Recovery Detected",
-                                message=f"Tank gained {NOTIFY_WELL_RECOVERY_THRESHOLD}+ gallons in last 24 hours!",
+                                title=title,
+                                message=msg,
                                 priority='default',
                                 tags=['droplet', 'white_check_mark'],
                                 click_url=DASHBOARD_URL,
                                 attach_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
                                 debug=self.debug
                             )
+
+                            send_email_notification(
+                                subject=title,
+                                message=msg,
+                                priority='default',
+                                dashboard_url=DASHBOARD_URL,
+                                chart_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
+                                debug=self.debug
+                            )
+
                         elif status_type == 'dry' and self.notification_manager.can_notify('well_dry'):
+                            title = "⚠️ Well May Be Dry"
+                            msg = f"No {NOTIFY_WELL_RECOVERY_THRESHOLD}+ gallon refill in {value:.1f} days"
+
                             send_notification(
-                                title="⚠️ Well May Be Dry",
-                                message=f"No {NOTIFY_WELL_RECOVERY_THRESHOLD}+ gallon refill in {value:.1f} days",
+                                title=title,
+                                message=msg,
                                 priority='urgent',
                                 tags=['warning', 'droplet'],
                                 click_url=DASHBOARD_URL,
                                 attach_url=f"{DASHBOARD_URL}api/chart.png?hours=168",
+                                debug=self.debug
+                            )
+
+                            send_email_notification(
+                                subject=title,
+                                message=msg,
+                                priority='urgent',
+                                dashboard_url=DASHBOARD_URL,
+                                chart_url=f"{DASHBOARD_URL}api/chart.png?hours=168",
                                 debug=self.debug
                             )
 
