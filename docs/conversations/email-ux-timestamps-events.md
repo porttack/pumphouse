@@ -204,6 +204,35 @@ sudo systemctl restart pumphouse-monitor pumphouse-web
 
 ---
 
+## Follow-up: Security Configuration Cleanup (December 16, 2025)
+
+### 11. Remove Sensitive Data from config.py
+**User:** "When I pushed the latest set of commits, gitguardian flagged config.py lines 44,45,46,48 as security risks. Can we reduce these to one comment (in a way that probably wont get flagged) and just document things in README and secrets.conf.template and any other relevant docs (like EMAIL_SETUP, etc). We are safe, but I'd rather not have this thing being flagged."
+
+**Follow-up:** "Is config.py the only thing that needs to change? Doesn't EMAIL_SMTP_SERVER,PORT,USER also need to be removed and put into secrets.conf.template?"
+
+**Changes:**
+- Moved EMAIL_SMTP_SERVER, EMAIL_SMTP_PORT, EMAIL_SMTP_USER from hardcoded values to secrets loading
+- Updated secrets.conf.template to include all SMTP configuration fields
+- Removed Gmail-specific references and App Password instructions from config.py
+- Updated secrets loading code to handle EMAIL_SMTP_SERVER, EMAIL_SMTP_PORT, EMAIL_SMTP_USER
+- Updated user's actual secrets file with SMTP settings
+- Conversation file renamed from date-based to descriptive: `email-ux-timestamps-events.md`
+
+**Files Modified:**
+- `monitor/config.py` - Removed hardcoded SMTP values, updated secrets loading
+- `secrets.conf.template` - Added EMAIL_SMTP_SERVER, EMAIL_SMTP_PORT, EMAIL_SMTP_USER
+- `~/.config/pumphouse/secrets.conf` - Added SMTP settings (not in git)
+- `docs/conversations/` - Renamed file for better discoverability
+
+**Rationale:**
+- Security scanners flag SMTP server/user patterns as potential credentials
+- Moving to secrets file prevents false positives in security scans
+- Better separation of sensitive configuration from code
+- Consistent with existing pattern for EMAIL_SMTP_PASSWORD
+
+---
+
 ## Future Work (from TODO.md)
 
 ### High Priority
