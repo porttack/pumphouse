@@ -132,10 +132,23 @@
             border-bottom: 2px solid #444;
             position: sticky;
             top: 0;
+            vertical-align: bottom;
+            white-space: nowrap;
+        }
+        th .vertical-text {
+            writing-mode: vertical-rl;
+            transform: rotate(180deg);
+            text-align: left;
+            min-height: 80px;
+            display: inline-block;
         }
         td {
             padding: 8px;
             border-bottom: 1px solid #333;
+        }
+        td:first-child {
+            width: 1%;
+            white-space: nowrap;
         }
         tr:hover {
             background: #2a2a2a;
@@ -323,13 +336,13 @@
         <!-- Snapshots Section -->
         {% if snapshot_headers %}
         <div class="section">
-            <h2>RECENT SNAPSHOTS (Last 10)</h2>
+            <h2>RECENT SNAPSHOTS (Last {{ snapshot_rows|length }})</h2>
             <div class="table-container">
                 <table>
                     <thead>
                         <tr>
                             {% for header in snapshot_headers %}
-                            <th>{{ header }}</th>
+                            <th><div class="vertical-text">{{ header }}</div></th>
                             {% endfor %}
                         </tr>
                     </thead>
@@ -338,7 +351,9 @@
                         <tr>
                             {% for cell in row %}
                             <td>
-                                {% if cell.startswith('+') %}
+                                {% if loop.index == 1 %}
+                                {{ cell|human_time }}
+                                {% elif cell.startswith('+') %}
                                 <span class="positive">{{ cell }}</span>
                                 {% elif cell.startswith('-') %}
                                 <span class="negative">{{ cell }}</span>
@@ -358,13 +373,13 @@
         <!-- Events Section -->
         {% if event_headers %}
         <div class="section">
-            <h2>RECENT EVENTS (Last 20)</h2>
+            <h2>RECENT EVENTS (Last {{ event_rows|length }})</h2>
             <div class="table-container">
                 <table>
                     <thead>
                         <tr>
                             {% for header in event_headers %}
-                            <th>{{ header }}</th>
+                            <th><div class="vertical-text">{{ header }}</div></th>
                             {% endfor %}
                         </tr>
                     </thead>
@@ -372,7 +387,7 @@
                         {% for row in event_rows|reverse %}
                         <tr>
                             {% for cell in row %}
-                            <td>{{ cell }}</td>
+                            <td>{% if loop.index == 1 %}{{ cell|human_time }}{% else %}{{ cell }}{% endif %}</td>
                             {% endfor %}
                         </tr>
                         {% endfor %}

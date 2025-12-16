@@ -10,6 +10,20 @@ from email.mime.image import MIMEImage
 from datetime import datetime
 import requests
 
+
+def format_human_time(timestamp_str):
+    """Convert timestamp to 3-letter day and HH:MM format (e.g., 'Mon 14:23')"""
+    try:
+        if isinstance(timestamp_str, str):
+            dt = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S.%f')
+        elif isinstance(timestamp_str, datetime):
+            dt = timestamp_str
+        else:
+            return timestamp_str
+        return dt.strftime('%a %H:%M')
+    except:
+        return timestamp_str
+
 from monitor.config import (
     ENABLE_EMAIL_NOTIFICATIONS,
     EMAIL_TO,
@@ -22,6 +36,8 @@ from monitor.config import (
     TANK_HEIGHT_INCHES,
     TANK_CAPACITY_GALLONS,
     TANK_URL,
+    DASHBOARD_HIDE_EVENT_TYPES,
+    DASHBOARD_MAX_EVENTS,
     SECRET_OVERRIDE_ON_TOKEN,
     SECRET_OVERRIDE_OFF_TOKEN,
     SECRET_BYPASS_ON_TOKEN,
@@ -230,8 +246,44 @@ def get_snapshots_stats(filepath='snapshots.csv'):
         return None
 
 
+def get_recent_events(filepath='events.csv', max_rows=None, hide_types=None):
+    """Get recent events with optional filtering"""
+    import os
+    import csv
+
+    if max_rows is None:
+        max_rows = DASHBOARD_MAX_EVENTS
+    if hide_types is None:
+        hide_types = DASHBOARD_HIDE_EVENT_TYPES
+
+    if not os.path.exists(filepath):
+        return None, None
+
+    try:
+        with open(filepath, 'r') as f:
+            reader = csv.reader(f)
+            headers = next(reader, None)
+            if not headers:
+                return None, None
+
+            # Read all rows and filter
+            rows = list(reader)
+
+            # Filter by event type if specified
+            if 'event_type' in headers and hide_types:
+                event_type_idx = headers.index('event_type')
+                rows = [row for row in rows if len(row) > event_type_idx and row[event_type_idx] not in hide_types]
+
+            # Take last N rows
+            rows = rows[-max_rows:] if len(rows) > max_rows else rows
+
+            return headers, rows
+    except Exception:
+        return None, None
+
+
 def fetch_system_status(debug=False):
-    """Fetch current system status (tank, sensors, stats, relays)"""
+    """Fetch current system status (tank, sensors, stats, relays, events)"""
     try:
         from monitor.tank import get_tank_data
         from monitor.gpio_helpers import read_pressure, read_float_sensor
@@ -255,12 +307,16 @@ def fetch_system_status(debug=False):
             if debug:
                 print(f"Warning: Could not get stats: {e}", file=sys.stderr)
 
+        # Get recent events
+        event_headers, event_rows = get_recent_events()
+
         return {
             'tank': tank_data,
             'pressure': pressure,
             'float': float_state,
             'relay': relay_status,
-            'stats': stats
+            'stats': stats,
+            'events': {'headers': event_headers, 'rows': event_rows}
         }
     except Exception as e:
         if debug:
@@ -307,6 +363,7 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
     float_state = status_data.get('float') if status_data else None
     relay_status = status_data.get('relay') if status_data else None
     stats = status_data.get('stats') if status_data else None
+    events_data = status_data.get('events') if status_data else None
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -471,17 +528,59 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
             font-size: 15px;
             text-align: center;
         }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+            background: #1a1a1a;
+            margin-top: 10px;
+        }}
+        th {{
+            background: #333;
+            color: #4CAF50;
+            padding: 8px 4px;
+            text-align: left;
+            border-bottom: 2px solid #444;
+            font-size: 10px;
+            vertical-align: bottom;
+            white-space: nowrap;
+        }}
+        th .vertical-text {{
+            writing-mode: vertical-rl;
+            transform: rotate(180deg);
+            text-align: left;
+            min-height: 60px;
+            display: inline-block;
+        }}
+        td {{
+            padding: 6px 4px;
+            border-bottom: 1px solid #333;
+            font-size: 10px;
+        }}
+        td:first-child {{
+            width: 1%;
+            white-space: nowrap;
+        }}
+        tr:hover {{
+            background: #2a2a2a;
+        }}
+        .table-container {{
+            overflow-x: auto;
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #444;
+            border-radius: 4px;
+        }}
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>{priority_emoji} PUMPHOUSE ALERT</h1>
+            <h1>{subject}</h1>
         </div>
 
         <div class="content">
             <div class="alert-box">
-                <p class="alert-message"><strong>{subject}</strong></p>
                 <p class="alert-message">{message}</p>
             </div>
 """
@@ -614,11 +713,47 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
             </div>
 """
 
-    # Add dashboard link if available
+    # Add recent events table if available
+    if events_data and events_data.get('headers') and events_data.get('rows'):
+        event_headers = events_data['headers']
+        event_rows = events_data['rows']
+        html += f"""
+            <div class="section">
+                <h2>RECENT EVENTS (Last {len(event_rows)})</h2>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+"""
+        for header in event_headers:
+            html += f"""                                <th><div class="vertical-text">{header}</div></th>
+"""
+        html += """                            </tr>
+                        </thead>
+                        <tbody>
+"""
+        # Reverse rows to show most recent first
+        for row in reversed(event_rows):
+            html += """                            <tr>
+"""
+            for i, cell in enumerate(row):
+                formatted_cell = format_human_time(cell) if i == 0 else cell
+                html += f"""                                <td>{formatted_cell}</td>
+"""
+            html += """                            </tr>
+"""
+        html += """                        </tbody>
+                    </table>
+                </div>
+            </div>
+"""
+
+    # Add dashboard and camera links if available
     if dashboard_url:
         html += f"""
             <div style="text-align: center; margin: 20px 0;">
                 <a href="{dashboard_url}" class="button">View Full Dashboard</a>
+                <a href="https://my.wyze.com/live" class="button" style="background: #607D8B; margin-left: 10px;">📹 View Camera</a>
             </div>
 """
 
@@ -663,8 +798,14 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
 
 def test_email(debug=True):
     """Send a test email to verify configuration"""
+    # Get current tank gallons for the subject
+    status_data = fetch_system_status(debug=debug)
+    current_gal = 0
+    if status_data and status_data.get('tank') and status_data['tank'].get('gallons'):
+        current_gal = status_data['tank']['gallons']
+
     return send_email_notification(
-        subject="🏠 Pumphouse Email Test",
+        subject=f"🏠 Pumphouse Email Test - {current_gal:.0f} gal",
         message="Email notification system is configured and working!",
         priority='default',
         dashboard_url=DASHBOARD_URL,

@@ -2,6 +2,50 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.9.0] - 2025-12-14
+
+### Added
+- **Camera Link in Emails**: Quick access button to Wyze camera feed in all email alerts
+- **Recent Events Table in Emails**: Full events table with filtering in every email
+  - Shows up to 500 events (~7 days) after filtering
+  - Same filtering as dashboard (excludes TANK_LEVEL by default)
+  - Vertical column headers to save horizontal space
+  - Auto-sizing first column for compact display
+- **Human-Friendly Timestamps**: Easier to read date/time format throughout
+  - Format: "Mon 14:23" (3-letter day + HH:MM)
+  - Applied to all events and snapshots tables in dashboard and emails
+  - More intuitive for quick scanning
+
+### Changed
+- **Gallons in All Email Subjects**: Tank level prominently displayed in subject lines
+  - Tank Filling: "🚰 Tank Filling - 1203 gal"
+  - Tank Dropping: "🚰 Tank Dropping - 875 gal"
+  - Tank Full: "💧 Tank Full Confirmed - 1450 gal"
+  - Override Shutoff: "⚠️ Override Auto-Shutoff - 1450 gal"
+  - Well Recovery: "💧 Well Recovery Detected - 1125 gal"
+  - Well Dry: "⚠️ Well May Be Dry - 450 gal"
+  - Test Email: "🏠 Pumphouse Email Test - 1319 gal"
+- **Improved Tank Threshold Alerts**: Clear indication of threshold direction
+  - Decreasing: "Tank is now < 1000 gallons (currently at 875 gal)"
+  - Increasing: "Tank is now > 750 gallons (currently at 820 gal)"
+- **Email Header Optimization**: Subject now displayed in header instead of generic "PUMPHOUSE ALERT"
+  - Reduces redundancy in email layout
+  - Makes subject immediately visible
+- **Dashboard Table Improvements**: Better space utilization
+  - Vertical column headers reduce width requirements
+  - First column (timestamp) auto-sizes to content
+  - Tables can fit more data on screen
+- **Increased Event History**: Dashboard and emails now show up to 500 events (previously 20)
+  - Covers approximately 7 days of filtered event history
+  - Configurable via `DASHBOARD_MAX_EVENTS` in config.py
+
+### Technical
+- Added `human_time` Jinja filter for timestamp formatting in web dashboard
+- Added `format_human_time()` helper function for email timestamp formatting
+- Enhanced `fetch_system_status()` to include recent events data
+- Updated `get_recent_events()` to support filtering and configurable limits
+- CSS improvements for vertical text and auto-sizing columns in both dashboard and emails
+
 ## [2.8.0] - 2025-12-14
 
 ### Added

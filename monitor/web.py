@@ -14,6 +14,7 @@ from functools import wraps
 from monitor import __version__
 from monitor.config import (
     TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS, DASHBOARD_HIDE_EVENT_TYPES,
+    DASHBOARD_MAX_EVENTS,
     SECRET_OVERRIDE_ON_TOKEN, SECRET_OVERRIDE_OFF_TOKEN,
     SECRET_BYPASS_ON_TOKEN, SECRET_BYPASS_OFF_TOKEN,
     SECRET_PURGE_TOKEN
@@ -36,6 +37,21 @@ app = Flask(__name__)
 USERNAME = os.environ.get('PUMPHOUSE_USER', 'admin')
 PASSWORD = os.environ.get('PUMPHOUSE_PASS', 'pumphouse')
 STARTUP_TIME = datetime.now()  # Track when web server started
+
+# Custom Jinja filter for human-friendly timestamp formatting
+@app.template_filter('human_time')
+def human_time_filter(timestamp_str):
+    """Convert timestamp to 3-letter day and HH:MM format (e.g., 'Mon 14:23')"""
+    try:
+        if isinstance(timestamp_str, str):
+            dt = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S.%f')
+        elif isinstance(timestamp_str, datetime):
+            dt = timestamp_str
+        else:
+            return timestamp_str
+        return dt.strftime('%a %H:%M')
+    except:
+        return timestamp_str
 
 def check_auth(username, password):
     """Check if username/password is valid"""
@@ -350,7 +366,7 @@ def index():
 
     # Read CSV files
     snapshot_headers, snapshot_rows = read_csv_tail('snapshots.csv', max_rows=10)
-    event_headers, event_rows = read_csv_tail('events.csv', max_rows=20)
+    event_headers, event_rows = read_csv_tail('events.csv', max_rows=DASHBOARD_MAX_EVENTS)
 
     # Filter events based on DASHBOARD_HIDE_EVENT_TYPES
     if event_headers and event_rows and 'event_type' in event_headers:
