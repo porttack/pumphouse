@@ -34,6 +34,7 @@
 - [ ] Matplotlib stuff should not go all the way to zero
 - [ ] Make a widget out of it for my phone and desktop
 - [ ] Camera link should go to the app on iOS
+- [ ] Is gpiozero better (less contention, no false readings)
 
 ### Low Priority
 

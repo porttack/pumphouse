@@ -38,14 +38,14 @@ NTFY_TOPIC = "REDACTED-TOPIC"  # User must set unique topic!
 DASHBOARD_URL = "https://REDACTED-HOST:6443/"  # Dashboard URL to include in notifications
 
 # Email Notification Configuration
+# See EMAIL_SETUP.md and secrets.conf.template for detailed configuration instructions
 ENABLE_EMAIL_NOTIFICATIONS = True  # Enable email alerts
 EMAIL_TO = "onblackberryhill@gmail.com"  # Recipient email address
-EMAIL_FROM = "onblackberryhill@gmail.com"  # Sender email (e.g., "alerts@yourdomain.com" or Gmail address)
-EMAIL_SMTP_SERVER = "smtp.gmail.com"  # SMTP server (Gmail default)
-EMAIL_SMTP_PORT = 587  # SMTP port (587 for TLS, 465 for SSL)
-EMAIL_SMTP_USER = "onblackberryhill@gmail.com"  # SMTP username (usually same as EMAIL_FROM for Gmail)
-EMAIL_SMTP_PASSWORD = ""  # SMTP password - stored in ~/.config/pumphouse/secrets.conf for security
-# To create Gmail App Password: Google Account → Security → 2-Step Verification → App passwords
+EMAIL_FROM = "onblackberryhill@gmail.com"  # Sender email address
+EMAIL_SMTP_SERVER = ""  # SMTP server - loaded from secrets file
+EMAIL_SMTP_PORT = 587  # SMTP port - can be overridden in secrets file
+EMAIL_SMTP_USER = ""  # SMTP username - loaded from secrets file
+EMAIL_SMTP_PASSWORD = ""  # SMTP password - loaded from secrets file
 
 # Notification Rules - Which events trigger notifications
 NOTIFY_TANK_DECREASING = [1300, 1150, 1000, 700, 500, 250]  # Alert when tank crosses these levels going DOWN
@@ -134,8 +134,14 @@ if SECRETS_FILE.exists():
                     key = key.strip()
                     value = value.strip()
 
-                    # Load secrets into module-level variables
-                    if key == 'EMAIL_SMTP_PASSWORD' and not EMAIL_SMTP_PASSWORD:
+                        # Load secrets into module-level variables
+                    if key == 'EMAIL_SMTP_SERVER' and not EMAIL_SMTP_SERVER:
+                        EMAIL_SMTP_SERVER = value
+                    elif key == 'EMAIL_SMTP_PORT':
+                        EMAIL_SMTP_PORT = int(value)
+                    elif key == 'EMAIL_SMTP_USER' and not EMAIL_SMTP_USER:
+                        EMAIL_SMTP_USER = value
+                    elif key == 'EMAIL_SMTP_PASSWORD' and not EMAIL_SMTP_PASSWORD:
                         EMAIL_SMTP_PASSWORD = value
                     elif key == 'SECRET_OVERRIDE_ON_TOKEN':
                         SECRET_OVERRIDE_ON_TOKEN = value
