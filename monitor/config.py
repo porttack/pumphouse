@@ -48,7 +48,7 @@ EMAIL_SMTP_PASSWORD = ""  # SMTP password - stored in ~/.config/pumphouse/secret
 # To create Gmail App Password: Google Account → Security → 2-Step Verification → App passwords
 
 # Notification Rules - Which events trigger notifications
-NOTIFY_TANK_DECREASING = [1000, 750, 500, 250]  # Alert when tank crosses these levels going DOWN
+NOTIFY_TANK_DECREASING = [1300, 1150, 1000, 700, 500, 250]  # Alert when tank crosses these levels going DOWN
 NOTIFY_TANK_INCREASING = [500, 750, 1000, 1200, 1400]  # Alert when tank crosses these levels going UP
 NOTIFY_WELL_RECOVERY_THRESHOLD = 50  # Gallons gained in 24hr to count as recovery
 NOTIFY_FLOAT_CONFIRMATIONS = 3  # Number of consecutive OPEN readings before alert
@@ -61,10 +61,11 @@ MIN_NOTIFICATION_INTERVAL = 300  # Minimum 5 minutes between same notification t
 ## Logging Configuration
 MAX_PRESSURE_LOG_INTERVAL = 1800  # Log at least every 30 minutes when pressure is high
 
-# Web Dashboard Event Filtering
+# Web Dashboard Configuration
 # List of event types to EXCLUDE from the Recent Events table on the web dashboard
 # Common types: TANK_LEVEL, PRESSURE_HIGH, PRESSURE_LOW, INIT, SHUTDOWN, FLOAT_CALLING, FLOAT_FULL
 DASHBOARD_HIDE_EVENT_TYPES = ['TANK_LEVEL']  # Hide noisy tank level change events
+DASHBOARD_MAX_EVENTS = 500  # Maximum number of events to show in dashboard and emails (~7 days)
 
 # Default file paths
 DEFAULT_LOG_FILE = 'pressure_log.txt'

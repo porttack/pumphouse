@@ -372,9 +372,15 @@ class SimplifiedMonitor:
                                 )
                                 for direction, level in crossings:
                                     if self.notification_manager.can_notify(f'tank_{direction}_{level}'):
-                                        title = f"🚰 Tank {'Dropping' if direction == 'decreasing' else 'Filling'}"
-                                        msg = f"Tank crossed {level} gallons ({'down' if direction == 'decreasing' else 'up'}) - currently at {self.state.tank_gallons:.0f} gal"
-                                        priority = 'default' if direction == 'increasing' else 'high'
+                                        current_gal = self.state.tank_gallons
+                                        if direction == 'decreasing':
+                                            title = f"🚰 Tank Dropping - {current_gal:.0f} gal"
+                                            msg = f"Tank is now < {level} gallons (currently at {current_gal:.0f} gal)"
+                                            priority = 'high'
+                                        else:
+                                            title = f"🚰 Tank Filling - {current_gal:.0f} gal"
+                                            msg = f"Tank is now > {level} gallons (currently at {current_gal:.0f} gal)"
+                                            priority = 'default'
                                         self.send_alert(
                                             f'NOTIFY_TANK_{direction.upper()}_{level}',
                                             title,
@@ -399,9 +405,10 @@ class SimplifiedMonitor:
                         # Check for float confirmation (CLOSED→OPEN for N consecutive times)
                         if self.notification_manager.check_float_confirmation(self.state.float_state):
                             if self.notification_manager.can_notify('float_full_confirmed'):
+                                current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
                                 self.send_alert(
                                     'NOTIFY_FLOAT_FULL',
-                                    "💧 Tank Full Confirmed",
+                                    f"💧 Tank Full Confirmed - {current_gal:.0f} gal",
                                     "Float sensor confirmed FULL for 3+ readings"
                                 )
 
@@ -430,7 +437,7 @@ class SimplifiedMonitor:
                                     if NOTIFY_OVERRIDE_SHUTOFF and self.notification_manager.can_notify('override_shutoff'):
                                         self.send_alert(
                                             'NOTIFY_OVERRIDE_OFF',
-                                            "⚠️ Override Auto-Shutoff",
+                                            f"⚠️ Override Auto-Shutoff - {self.state.tank_gallons:.0f} gal",
                                             f"Tank reached {self.state.tank_gallons:.0f} gal (threshold: {self.override_shutoff_threshold}), override turned off",
                                             priority='high'
                                         )
@@ -444,16 +451,18 @@ class SimplifiedMonitor:
                     if refill_status:
                         status_type, value = refill_status
                         if status_type == 'recovery' and self.notification_manager.can_notify('well_recovery'):
+                            current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
                             self.send_alert(
                                 'NOTIFY_WELL_RECOVERY',
-                                "💧 Well Recovery Detected",
+                                f"💧 Well Recovery Detected - {current_gal:.0f} gal",
                                 f"Tank gained {NOTIFY_WELL_RECOVERY_THRESHOLD}+ gallons in last 24 hours!"
                             )
 
                         elif status_type == 'dry' and self.notification_manager.can_notify('well_dry'):
+                            current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
                             self.send_alert(
                                 'NOTIFY_WELL_DRY',
-                                "⚠️ Well May Be Dry",
+                                f"⚠️ Well May Be Dry - {current_gal:.0f} gal",
                                 f"No {NOTIFY_WELL_RECOVERY_THRESHOLD}+ gallon refill in {value:.1f} days",
                                 priority='urgent',
                                 chart_hours=168
