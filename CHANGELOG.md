@@ -2,6 +2,39 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.11.0] - 2025-12-20
+
+### Added
+- **Override Auto-On Feature**: Automatic override valve turn-on when tank drops below threshold
+  - New configuration: `OVERRIDE_ON_THRESHOLD` (None = disabled, e.g., 1350)
+  - Automatically turns ON override valve when tank level drops below threshold
+  - Keeps tank fuller by eliminating large hysteresis of physical float switch
+  - Physical float switch becomes backup safety mechanism
+  - Continuous enforcement during tank polling (every 60 seconds)
+  - Runtime threshold changes supported via config reload
+  - New event type: `OVERRIDE_AUTO_ON` logged with tank level
+  - Notification support: sends alerts when auto-on triggers
+  - Works in conjunction with existing auto-shutoff feature
+- **Configuration Example**: Set `OVERRIDE_ON_THRESHOLD = 1350` and `OVERRIDE_SHUTOFF_THRESHOLD = 1410`
+  - Tank drops to 1349 gal → Override turns ON automatically
+  - Tank fills to 1410 gal → Override turns OFF automatically
+  - Result: Tank stays between 1350-1410 gallons most of the time
+
+### Changed
+- **README Documentation**: Enhanced "Automatic Override Control" section
+  - Explains both auto-on and auto-shutoff features
+  - Provides clear configuration examples
+  - Documents interaction between thresholds
+- **Event Types**: Added `OVERRIDE_AUTO_ON` to documented event types
+- **Configuration File Template**: Updated with auto-on threshold example
+
+### Technical
+- Added `OVERRIDE_ON_THRESHOLD` to config.py (default: None for backward compatibility)
+- Implemented auto-on logic in poll.py tank polling section
+- Added notification support via `NOTIFY_OVERRIDE_ON` event type
+- Auto-on check runs before auto-shutoff check to ensure proper precedence
+- Reloads config on each check for runtime threshold adjustments
+
 ## [2.10.0] - 2025-12-20
 
 ### Added

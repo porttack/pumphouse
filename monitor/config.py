@@ -31,6 +31,9 @@ PURGE_DURATION = 10  # Duration of purge in seconds
 ENABLE_OVERRIDE_SHUTOFF = True  # Enable automatic override shutoff to prevent tank overflow
 OVERRIDE_SHUTOFF_THRESHOLD = 1410  # Gallons at which to turn off override valve
 
+# Override Auto-On Configuration
+OVERRIDE_ON_THRESHOLD = None  # Gallons at which to turn on override valve (None = disabled, e.g., 1350)
+
 # Notification Configuration
 ENABLE_NOTIFICATIONS = True  # Master switch (default OFF for safety)
 NTFY_SERVER = "https://ntfy.sh"  # Can change to self-hosted later
