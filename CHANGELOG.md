@@ -2,6 +2,43 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.10.0] - 2025-12-20
+
+### Added
+- **Persistent Relay State**: Relay states now survive service restarts
+  - Override and bypass valve states saved to `relay_state.json`
+  - States automatically restored on monitor startup
+  - Prevents accidental override/bypass turn-off during service restarts or system reboots
+  - State manager tracks last update timestamp for debugging
+- **Persistent Notification State**: Notification tracking survives service restarts
+  - Well recovery and well dry alert states saved to `notification_state.json`
+  - Prevents duplicate "Well Recovery Detected" alerts after service restarts
+  - Each unique 50+ gallon refill event triggers exactly ONE alert
+- **Safety Override Shutoff**: Automatic override turn-off when tank level cannot be read
+  - Prevents tank overflow during internet outages or PT sensor failures
+  - Override valve turns off immediately if tank data fetch fails
+  - Sends urgent notification explaining safety shutoff
+  - Logs event as 'Safety shutoff: cannot read tank level'
+
+### Fixed
+- **Duplicate Well Recovery Alerts**: No longer sends repeated recovery alerts
+  - Previous behavior: Alert sent every hour for same recovery after service restart
+  - Root cause: Notification state only in memory, reset on restart
+  - Solution: Persistent state tracks specific refill timestamps
+  - Now: One alert per unique recovery event, regardless of restarts
+- **Lost Relay States on Restart**: Relay states now persist across restarts
+  - Previous behavior: Override/bypass would turn off on service restart
+  - Solution: States saved to disk and restored automatically
+  - Critical for maintaining override valve state during planned/unplanned restarts
+
+### Technical
+- Added `RelayStateManager` class for relay state persistence
+- Added `_load_state()` and `_save_state()` to NotificationManager
+- Modified `set_supply_override()` and `set_bypass()` to save state after changes
+- Added `restore_relay_states()` function called during relay initialization
+- Safety check added to tank polling loop for override shutoff
+- Both state files excluded from git (added to .gitignore)
+
 ## [2.9.0] - 2025-12-14
 
 ### Added

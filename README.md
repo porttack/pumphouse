@@ -687,6 +687,6 @@ Internal use only - Pumphouse monitoring system
 
 ## Version
 
-Current version: **2.9.0**
+Current version: **2.10.0**
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.
