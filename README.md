@@ -212,6 +212,9 @@ timestamp,event_type,pressure_state,float_state,tank_gallons,tank_depth,tank_per
 - **NOTIFY_OVERRIDE_OFF**: Email notification sent for override auto-shutoff
 - **NOTIFY_WELL_RECOVERY**: Email notification sent for well recovery detection
 - **NOTIFY_WELL_DRY**: Email notification sent for potential well dry condition
+- **NOTIFY_HIGH_FLOW**: Email notification sent for high flow rate detection (fast fill mode)
+- **NOTIFY_BACKFLUSH**: Email notification sent for backflush event detection
+- **TANK_STOPPED_FILLING**: Event logged when tank stops filling (no alert)
 - **SHUTDOWN**: Clean shutdown
 
 ### Snapshots CSV (snapshots.csv)
@@ -454,8 +457,22 @@ Get real-time alerts on your phone for important tank events using ntfy.sh push 
    NOTIFY_TANK_INCREASING = [500, 750, 1000, 1200]  # Alert when filling
 
    # Well monitoring
-   NOTIFY_WELL_RECOVERY_THRESHOLD = 50  # Gallons gained in 24hr
+   NOTIFY_WELL_RECOVERY_THRESHOLD = 50  # Gallons gained to count as recovery
+   NOTIFY_WELL_RECOVERY_STAGNATION_HOURS = 6  # Hours of flat/declining before recovery
    NOTIFY_WELL_DRY_DAYS = 4  # Days without refill before alert
+
+   # High flow detection (fast fill mode)
+   NOTIFY_HIGH_FLOW_ENABLED = True  # Enable high flow alerts
+   NOTIFY_HIGH_FLOW_GPH = 60  # GPH threshold for fast fill detection
+   NOTIFY_HIGH_FLOW_WINDOW_HOURS = 6  # How far back to look
+   NOTIFY_HIGH_FLOW_AVERAGING = 2  # Average over N snapshots
+
+   # Backflush detection
+   NOTIFY_BACKFLUSH_ENABLED = True  # Enable backflush detection
+   NOTIFY_BACKFLUSH_THRESHOLD = 50  # Gallons lost to trigger detection
+   NOTIFY_BACKFLUSH_WINDOW_SNAPSHOTS = 2  # Look back N snapshots
+   NOTIFY_BACKFLUSH_TIME_START = "00:00"  # Start of backflush window
+   NOTIFY_BACKFLUSH_TIME_END = "04:30"  # End of backflush window
 
    # Float sensor confirmation
    NOTIFY_FLOAT_CONFIRMATIONS = 3  # Consecutive OPEN readings
@@ -494,15 +511,27 @@ The system sends notifications for:
    - Bounce protection: won't re-alert if water fluctuates
 
 2. **Well Recovery** - Detects when well starts producing water again
-   - "Well Recovery Detected - Tank gained 50+ gallons in last 24 hours!"
+   - "Well Recovery Detected - Tank gained 50+ gallons after stagnation period"
+   - Uses smart detection: looks for 6+ hours of flat/declining levels followed by 50+ gallon gain
+   - Prevents duplicate alerts by tracking the low point timestamp
 
-3. **Well Dry** - Warns if no significant refill in several days
+3. **High Flow Detection** - Alerts when fast fill mode is active
+   - "High Flow Detected - Tank filling at 65 GPH (fast fill mode active)"
+   - Detects when shared well's float activates (>60 GPH sustained flow)
+   - Helps decide whether to manually adjust bypass relay based on occupancy
+
+4. **Backflush Detection** - Tracks carbon filter backflush events
+   - "Backflush Detected - Carbon filter backflush used ~85 gallons"
+   - Detects large water usage (50+ gallons) during configured time window (12am-4:30am)
+   - Logs water usage estimate for tracking filter efficiency
+
+5. **Well Dry** - Warns if no significant refill in several days
    - "Well May Be Dry - No 50+ gallon refill in 4.2 days"
 
-4. **Float Confirmation** - Tank full confirmation
+6. **Float Confirmation** - Tank full confirmation
    - "Tank Full Confirmed - Float sensor confirmed FULL for 3+ readings"
 
-5. **Override Shutoff** - Overflow protection triggered
+7. **Override Shutoff** - Overflow protection triggered
    - "Override Auto-Shutoff - Tank reached 1410 gal, override turned off"
 
 ### Self-Hosting ntfy (Optional)
@@ -712,6 +741,6 @@ Internal use only - Pumphouse monitoring system
 
 ## Version
 
-Current version: **2.10.0**
+Current version: **2.11.0**
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.

@@ -53,10 +53,28 @@ EMAIL_SMTP_PASSWORD = ""  # SMTP password - loaded from secrets file
 # Notification Rules - Which events trigger notifications
 NOTIFY_TANK_DECREASING = [1300, 1150, 1000, 700, 500, 250]  # Alert when tank crosses these levels going DOWN
 NOTIFY_TANK_INCREASING = [500, 750, 1000, 1200, 1400]  # Alert when tank crosses these levels going UP
-NOTIFY_WELL_RECOVERY_THRESHOLD = 50  # Gallons gained in 24hr to count as recovery
+NOTIFY_WELL_RECOVERY_THRESHOLD = 50  # Gallons gained to count as recovery
+NOTIFY_WELL_RECOVERY_STAGNATION_HOURS = 6  # Hours of flat/declining before recovery
 NOTIFY_FLOAT_CONFIRMATIONS = 3  # Number of consecutive OPEN readings before alert
 NOTIFY_WELL_DRY_DAYS = 4  # Days without refill before "well dry" alert
 NOTIFY_OVERRIDE_SHUTOFF = True  # Alert on automatic override shutoff
+
+# High Flow Detection (Fast Fill Mode)
+NOTIFY_HIGH_FLOW_ENABLED = True  # Enable high flow alerts
+NOTIFY_HIGH_FLOW_GPH = 60  # GPH threshold for fast fill detection
+NOTIFY_HIGH_FLOW_WINDOW_HOURS = 6  # How far back to look
+NOTIFY_HIGH_FLOW_AVERAGING = 2  # Average over N snapshots (1=no averaging)
+
+# Backflush Detection
+NOTIFY_BACKFLUSH_ENABLED = True  # Enable backflush detection
+NOTIFY_BACKFLUSH_THRESHOLD = 50  # Gallons lost to trigger detection
+NOTIFY_BACKFLUSH_WINDOW_SNAPSHOTS = 2  # Look back N snapshots (2=30min, 3=45min)
+NOTIFY_BACKFLUSH_TIME_START = "00:00"  # Start of backflush window (HH:MM)
+NOTIFY_BACKFLUSH_TIME_END = "04:30"  # End of backflush window (HH:MM)
+
+# Tank Stopped Filling Detection
+TANK_FILLING_WINDOW_MINUTES = 60  # Look back this long to determine if filling
+TANK_FILLING_THRESHOLD = 10  # Gallons gained over window to be considered "filling"
 
 # Notification Cooldowns (prevent spam)
 MIN_NOTIFICATION_INTERVAL = 300  # Minimum 5 minutes between same notification type

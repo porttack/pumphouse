@@ -19,21 +19,63 @@ All notable changes to the pressure monitoring system.
   - Tank drops to 1349 gal → Override turns ON automatically
   - Tank fills to 1410 gal → Override turns OFF automatically
   - Result: Tank stays between 1350-1410 gallons most of the time
+- **High Flow Detection (Fast Fill Mode)**: Detects when shared well's float activates
+  - Alerts when tank filling rate exceeds configurable threshold (default: 60 GPH)
+  - Averages flow rate over multiple snapshots to filter noise
+  - Helps decide whether to manually adjust bypass relay based on occupancy
+  - New event type: `NOTIFY_HIGH_FLOW`
+  - Configuration: `NOTIFY_HIGH_FLOW_GPH`, `NOTIFY_HIGH_FLOW_WINDOW_HOURS`, `NOTIFY_HIGH_FLOW_AVERAGING`
+- **Backflush Detection**: Automatically detects carbon filter backflush events
+  - Detects large water usage (default: 50+ gallons) during configured time window
+  - Default window: 12:00 AM - 4:30 AM (configurable)
+  - Logs estimated water usage for tracking filter efficiency
+  - New event type: `NOTIFY_BACKFLUSH`
+  - Configuration: `NOTIFY_BACKFLUSH_THRESHOLD`, `NOTIFY_BACKFLUSH_TIME_START`, `NOTIFY_BACKFLUSH_TIME_END`
+- **Tank Stopped Filling Event**: Tracks when tank transitions from filling to flat/declining
+  - Uses 60-minute rolling window to smooth out sensor noise (±6 gallon fluctuations)
+  - Only logs transition events (no alerts)
+  - New event type: `TANK_STOPPED_FILLING`
+  - Configuration: `TANK_FILLING_WINDOW_MINUTES`, `TANK_FILLING_THRESHOLD`
+
+### Fixed
+- **Well Recovery Alert Frequency**: Fixed duplicate well recovery alerts every 15-30 minutes
+  - Root cause: Algorithm returned different timestamp for each snapshot during recovery
+  - Previous behavior: "Well recovery" alert every 15-30 min during tank fill
+  - New behavior: Looks for 6+ hours of stagnation followed by 50+ gallon gain
+  - Returns consistent timestamp (low point) for entire recovery event
+  - Prevents duplicate alerts by tracking specific recovery event timestamps
+  - Configuration: `NOTIFY_WELL_RECOVERY_STAGNATION_HOURS` (default: 6 hours)
 
 ### Changed
-- **README Documentation**: Enhanced "Automatic Override Control" section
-  - Explains both auto-on and auto-shutoff features
-  - Provides clear configuration examples
-  - Documents interaction between thresholds
-- **Event Types**: Added `OVERRIDE_AUTO_ON` to documented event types
-- **Configuration File Template**: Updated with auto-on threshold example
+- **README Documentation**: Enhanced notification events section
+  - Documents new high flow, backflush, and tank stopped filling features
+  - Updated configuration examples with new parameters
+  - Explains smart well recovery detection algorithm
+- **Event Types**: Added `NOTIFY_HIGH_FLOW`, `NOTIFY_BACKFLUSH`, `TANK_STOPPED_FILLING`
+- **Well Recovery Message**: Changed from "in last 24 hours" to "after stagnation period"
 
 ### Technical
-- Added `OVERRIDE_ON_THRESHOLD` to config.py (default: None for backward compatibility)
-- Implemented auto-on logic in poll.py tank polling section
-- Added notification support via `NOTIFY_OVERRIDE_ON` event type
-- Auto-on check runs before auto-shutoff check to ensure proper precedence
-- Reloads config on each check for runtime threshold adjustments
+- Enhanced `find_last_refill()` in stats.py with stagnation detection
+  - Scans for minimum gallons during stagnation period
+  - Returns low point timestamp (constant for entire recovery event)
+  - Added `stagnation_hours` parameter
+- Added `find_high_flow_event()` to stats.py
+  - Calculates GPH using `tank_gallons_delta` from snapshots
+  - Sliding window averaging over N snapshots
+  - Returns first snapshot timestamp where high flow detected
+- Added `find_backflush_event()` to stats.py
+  - Detects negative `tank_gallons_delta` during time window
+  - Time-of-day filtering for backflush window
+  - Returns gallons used estimate
+- Added high flow and backflush tracking to NotificationManager
+  - `high_flow_alerted_ts` and `backflush_alerted_ts` state variables
+  - Persistent state storage in `notification_state.json`
+  - `check_high_flow_status()` and `check_backflush_status()` methods
+- Added tank stopped filling logic to poll.py
+  - Tracks `tank_gallons_history` over configurable window
+  - Calculates net change to determine filling state
+  - Logs transition from filling to not filling
+- Added configuration parameters to config.py for all new features
 
 ## [2.10.0] - 2025-12-20
 
