@@ -3,6 +3,9 @@ Notification rule engine with state tracking
 Evaluates notification rules without directly sending (separation of concerns)
 """
 import time
+import json
+import os
+from pathlib import Path
 from datetime import datetime
 from monitor.config import (
     ENABLE_NOTIFICATIONS,
@@ -15,13 +18,14 @@ from monitor.stats import find_last_refill
 
 class NotificationManager:
     """
-    Manages notification state and rule evaluation
+    Manages notification state and rule evaluation with persistent state storage
     """
 
     def __init__(self, snapshots_file='snapshots.csv', debug=False):
         self.enabled = ENABLE_NOTIFICATIONS
         self.debug = debug
         self.snapshots_file = snapshots_file
+        self.state_file = Path('notification_state.json')
 
         # State tracking
         self.last_notification_time = {}  # event_type -> timestamp
@@ -33,6 +37,9 @@ class NotificationManager:
         self.last_refill_check = 0
         self.well_dry_alerted = False
         self.well_recovery_alerted_ts = None  # Timestamp of last recovery we alerted for
+
+        # Load persistent state
+        self._load_state()
 
     def check_tank_threshold_crossing(self, current_gallons, previous_gallons):
         """
@@ -115,22 +122,56 @@ class NotificationManager:
         )
 
         if refill_ts and days_ago is not None:
-            # Check if this is a recent recovery (within last hour)
-            if days_ago < (1/24):  # Less than 1 hour ago
-                # Only alert if we haven't already alerted for this specific refill event
-                if self.well_recovery_alerted_ts != refill_ts:
-                    self.well_recovery_alerted_ts = refill_ts
-                    self.well_dry_alerted = False  # Reset dry flag on recovery
-                    return ('recovery', refill_ts)
+            # Only alert if we haven't already alerted for this specific refill event
+            # Convert timestamp to string for comparison (datetime objects aren't JSON serializable)
+            refill_ts_str = refill_ts.isoformat() if isinstance(refill_ts, datetime) else str(refill_ts)
+
+            if self.well_recovery_alerted_ts != refill_ts_str:
+                # This is a NEW refill we haven't alerted about yet
+                self.well_recovery_alerted_ts = refill_ts_str
+                self.well_dry_alerted = False  # Reset dry flag on recovery
+                self._save_state()
+                return ('recovery', refill_ts)
 
             # Check if well has been dry too long
             if days_ago >= NOTIFY_WELL_DRY_DAYS and not self.well_dry_alerted:
                 self.well_dry_alerted = True
+                self._save_state()
                 return ('dry', days_ago)
-            elif days_ago < NOTIFY_WELL_DRY_DAYS:
-                self.well_dry_alerted = False  # Reset if we got water
+            elif days_ago < NOTIFY_WELL_DRY_DAYS and self.well_dry_alerted:
+                # Got water again, reset dry flag
+                self.well_dry_alerted = False
+                self._save_state()
 
         return None
+
+    def _load_state(self):
+        """Load persistent notification state from disk"""
+        try:
+            if self.state_file.exists():
+                with open(self.state_file, 'r') as f:
+                    state = json.load(f)
+                    self.well_recovery_alerted_ts = state.get('well_recovery_alerted_ts')
+                    self.well_dry_alerted = state.get('well_dry_alerted', False)
+                    if self.debug:
+                        print(f"Loaded notification state: recovery_ts={self.well_recovery_alerted_ts}, dry={self.well_dry_alerted}")
+        except Exception as e:
+            if self.debug:
+                print(f"Warning: Could not load notification state: {e}")
+
+    def _save_state(self):
+        """Save persistent notification state to disk"""
+        try:
+            state = {
+                'well_recovery_alerted_ts': self.well_recovery_alerted_ts,
+                'well_dry_alerted': self.well_dry_alerted,
+                'saved_at': datetime.now().isoformat()
+            }
+            with open(self.state_file, 'w') as f:
+                json.dump(state, f, indent=2)
+        except Exception as e:
+            if self.debug:
+                print(f"Warning: Could not save notification state: {e}")
 
     def can_notify(self, event_type):
         """

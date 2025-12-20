@@ -169,12 +169,28 @@ class SimplifiedMonitor:
         self.running = False
     
     def enable_relay_control(self):
-        """Enable relay control"""
-        from monitor.relay import init_relays
+        """Enable relay control and restore saved states"""
+        from monitor.relay import init_relays, restore_relay_states
         if init_relays():
             self.relay_control_enabled = True
             if self.debug:
                 print("Relay control enabled")
+
+            # Restore saved relay states
+            restored = restore_relay_states(debug=self.debug)
+            if self.debug and restored:
+                print(f"Restored relay states: {restored}")
+
+            # Log relay state restoration if any were changed
+            if restored:
+                restore_notes = []
+                if 'supply_override' in restored:
+                    restore_notes.append(f"Override: {restored['supply_override']}")
+                if 'bypass' in restored:
+                    restore_notes.append(f"Bypass: {restored['bypass']}")
+                if restore_notes:
+                    self.log_state_event('INIT', f"Restored relay states - {', '.join(restore_notes)}")
+
             return True
         return False
     
@@ -354,7 +370,30 @@ class SimplifiedMonitor:
                 # TANK POLLING
                 if current_time - self.last_tank_check >= self.tank_interval:
                     prev_gallons = self.state.tank_gallons
-                    if self.fetch_tank_data():
+                    tank_fetch_success = self.fetch_tank_data()
+
+                    # SAFETY: Turn off override if we can't read tank level
+                    if not tank_fetch_success and self.relay_control_enabled:
+                        relay_status = self.get_relay_status()
+                        if relay_status['supply_override'] == 'ON':
+                            if self.debug:
+                                print(f"  → SAFETY: Cannot read tank level, turning off override to prevent overflow")
+
+                            from monitor.relay import set_supply_override
+                            if set_supply_override('OFF', debug=self.debug):
+                                self.log_state_event('OVERRIDE_SHUTOFF',
+                                    'Safety shutoff: cannot read tank level (possible internet outage)')
+
+                                # Send urgent notification
+                                if NOTIFY_OVERRIDE_SHUTOFF and self.notification_manager.can_notify('override_shutoff_safety'):
+                                    self.send_alert(
+                                        'NOTIFY_OVERRIDE_OFF',
+                                        f"⚠️ Override Safety Shutoff - Tank Unreadable",
+                                        f"Override turned off because tank level cannot be read (possible internet outage). This prevents overflow.",
+                                        priority='urgent'
+                                    )
+
+                    if tank_fetch_success:
                         # Log tank level change
                         if prev_gallons and self.state.tank_gallons:
                             if abs(self.state.tank_gallons - prev_gallons) > 0.1:

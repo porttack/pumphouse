@@ -11,6 +11,17 @@ except (ImportError, RuntimeError):
     print("Warning: RPi.GPIO not available for relay control")
 
 from monitor.config import PURGE_DURATION
+from monitor.relay_state import RelayStateManager
+
+# Global state manager instance
+_state_manager = None
+
+def get_state_manager():
+    """Get or create the global relay state manager"""
+    global _state_manager
+    if _state_manager is None:
+        _state_manager = RelayStateManager()
+    return _state_manager
 
 # Relay pin assignments (BCM numbering)
 BYPASS_VALVE_PIN = 26      # Channel 1 - Emergency bypass
@@ -295,6 +306,9 @@ def set_supply_override(state, debug=False):
                               capture_output=True, text=True, check=True, timeout=2)
         if debug:
             print(f"Supply override turned {state}")
+
+        # Save state to disk
+        get_state_manager().set_supply_override(state)
         return True
     except subprocess.TimeoutExpired:
         print(f"Timeout setting supply override to {state}", file=sys.stderr)
@@ -336,6 +350,9 @@ def set_bypass(state, debug=False):
                               capture_output=True, text=True, check=True, timeout=2)
         if debug:
             print(f"Bypass valve turned {state}")
+
+        # Save state to disk
+        get_state_manager().set_bypass(state)
         return True
     except subprocess.TimeoutExpired:
         print(f"Timeout setting bypass to {state}", file=sys.stderr)
@@ -346,3 +363,33 @@ def set_bypass(state, debug=False):
     except Exception as e:
         print(f"Error setting bypass to {state}: {e}", file=sys.stderr)
         return False
+
+
+def restore_relay_states(debug=False):
+    """
+    Restore relay states from saved state file.
+    Called on monitor startup to preserve relay states across restarts.
+
+    Returns:
+        dict with 'supply_override' and 'bypass' states that were restored
+    """
+    state_mgr = get_state_manager()
+    restored = {}
+
+    # Restore supply override
+    saved_override = state_mgr.get_supply_override()
+    if saved_override in ['ON', 'OFF']:
+        if set_supply_override(saved_override, debug=debug):
+            restored['supply_override'] = saved_override
+            if debug:
+                print(f"Restored supply override to {saved_override}")
+
+    # Restore bypass
+    saved_bypass = state_mgr.get_bypass()
+    if saved_bypass in ['ON', 'OFF']:
+        if set_bypass(saved_bypass, debug=debug):
+            restored['bypass'] = saved_bypass
+            if debug:
+                print(f"Restored bypass to {saved_bypass}")
+
+    return restored

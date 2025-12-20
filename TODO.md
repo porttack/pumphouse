@@ -4,7 +4,6 @@
 
 ### High Priority
 
-- [ ] If override is on and we cannot read the tank level, turn off overrride
 - [ ] **Email confirmation for remote control actions**
   - Send follow-up email when user clicks Override ON/OFF, Bypass ON/OFF, or Purge buttons
   - Email should confirm the action was successful with current system status
@@ -13,7 +12,6 @@
 - [ ] one email per day (morning)
 - [ ] turn on override below 1300 maybe?
 - [ ] Option to turn on overide N times per day if < certain value
-- [ ] Still get "Recovery Detected" alerts (50 gallons) when the thing recovered 8 hours ago.
 
 ### Medium Priority
 
@@ -47,6 +45,19 @@
 ---
 
 ## Completed Items
+
+### 2025-12-20 - Version 2.10.0
+- [x] Fixed duplicate "Well Recovery Detected" alerts
+  - Added persistent notification state to track which recovery events have been alerted
+  - State survives service restarts (notification_state.json)
+- [x] Persistent relay state across service restarts
+  - Override and bypass states saved to disk (relay_state.json)
+  - States automatically restored on monitor startup
+  - No more accidental override turn-off on restart
+- [x] Safety shutoff when tank level cannot be read
+  - Override automatically turned off if internet/PT sensor unavailable
+  - Prevents tank overflow during network outages
+  - Sends urgent notification when safety shutoff triggers
 
 ### 2025-12-14 - Version 2.8.0
 - [x] Remote control via email with secret URL tokens

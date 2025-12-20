@@ -32,3 +32,5 @@ Thumbs.db
 secrets.conf
 *.secret
 .env
+notification_state.json
+relay_state.json
