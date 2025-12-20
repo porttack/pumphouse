@@ -10,7 +10,6 @@
   - Subject: e.g., "✓ Override Turned ON - 1320 gal"
   - Include event details and current relay states in email body
 - [ ] one email per day (morning)
-- [ ] turn on override below 1300 maybe?
 - [ ] Option to turn on overide N times per day if < certain value
 
 ### Medium Priority
@@ -47,6 +46,7 @@
 ## Completed Items
 
 ### 2025-12-20 - Version 2.10.0
+- [x] turn on override below a threshold
 - [x] Fixed duplicate "Well Recovery Detected" alerts
   - Added persistent notification state to track which recovery events have been alerted
   - State survives service restarts (notification_state.json)
