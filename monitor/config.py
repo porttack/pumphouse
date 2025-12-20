@@ -32,7 +32,7 @@ ENABLE_OVERRIDE_SHUTOFF = True  # Enable automatic override shutoff to prevent t
 OVERRIDE_SHUTOFF_THRESHOLD = 1410  # Gallons at which to turn off override valve
 
 # Override Auto-On Configuration
-OVERRIDE_ON_THRESHOLD = None  # Gallons at which to turn on override valve (None = disabled, e.g., 1350)
+OVERRIDE_ON_THRESHOLD = 1350  # Gallons at which to turn on override valve (None = disabled, e.g., 1350)
 
 # Notification Configuration
 ENABLE_NOTIFICATIONS = True  # Master switch (default OFF for safety)
