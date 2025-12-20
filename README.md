@@ -137,9 +137,10 @@ ENABLE_PURGE=False
 MIN_PURGE_INTERVAL=3600
 PURGE_DURATION=10
 
-# Override Shutoff Configuration (overflow protection)
-ENABLE_OVERRIDE_SHUTOFF=True
-OVERRIDE_SHUTOFF_THRESHOLD=1450
+# Override Control Configuration
+OVERRIDE_ON_THRESHOLD=1350  # Auto-on when tank drops below this (None=disabled)
+ENABLE_OVERRIDE_SHUTOFF=True  # Auto-off overflow protection
+OVERRIDE_SHUTOFF_THRESHOLD=1410  # Auto-off when tank reaches this
 
 # Notification Configuration
 ENABLE_NOTIFICATIONS=True
@@ -203,6 +204,7 @@ timestamp,event_type,pressure_state,float_state,tank_gallons,tank_depth,tank_per
 - **FLOAT_CALLING**: Float sensor changed to CLOSED/CALLING (tank needs water)
 - **FLOAT_FULL**: Float sensor changed to OPEN/FULL (tank full)
 - **PURGE**: Automatic spindown filter purge triggered
+- **OVERRIDE_AUTO_ON**: Automatic override valve turn-on when tank drops below threshold
 - **OVERRIDE_SHUTOFF**: Automatic override valve shutoff due to tank overflow protection
 - **REMOTE_CONTROL**: Remote relay control action via email secret URL
 - **NOTIFY_TANK_***: Email notification sent for tank threshold crossing
@@ -559,26 +561,49 @@ PURGE_DURATION = 10  # Purge for 10 seconds
 
 Or set in your config file at `~/.config/pumphouse/monitor.conf`.
 
-### Automatic Override Shutoff (Overflow Protection)
+### Automatic Override Control (Keep Tank Full)
 
-The monitor automatically turns off the override valve when the tank reaches a configurable threshold to prevent overflow. This is enabled by default.
+The monitor can automatically manage the override valve to keep your tank full by eliminating the large hysteresis of the physical float switch.
+
+**Override Auto-On** (Optional):
+- When enabled, automatically turns ON the override valve when tank drops below a threshold
+- Keeps tank fuller by triggering refill sooner than the physical float would
+- The physical float switch becomes a backup safety mechanism
+
+**Override Auto-Shutoff** (Overflow Protection):
+- Automatically turns OFF the override valve when tank reaches the shutoff threshold
+- Prevents overflow and ensures tank doesn't overfill
+- Enabled by default for safety
 
 **How it works:**
 - Checks tank level every 60 seconds during tank polling
-- If override valve is ON and tank >= threshold, automatically turns it off
-- Logs shutoff event with tank level to events.csv
-- Continuous enforcement: even if you manually turn override back on, it will be shut off again on next check
-- Reloads config on each check, so threshold can be changed without restarting the service
+- If auto-on is enabled and override is OFF and tank < on-threshold, automatically turns it on
+- If auto-shutoff is enabled and override is ON and tank >= shutoff-threshold, automatically turns it off
+- Logs all automatic actions with tank level to events.csv
+- Continuous enforcement: thresholds are checked on every tank poll
+- Reloads config on each check, so thresholds can be changed without restarting the service
 
 **Configuration** (`monitor/config.py`):
 ```python
+# Override Auto-On Configuration
+OVERRIDE_ON_THRESHOLD = None  # Gallons to turn ON override (None = disabled, e.g., 1350)
+
+# Override Shutoff Configuration
 ENABLE_OVERRIDE_SHUTOFF = True  # Enable overflow protection (default: True)
-OVERRIDE_SHUTOFF_THRESHOLD = 1450  # Gallons at which to turn off override
+OVERRIDE_SHUTOFF_THRESHOLD = 1410  # Gallons to turn OFF override
 ```
 
-**Example:** If you set threshold to 1425 gallons and turn on the override valve manually, the system will let it run until the tank hits 1425 gallons, then automatically turn it off to prevent overflow.
+**Example:** With `OVERRIDE_ON_THRESHOLD = 1350` and `OVERRIDE_SHUTOFF_THRESHOLD = 1410`:
+1. Tank drops to 1349 gallons → Override automatically turns ON
+2. Tank fills to 1410 gallons → Override automatically turns OFF
+3. Float switch is still active as backup, but rarely needed
 
-**Disabling:** If you need to fill past the threshold, temporarily disable in config.py:
+**Disabling auto-on:** Set to `None` (default) to disable automatic turn-on:
+```python
+OVERRIDE_ON_THRESHOLD = None  # Disabled
+```
+
+**Disabling auto-shutoff:** Set to `False` if you need to fill past the threshold:
 ```python
 ENABLE_OVERRIDE_SHUTOFF = False
 ```

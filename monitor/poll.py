@@ -10,6 +10,7 @@ from monitor.config import (
     RESIDUAL_PRESSURE_SECONDS, SECONDS_PER_GALLON,
     ENABLE_PURGE, MIN_PURGE_INTERVAL,
     ENABLE_OVERRIDE_SHUTOFF, OVERRIDE_SHUTOFF_THRESHOLD,
+    OVERRIDE_ON_THRESHOLD,
     NOTIFY_OVERRIDE_SHUTOFF, NOTIFY_WELL_RECOVERY_THRESHOLD,
     DASHBOARD_URL
 )
@@ -152,6 +153,9 @@ class SimplifiedMonitor:
         # Override shutoff control
         self.enable_override_shutoff = ENABLE_OVERRIDE_SHUTOFF
         self.override_shutoff_threshold = OVERRIDE_SHUTOFF_THRESHOLD
+
+        # Override auto-on control
+        self.override_on_threshold = OVERRIDE_ON_THRESHOLD
 
         # Notification system
         self.notification_manager = NotificationManager(
@@ -450,6 +454,37 @@ class SimplifiedMonitor:
                                     f"💧 Tank Full Confirmed - {current_gal:.0f} gal",
                                     "Float sensor confirmed FULL for 3+ readings"
                                 )
+
+                        # Check for override auto-on (continuous enforcement)
+                        if self.override_on_threshold is not None and self.relay_control_enabled:
+                            # Re-read config to allow runtime threshold changes
+                            from monitor import config
+                            import importlib
+                            importlib.reload(config)
+                            self.override_on_threshold = config.OVERRIDE_ON_THRESHOLD
+
+                            if self.override_on_threshold is not None:
+                                relay_status = self.get_relay_status()
+                                if (relay_status['supply_override'] == 'OFF' and
+                                    self.state.tank_gallons is not None and
+                                    self.state.tank_gallons < self.override_on_threshold):
+
+                                    if self.debug:
+                                        print(f"  → Tank at {self.state.tank_gallons} gal (< {self.override_on_threshold}), turning on override...")
+
+                                    from monitor.relay import set_supply_override
+                                    if set_supply_override('ON', debug=self.debug):
+                                        self.log_state_event('OVERRIDE_AUTO_ON',
+                                            f'Auto-on: tank at {self.state.tank_gallons:.0f} gal (threshold: {self.override_on_threshold})')
+
+                                        # Send notification
+                                        if NOTIFY_OVERRIDE_SHUTOFF and self.notification_manager.can_notify('override_auto_on'):
+                                            self.send_alert(
+                                                'NOTIFY_OVERRIDE_ON',
+                                                f"💧 Override Auto-On - {self.state.tank_gallons:.0f} gal",
+                                                f"Tank dropped to {self.state.tank_gallons:.0f} gal (threshold: {self.override_on_threshold}), override turned on",
+                                                priority='default'
+                                            )
 
                         # Check for override shutoff (continuous enforcement)
                         if self.enable_override_shutoff and self.relay_control_enabled:
