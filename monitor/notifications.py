@@ -10,11 +10,16 @@ from datetime import datetime
 from monitor.config import (
     ENABLE_NOTIFICATIONS,
     NOTIFY_TANK_DECREASING, NOTIFY_TANK_INCREASING,
-    NOTIFY_WELL_RECOVERY_THRESHOLD, NOTIFY_FLOAT_CONFIRMATIONS,
+    NOTIFY_WELL_RECOVERY_THRESHOLD, NOTIFY_WELL_RECOVERY_STAGNATION_HOURS,
+    NOTIFY_FLOAT_CONFIRMATIONS,
     NOTIFY_WELL_DRY_DAYS, NOTIFY_OVERRIDE_SHUTOFF,
+    NOTIFY_HIGH_FLOW_ENABLED, NOTIFY_HIGH_FLOW_GPH, NOTIFY_HIGH_FLOW_WINDOW_HOURS,
+    NOTIFY_HIGH_FLOW_AVERAGING,
+    NOTIFY_BACKFLUSH_ENABLED, NOTIFY_BACKFLUSH_THRESHOLD, NOTIFY_BACKFLUSH_WINDOW_SNAPSHOTS,
+    NOTIFY_BACKFLUSH_TIME_START, NOTIFY_BACKFLUSH_TIME_END,
     MIN_NOTIFICATION_INTERVAL
 )
-from monitor.stats import find_last_refill
+from monitor.stats import find_last_refill, find_high_flow_event, find_backflush_event
 
 class NotificationManager:
     """
@@ -37,6 +42,8 @@ class NotificationManager:
         self.last_refill_check = 0
         self.well_dry_alerted = False
         self.well_recovery_alerted_ts = None  # Timestamp of last recovery we alerted for
+        self.high_flow_alerted_ts = None  # Timestamp of last high flow we alerted for
+        self.backflush_alerted_ts = None  # Timestamp of last backflush we alerted for
 
         # Load persistent state
         self._load_state()
@@ -118,7 +125,8 @@ class NotificationManager:
         # Find last refill
         refill_ts, days_ago = find_last_refill(
             self.snapshots_file,
-            threshold_gallons=NOTIFY_WELL_RECOVERY_THRESHOLD
+            threshold_gallons=NOTIFY_WELL_RECOVERY_THRESHOLD,
+            stagnation_hours=NOTIFY_WELL_RECOVERY_STAGNATION_HOURS
         )
 
         if refill_ts and days_ago is not None:
@@ -145,6 +153,75 @@ class NotificationManager:
 
         return None
 
+    def check_high_flow_status(self):
+        """
+        Check for high flow rate (fast fill mode).
+        Returns ('high_flow', gph) or None.
+        """
+        if not NOTIFY_HIGH_FLOW_ENABLED:
+            return None
+
+        current_time = time.time()
+
+        # Don't check too frequently (once per hour)
+        if current_time - self.last_refill_check < 3600:
+            return None
+
+        # Find last high flow event
+        flow_ts, gph = find_high_flow_event(
+            self.snapshots_file,
+            gph_threshold=NOTIFY_HIGH_FLOW_GPH,
+            window_hours=NOTIFY_HIGH_FLOW_WINDOW_HOURS,
+            averaging_snapshots=NOTIFY_HIGH_FLOW_AVERAGING
+        )
+
+        if flow_ts and gph is not None:
+            # Only alert if we haven't already alerted for this specific high flow event
+            flow_ts_str = flow_ts.isoformat() if isinstance(flow_ts, datetime) else str(flow_ts)
+
+            if self.high_flow_alerted_ts != flow_ts_str:
+                # This is a NEW high flow event we haven't alerted about yet
+                self.high_flow_alerted_ts = flow_ts_str
+                self._save_state()
+                return ('high_flow', gph)
+
+        return None
+
+    def check_backflush_status(self):
+        """
+        Check for backflush event (large water usage during specific hours).
+        Returns ('backflush', gallons_used) or None.
+        """
+        if not NOTIFY_BACKFLUSH_ENABLED:
+            return None
+
+        current_time = time.time()
+
+        # Don't check too frequently (once per hour)
+        if current_time - self.last_refill_check < 3600:
+            return None
+
+        # Find last backflush event
+        backflush_ts, gallons_used = find_backflush_event(
+            self.snapshots_file,
+            threshold_gallons=NOTIFY_BACKFLUSH_THRESHOLD,
+            window_snapshots=NOTIFY_BACKFLUSH_WINDOW_SNAPSHOTS,
+            time_start=NOTIFY_BACKFLUSH_TIME_START,
+            time_end=NOTIFY_BACKFLUSH_TIME_END
+        )
+
+        if backflush_ts and gallons_used is not None:
+            # Only alert if we haven't already alerted for this specific backflush event
+            backflush_ts_str = backflush_ts.isoformat() if isinstance(backflush_ts, datetime) else str(backflush_ts)
+
+            if self.backflush_alerted_ts != backflush_ts_str:
+                # This is a NEW backflush event we haven't alerted about yet
+                self.backflush_alerted_ts = backflush_ts_str
+                self._save_state()
+                return ('backflush', gallons_used)
+
+        return None
+
     def _load_state(self):
         """Load persistent notification state from disk"""
         try:
@@ -153,8 +230,12 @@ class NotificationManager:
                     state = json.load(f)
                     self.well_recovery_alerted_ts = state.get('well_recovery_alerted_ts')
                     self.well_dry_alerted = state.get('well_dry_alerted', False)
+                    self.high_flow_alerted_ts = state.get('high_flow_alerted_ts')
+                    self.backflush_alerted_ts = state.get('backflush_alerted_ts')
                     if self.debug:
-                        print(f"Loaded notification state: recovery_ts={self.well_recovery_alerted_ts}, dry={self.well_dry_alerted}")
+                        print(f"Loaded notification state: recovery_ts={self.well_recovery_alerted_ts}, "
+                              f"dry={self.well_dry_alerted}, high_flow_ts={self.high_flow_alerted_ts}, "
+                              f"backflush_ts={self.backflush_alerted_ts}")
         except Exception as e:
             if self.debug:
                 print(f"Warning: Could not load notification state: {e}")
@@ -165,6 +246,8 @@ class NotificationManager:
             state = {
                 'well_recovery_alerted_ts': self.well_recovery_alerted_ts,
                 'well_dry_alerted': self.well_dry_alerted,
+                'high_flow_alerted_ts': self.high_flow_alerted_ts,
+                'backflush_alerted_ts': self.backflush_alerted_ts,
                 'saved_at': datetime.now().isoformat()
             }
             with open(self.state_file, 'w') as f:
