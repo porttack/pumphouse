@@ -2,7 +2,7 @@
 Simplified event-based polling loop
 """
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import signal
 
 from monitor.config import (
@@ -582,10 +582,13 @@ class SimplifiedMonitor:
                         status_type, value = refill_status
                         if status_type == 'recovery' and self.notification_manager.can_notify('well_recovery'):
                             current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
+                            # value is the stagnation start timestamp
+                            stagnation_end_ts = value + timedelta(hours=NOTIFY_WELL_RECOVERY_STAGNATION_HOURS)
+                            stagnation_end_str = stagnation_end_ts.strftime('%a %I:%M %p').replace(' 0', ' ')
                             self.send_alert(
                                 'NOTIFY_WELL_RECOVERY',
                                 f"{current_gal:.0f} gal - Well Recovery",
-                                f"Tank gained {NOTIFY_WELL_RECOVERY_THRESHOLD}+ gallons after stagnation period"
+                                f"Tank gained {NOTIFY_WELL_RECOVERY_THRESHOLD}+ gallons after stagnation period ended {stagnation_end_str}"
                             )
 
                         elif status_type == 'dry' and self.notification_manager.can_notify('well_dry'):
@@ -614,13 +617,14 @@ class SimplifiedMonitor:
                     # Check for backflush event
                     backflush_status = self.notification_manager.check_backflush_status()
                     if backflush_status:
-                        status_type, gallons_used = backflush_status
+                        status_type, gallons_used, backflush_ts = backflush_status
                         if status_type == 'backflush' and self.notification_manager.can_notify('backflush'):
                             current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
+                            backflush_time_str = backflush_ts.strftime('%a %I:%M %p').replace(' 0', ' ')
                             self.send_alert(
                                 'NOTIFY_BACKFLUSH',
                                 f"{current_gal:.0f} gal - Backflush",
-                                f"Carbon filter backflush used ~{gallons_used:.0f} gallons",
+                                f"Carbon filter backflush at {backflush_time_str} used ~{gallons_used:.0f} gallons",
                                 priority='default'
                             )
 
