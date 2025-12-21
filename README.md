@@ -306,6 +306,7 @@ python -m monitor.web
 - Live sensor readings (pressure, float, temperature, humidity)
 - Tank level with visual progress bar
 - Interactive time-series chart with selectable time ranges (6h, 12h, 24h, 3d, 7d, 14d)
+- Configurable default time range (default: 72 hours / 3 days)
 - Aggregate statistics: tank level changes (1hr/24hr), pressure HIGH percentages, last 50+ gallon refill
 - Recent snapshots (last 10)
 - Recent events (last 20)
@@ -346,10 +347,21 @@ Receive rich HTML email alerts with full system status, tank charts, and sensor 
 
 4. **Configure email settings in monitor/config.py:**
    ```python
+   # Basic email settings
    ENABLE_EMAIL_NOTIFICATIONS = True
    EMAIL_TO = "your-email@gmail.com"
    EMAIL_FROM = "your-email@gmail.com"
+   EMAIL_FRIENDLY_NAME = "Pumphouse"  # Name shown in From field
    EMAIL_SMTP_USER = "your-email@gmail.com"
+
+   # Daily status email (optional)
+   ENABLE_DAILY_STATUS_EMAIL = True  # Send daily status email
+   DAILY_STATUS_EMAIL_TIME = "06:00"  # Time in HH:MM format (24-hour)
+   DAILY_STATUS_EMAIL_CHART_HOURS = 72  # Hours of history in chart (3 days)
+
+   # Dashboard settings
+   DASHBOARD_DEFAULT_HOURS = 72  # Default time range for web dashboard
+   DASHBOARD_EMAIL_URL = None  # Custom URL for email links (optional)
    ```
 
 5. **Test it:**
@@ -364,12 +376,15 @@ Receive rich HTML email alerts with full system status, tank charts, and sensor 
 
 **Email Features:**
 - HTML emails styled like the web dashboard
+- Dashboard link at top of every email for quick access
 - Tank level bar showing current percentage and gallons
 - Current sensor readings (float switch, pressure)
 - 1-hour and 24-hour tank change statistics
-- Embedded tank level history chart
-- Link to full web dashboard
+- Embedded tank level history chart (default: 3 days)
+- Configurable friendly name in From field (default: "Pumphouse")
 - Priority-based formatting (green/orange/red)
+- Daily status email at configurable time (default: 6am)
+- Shortened subject lines with gallons first for better mobile display
 
 See [EMAIL_SETUP.md](EMAIL_SETUP.md) for detailed setup instructions and troubleshooting.
 
@@ -741,6 +756,6 @@ Internal use only - Pumphouse monitoring system
 
 ## Version
 
-Current version: **2.11.0**
+Current version: **2.12.0**
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.

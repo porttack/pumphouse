@@ -2,6 +2,51 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.12.0] - 2025-12-21
+
+### Added
+- **Daily Status Email**: Automatic daily status email at configurable time
+  - New configuration: `ENABLE_DAILY_STATUS_EMAIL` (default: True)
+  - `DAILY_STATUS_EMAIL_TIME` - Time to send in HH:MM format (default: "06:00")
+  - `DAILY_STATUS_EMAIL_CHART_HOURS` - Hours of history in chart (default: 72 = 3 days)
+  - Sends comprehensive system status with full tank/sensor information
+  - New event type: `DAILY_STATUS_EMAIL` logged when sent
+- **Email Friendly Name**: Configurable sender name in email From field
+  - New configuration: `EMAIL_FRIENDLY_NAME` (default: "Pumphouse")
+  - Displays as "Pumphouse <email@example.com>" in inbox
+  - Used in email footer: "{Name} Monitoring System"
+- **Dashboard Link in Emails**: Prominent dashboard link at top of every email
+  - Appears immediately below subject for quick access
+  - Configurable URL via `DASHBOARD_EMAIL_URL` (optional)
+  - Defaults to dashboard with `?hours=DAILY_STATUS_EMAIL_CHART_HOURS` parameter
+  - Styled with green accent matching dashboard theme
+- **Configurable Dashboard Default Time Range**: Web dashboard defaults to configurable time range
+  - New configuration: `DASHBOARD_DEFAULT_HOURS` (default: 72 hours = 3 days)
+  - Previously hardcoded to 6 hours
+  - User can still override via URL parameter (?hours=24)
+
+### Changed
+- **Shortened Email Subject Lines**: More concise subjects with gallons first
+  - Tank thresholds: "800 gal - Tank < 1000" (was "🚰 Tank Dropping - 800 gal")
+  - Tank full: "1430 gal - Tank Full" (was "💧 Tank Full Confirmed - 1430 gal")
+  - Override: "1410 gal - Override OFF" (was "⚠️ Override Auto-Shutoff - 1410 gal")
+  - Well recovery: "1200 gal - Well Recovery" (was "💧 Well Recovery Detected - 1200 gal")
+  - Well dry: "450 gal - Well May Be Dry" (was "⚠️ Well May Be Dry - 450 gal")
+  - High flow: "1100 gal - High Flow 65 GPH" (was "💧 High Flow Detected - 1100 gal")
+  - Backflush: "900 gal - Backflush" (was "🔧 Backflush Detected - 900 gal")
+  - Prevents current gallons from being cut off on narrow phone displays
+- **Email Template Enhancement**: Added dashboard link section with custom styling
+  - Link appears in separate box below header
+  - Uses dashboard green color (#4CAF50)
+  - Clear visual hierarchy for quick access
+
+### Technical
+- Added `get_next_daily_status_time()` function to calculate daily email schedule
+- Daily status email integrated into main polling loop (checked after snapshots)
+- Email dashboard URL computed dynamically from config settings
+- Web dashboard template now uses `{{ default_hours }}` from config
+- All configuration changes backward compatible with existing setups
+
 ## [2.11.0] - 2025-12-20
 
 ### Added

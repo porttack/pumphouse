@@ -408,11 +408,11 @@
     <script>
         let tankChart = null;
 
-        // Get hours from URL parameter or default to 6
+        // Get hours from URL parameter or default to configured value
         function getHoursFromURL() {
             const urlParams = new URLSearchParams(window.location.search);
             const hours = parseInt(urlParams.get('hours'));
-            return hours && !isNaN(hours) ? hours : 6;
+            return hours && !isNaN(hours) ? hours : {{ default_hours }};
         }
 
         // Initialize chart with default data

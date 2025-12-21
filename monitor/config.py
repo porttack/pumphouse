@@ -39,16 +39,24 @@ ENABLE_NOTIFICATIONS = True  # Master switch (default OFF for safety)
 NTFY_SERVER = "https://ntfy.sh"  # Can change to self-hosted later
 NTFY_TOPIC = "REDACTED-TOPIC"  # User must set unique topic!
 DASHBOARD_URL = "https://REDACTED-HOST:6443/"  # Dashboard URL to include in notifications
+DASHBOARD_EMAIL_URL = None  # Custom URL for emails (default: None uses DASHBOARD_URL with ?hours=DAILY_STATUS_EMAIL_CHART_HOURS)
+DASHBOARD_DEFAULT_HOURS = 72  # Default time range for web dashboard (hours)
 
 # Email Notification Configuration
 # See EMAIL_SETUP.md and secrets.conf.template for detailed configuration instructions
 ENABLE_EMAIL_NOTIFICATIONS = True  # Enable email alerts
 EMAIL_TO = "onblackberryhill@gmail.com"  # Recipient email address
 EMAIL_FROM = "onblackberryhill@gmail.com"  # Sender email address
+EMAIL_FRIENDLY_NAME = "Pumphouse"  # Friendly name shown in email headers and footers
 EMAIL_SMTP_SERVER = ""  # SMTP server - loaded from secrets file
 EMAIL_SMTP_PORT = 587  # SMTP port - can be overridden in secrets file
 EMAIL_SMTP_USER = ""  # SMTP username - loaded from secrets file
 EMAIL_SMTP_PASSWORD = ""  # SMTP password - loaded from secrets file
+
+# Daily Status Email Configuration
+ENABLE_DAILY_STATUS_EMAIL = True  # Send a daily status email
+DAILY_STATUS_EMAIL_TIME = "06:00"  # Time to send daily status email (HH:MM in 24-hour format)
+DAILY_STATUS_EMAIL_CHART_HOURS = 72  # Hours of history to show in daily status chart (default: 72 = 3 days)
 
 # Notification Rules - Which events trigger notifications
 NOTIFY_TANK_DECREASING = [1300, 1150, 1000, 700, 500, 250]  # Alert when tank crosses these levels going DOWN

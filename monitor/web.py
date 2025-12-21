@@ -14,7 +14,7 @@ from functools import wraps
 from monitor import __version__
 from monitor.config import (
     TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS, DASHBOARD_HIDE_EVENT_TYPES,
-    DASHBOARD_MAX_EVENTS,
+    DASHBOARD_MAX_EVENTS, DASHBOARD_DEFAULT_HOURS,
     SECRET_OVERRIDE_ON_TOKEN, SECRET_OVERRIDE_OFF_TOKEN,
     SECRET_BYPASS_ON_TOKEN, SECRET_BYPASS_OFF_TOKEN,
     SECRET_PURGE_TOKEN
@@ -396,7 +396,8 @@ def index():
                          format_pressure_state=format_pressure_state,
                          format_float_state=format_float_state,
                          now=datetime.now(),
-                         startup_time=STARTUP_TIME)
+                         startup_time=STARTUP_TIME,
+                         default_hours=DASHBOARD_DEFAULT_HOURS)
 
 @app.route('/control/<token>')
 def control(token):
