@@ -35,11 +35,19 @@ All notable changes to the pressure monitoring system.
   - Provides better detection of backflush events that may span multiple snapshots
   - Helps catch events that start/end between snapshot times
   - Configuration: `NOTIFY_BACKFLUSH_WINDOW_SNAPSHOTS = 3`
+- **Backflush Notification Message**: Now includes timestamp of when backflush occurred
+  - Old: "Carbon filter backflush used ~152 gallons"
+  - New: "Carbon filter backflush at Sat 1:15 AM used ~152 gallons"
+- **Well Recovery Notification Message**: Now includes when stagnation period ended
+  - Old: "Tank gained 50+ gallons after stagnation period"
+  - New: "Tank gained 50+ gallons after stagnation period ended Fri 9:00 PM"
 
 ### Technical
-- Modified `check_backflush_status()` in notifications.py to remove cooldown check
+- Modified `check_backflush_status()` in notifications.py to remove cooldown check and return timestamp
+- Modified `check_backflush_status()` return value: now returns 3-tuple `('backflush', gallons_used, timestamp)`
 - Added `tank_fetch_failures` and `max_tank_failures` tracking to SimplifiedMonitor
 - Enhanced tank polling logic with consecutive failure counting and recovery detection
+- Enhanced notification messages to include human-readable timestamps (e.g., "Sat 1:15 AM")
 - All changes maintain backward compatibility with existing configurations
 
 ### Investigation Notes

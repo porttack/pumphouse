@@ -192,7 +192,7 @@ class NotificationManager:
     def check_backflush_status(self):
         """
         Check for backflush event (large water usage during specific hours).
-        Returns ('backflush', gallons_used) or None.
+        Returns ('backflush', gallons_used, timestamp) or None.
         """
         if not NOTIFY_BACKFLUSH_ENABLED:
             return None
@@ -219,7 +219,7 @@ class NotificationManager:
                 # This is a NEW backflush event we haven't alerted about yet
                 self.backflush_alerted_ts = backflush_ts_str
                 self._save_state()
-                return ('backflush', gallons_used)
+                return ('backflush', gallons_used, backflush_ts)
 
         return None
 
