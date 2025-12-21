@@ -11,6 +11,7 @@ from monitor.config import (
     ENABLE_NOTIFICATIONS,
     NOTIFY_TANK_DECREASING, NOTIFY_TANK_INCREASING,
     NOTIFY_WELL_RECOVERY_THRESHOLD, NOTIFY_WELL_RECOVERY_STAGNATION_HOURS,
+    NOTIFY_WELL_RECOVERY_MAX_STAGNATION_GAIN,
     NOTIFY_FLOAT_CONFIRMATIONS,
     NOTIFY_WELL_DRY_DAYS, NOTIFY_OVERRIDE_SHUTOFF,
     NOTIFY_HIGH_FLOW_ENABLED, NOTIFY_HIGH_FLOW_GPH, NOTIFY_HIGH_FLOW_WINDOW_HOURS,
@@ -126,7 +127,8 @@ class NotificationManager:
         refill_ts, days_ago = find_last_refill(
             self.snapshots_file,
             threshold_gallons=NOTIFY_WELL_RECOVERY_THRESHOLD,
-            stagnation_hours=NOTIFY_WELL_RECOVERY_STAGNATION_HOURS
+            stagnation_hours=NOTIFY_WELL_RECOVERY_STAGNATION_HOURS,
+            max_stagnation_gain=NOTIFY_WELL_RECOVERY_MAX_STAGNATION_GAIN
         )
 
         if refill_ts and days_ago is not None:

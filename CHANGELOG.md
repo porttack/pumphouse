@@ -39,12 +39,15 @@ All notable changes to the pressure monitoring system.
 
 ### Fixed
 - **Well Recovery Alert Frequency**: Fixed duplicate well recovery alerts every 15-30 minutes
-  - Root cause: Algorithm returned different timestamp for each snapshot during recovery
-  - Previous behavior: "Well recovery" alert every 15-30 min during tank fill
-  - New behavior: Looks for 6+ hours of stagnation followed by 50+ gallon gain
-  - Returns consistent timestamp (low point) for entire recovery event
-  - Prevents duplicate alerts by tracking specific recovery event timestamps
-  - Configuration: `NOTIFY_WELL_RECOVERY_STAGNATION_HOURS` (default: 6 hours)
+  - Root cause: Algorithm had NO actual stagnation check - only found low points in sliding window
+  - During continuous slow fill, every snapshot showed different "low point", bypassing state tracking
+  - New algorithm: Searches 24-hour window for 6+ hour stagnation periods (max 15 gal gain)
+  - Then checks if tank gained 50+ gallons AFTER that stagnation
+  - Returns stagnation start timestamp (stays constant for entire recovery event)
+  - Separated core algorithm into `_find_recovery_in_data()` with comprehensive doctests
+  - Added TEST 1: Slow continuous fill (should NOT trigger)
+  - Added TEST 2: True recovery with stagnation followed by significant gain (SHOULD trigger)
+  - Configuration: `NOTIFY_WELL_RECOVERY_THRESHOLD` (50 gal), `NOTIFY_WELL_RECOVERY_STAGNATION_HOURS` (6 hrs), `NOTIFY_WELL_RECOVERY_MAX_STAGNATION_GAIN` (15 gal)
 
 ### Changed
 - **README Documentation**: Enhanced notification events section
