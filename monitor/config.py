@@ -55,6 +55,7 @@ NOTIFY_TANK_DECREASING = [1300, 1150, 1000, 700, 500, 250]  # Alert when tank cr
 NOTIFY_TANK_INCREASING = [500, 750, 1000, 1200, 1400]  # Alert when tank crosses these levels going UP
 NOTIFY_WELL_RECOVERY_THRESHOLD = 50  # Gallons gained to count as recovery
 NOTIFY_WELL_RECOVERY_STAGNATION_HOURS = 6  # Hours of flat/declining before recovery
+NOTIFY_WELL_RECOVERY_MAX_STAGNATION_GAIN = 15  # Max gallons gained during stagnation period (to filter slow fill)
 NOTIFY_FLOAT_CONFIRMATIONS = 3  # Number of consecutive OPEN readings before alert
 NOTIFY_WELL_DRY_DAYS = 4  # Days without refill before "well dry" alert
 NOTIFY_OVERRIDE_SHUTOFF = True  # Alert on automatic override shutoff

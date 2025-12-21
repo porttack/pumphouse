@@ -5,90 +5,166 @@ import csv
 import os
 from datetime import datetime
 
-def find_last_refill(snapshots_file, threshold_gallons=50, stagnation_hours=6):
+def _find_recovery_in_data(snapshots, threshold_gallons, stagnation_hours, max_stagnation_gain, lookback_hours=24):
     """
-    Find the last time tank recovered from stagnation (6+ hours flat/declining followed by 50+ gallon gain).
-    Returns (timestamp, days_ago) or (None, None) if not found.
+    Core algorithm to find recovery event in snapshot data.
+    Separated for easier testing with synthetic data.
 
-    This fixes the duplicate alert issue by returning the timestamp of the LOW POINT (end of stagnation),
-    which remains constant throughout the entire recovery event.
+    Args:
+        snapshots: List of dicts with 'ts' (datetime) and 'gallons' (float)
+        threshold_gallons: Min gallons to count as recovery
+        stagnation_hours: Length of stagnation period to verify
+        max_stagnation_gain: Max gain during stagnation to be considered "stagnant"
+        lookback_hours: How far back to search for stagnation windows (default: 24)
+
+    Returns:
+        datetime of stagnation start, or None
+
+    Examples:
+        >>> from datetime import datetime, timedelta
+        >>>
+        >>> # TEST 1: Slow continuous fill (should NOT trigger - this is the bug case)
+        >>> base_time = datetime(2025, 12, 20, 12, 0)
+        >>> slow_fill = [
+        ...     {'ts': base_time - timedelta(hours=8), 'gallons': 1000},
+        ...     {'ts': base_time - timedelta(hours=6), 'gallons': 1010},  # +10 gal over 2 hrs
+        ...     {'ts': base_time - timedelta(hours=4), 'gallons': 1020},  # +10 gal over 2 hrs
+        ...     {'ts': base_time - timedelta(hours=2), 'gallons': 1030},  # +10 gal over 2 hrs
+        ...     {'ts': base_time, 'gallons': 1060},  # +30 gal over 2 hrs, total +60
+        ... ]
+        >>> result = _find_recovery_in_data(slow_fill, threshold_gallons=50,
+        ...                                  stagnation_hours=6, max_stagnation_gain=15)
+        >>> result is None  # Should be None - continuous fill, not stagnant
+        True
+        >>>
+        >>> # TEST 2: True recovery (6 hrs stagnant, then 50+ gal gain - SHOULD trigger)
+        >>> recovery = [
+        ...     {'ts': base_time - timedelta(hours=10), 'gallons': 1000},
+        ...     {'ts': base_time - timedelta(hours=8), 'gallons': 1005},   # Stagnant start
+        ...     {'ts': base_time - timedelta(hours=6), 'gallons': 1008},   # +3 gal (stagnant)
+        ...     {'ts': base_time - timedelta(hours=4), 'gallons': 1010},   # +2 gal (stagnant)
+        ...     {'ts': base_time - timedelta(hours=2), 'gallons': 1012},   # +2 gal (end stagnation)
+        ...     {'ts': base_time - timedelta(hours=1), 'gallons': 1040},   # +28 gal (recovery starts)
+        ...     {'ts': base_time, 'gallons': 1070},  # +30 gal (total recovery: 58 gal)
+        ... ]
+        >>> result = _find_recovery_in_data(recovery, threshold_gallons=50,
+        ...                                  stagnation_hours=6, max_stagnation_gain=15)
+        >>> result == base_time - timedelta(hours=8)  # Returns stagnation start timestamp
+        True
+    """
+    if len(snapshots) < 2:
+        return None
+
+    # Work with most recent data
+    now = snapshots[-1]['ts']
+    lookback_cutoff = now.timestamp() - (lookback_hours * 3600)
+
+    # Filter to recent snapshots only
+    recent_snapshots = [s for s in snapshots if s['ts'].timestamp() >= lookback_cutoff]
+
+    if len(recent_snapshots) < 2:
+        return None
+
+    # Search for: stagnation window followed by significant gain
+    # Check each possible stagnation window (going backwards = most recent first)
+    for end_idx in range(len(recent_snapshots) - 1, 0, -1):
+        period_end = recent_snapshots[end_idx]
+        period_end_time = period_end['ts'].timestamp()
+        period_end_gallons = period_end['gallons']
+
+        # Define stagnation window: N hours before this snapshot
+        stagnation_start_time = period_end_time - (stagnation_hours * 3600)
+
+        # Find snapshot at start of stagnation window
+        period_start = None
+        for snapshot in reversed(recent_snapshots[:end_idx]):
+            if snapshot['ts'].timestamp() <= stagnation_start_time:
+                period_start = snapshot
+                break
+
+        if period_start is None:
+            continue
+
+        period_start_gallons = period_start['gallons']
+
+        # CHECK #1: Was tank truly stagnant? (didn't gain more than threshold)
+        gain_during_stagnation = period_end_gallons - period_start_gallons
+        if gain_during_stagnation > max_stagnation_gain:
+            continue  # Tank was filling during this period - not stagnant
+
+        # CHECK #2: Did tank recover significantly after stagnation?
+        current_gallons = recent_snapshots[-1]['gallons']
+        recovery_gain = current_gallons - period_end_gallons
+
+        if recovery_gain >= threshold_gallons:
+            # FOUND IT! Return start of stagnation as unique identifier
+            return period_start['ts']
+
+    return None
+
+
+def find_last_refill(snapshots_file, threshold_gallons=50, stagnation_hours=6, max_stagnation_gain=15):
+    """
+    Find most recent well recovery: stagnation followed by significant refill.
+
+    WHAT IT DETECTS:
+    - Tank was stagnant for 6+ hours (gained ≤15 gallons)
+    - Then gained 50+ gallons after that stagnation
+    - Returns: timestamp of stagnation start (stays constant for entire recovery)
+
+    WHAT IT FILTERS OUT:
+    - Continuous slow fill (your current situation)
+    - Gradual increases without a true low/stagnant period
 
     Args:
         snapshots_file: Path to snapshots.csv file
-        threshold_gallons: Minimum gallon increase to count as refill (default: 50)
-        stagnation_hours: Hours of flat/declining before recovery (default: 6)
+        threshold_gallons: Min gallon increase to count as recovery (default: 50)
+        stagnation_hours: Hours of stagnation to verify (default: 6)
+        max_stagnation_gain: Max gallons gained during stagnation (default: 15)
 
     Returns:
-        Tuple of (datetime, float) representing timestamp of low point and days_ago, or (None, None)
+        Tuple of (datetime, float) representing stagnation start timestamp and days_ago,
+        or (None, None) if no recovery found
     """
     if not os.path.exists(snapshots_file):
         return None, None
 
     try:
+        # Read and parse snapshot data
         with open(snapshots_file, 'r') as f:
             reader = csv.DictReader(f)
             rows = list(reader)
 
-        if len(rows) <= 1:
-            return None, None
-
-        now = datetime.now()
-
-        # Parse rows with timestamps and gallons
-        parsed_rows = []
+        snapshots = []
         for row in rows:
             try:
-                parsed_rows.append({
+                snapshots.append({
                     'ts': datetime.fromisoformat(row['timestamp']),
                     'gallons': float(row['tank_gallons'])
                 })
             except (ValueError, KeyError):
                 continue
 
-        # Ensure rows are sorted by timestamp
-        parsed_rows.sort(key=lambda x: x['ts'])
+        snapshots.sort(key=lambda x: x['ts'])
 
-        # Look for pattern: stagnation period followed by significant gain
-        # Iterate backwards to find most recent recovery event
-        for i in range(len(parsed_rows) - 1, 0, -1):
-            current_snapshot = parsed_rows[i]
+        # Run the core algorithm
+        recovery_ts = _find_recovery_in_data(
+            snapshots,
+            threshold_gallons,
+            stagnation_hours,
+            max_stagnation_gain
+        )
 
-            # Look back to find a stagnation period
-            stagnation_cutoff = current_snapshot['ts'].timestamp() - (stagnation_hours * 3600)
-
-            # Find snapshot from stagnation_hours ago
-            stagnation_start = next(
-                (s for s in reversed(parsed_rows[:i]) if s['ts'].timestamp() <= stagnation_cutoff),
-                None
-            )
-
-            if not stagnation_start:
-                continue
-
-            # Find the low point (minimum gallons) during the stagnation period
-            stagnation_snapshots = [
-                s for s in parsed_rows
-                if stagnation_start['ts'] <= s['ts'] <= current_snapshot['ts']
-            ]
-
-            if len(stagnation_snapshots) < 2:
-                continue
-
-            low_point = min(stagnation_snapshots, key=lambda x: x['gallons'])
-
-            # Check if tank gained threshold+ gallons from low point to current
-            gain = current_snapshot['gallons'] - low_point['gallons']
-
-            if gain >= threshold_gallons:
-                # Return the LOW POINT timestamp (this remains constant for the entire recovery)
-                days_ago = (now - low_point['ts']).total_seconds() / 86400
-                return low_point['ts'], days_ago
+        if recovery_ts:
+            days_ago = (datetime.now() - recovery_ts).total_seconds() / 86400
+            return recovery_ts, days_ago
 
         return None, None
 
     except Exception as e:
-        # Silently ignore errors in refill calculation
+        # Silently ignore errors
         return None, None
+
 
 def find_high_flow_event(snapshots_file, gph_threshold=60, window_hours=6,
                          averaging_snapshots=2, snapshot_interval_minutes=15):
