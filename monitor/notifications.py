@@ -197,11 +197,10 @@ class NotificationManager:
         if not NOTIFY_BACKFLUSH_ENABLED:
             return None
 
-        current_time = time.time()
-
-        # Don't check too frequently (once per hour)
-        if current_time - self.last_refill_check < 3600:
-            return None
+        # NOTE: No cooldown timer for backflush checks (unlike recovery/high-flow)
+        # Backflush events are brief (15-30 min) with a narrow detection window,
+        # so we must check every snapshot to avoid missing them.
+        # Duplicate alerts are already prevented by backflush_alerted_ts tracking.
 
         # Find last backflush event
         backflush_ts, gallons_used = find_backflush_event(

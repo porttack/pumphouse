@@ -2,6 +2,54 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.13.0] - 2025-12-21
+
+### Fixed
+- **Backflush Detection Reliability**: Removed hourly cooldown timer from backflush checks
+  - Previous issue: Backflush events (15-30 min duration) were missed due to hourly check interval
+  - Root cause: Hourly cooldown meant check could happen before/after brief backflush window
+  - Solution: Now checks every snapshot (every 15 min) to catch brief events
+  - Duplicate prevention still handled by `backflush_alerted_ts` timestamp tracking
+  - Updated comments to explain why backflush needs frequent checking vs recovery/high-flow
+- **Tank Read Failure Resilience**: Added retry logic before safety shutdown
+  - Previous issue: Single network glitch would immediately shut off override valve
+  - Root cause: No tolerance for transient internet failures
+  - Solution: Requires 3 consecutive failures (3 minutes) before triggering safety shutdown
+  - Tracks failure count and resets on successful read
+  - Debug output shows failure progress: "Tank fetch failed (2/3)"
+  - Alert message includes attempt count: "after 3 attempts"
+  - Dramatically reduces false shutdowns while maintaining safety
+- **False Recovery Alerts**: Reduced duplicate well recovery notifications during slow fill
+  - Issue: Getting recovery alerts during continuous slow fill + tenant usage
+  - Root cause: Slow fill (24 gal/hr) + tenant usage looked like stagnation periods
+  - Solution: Increased `NOTIFY_WELL_RECOVERY_MAX_STAGNATION_GAIN` from 15 to 30 gallons
+  - Now tolerates slow refill patterns without triggering false recovery alerts
+- **Excessive Tank Stopped Filling Events**: Reduced sensitivity to normal slow refill
+  - Issue: Getting TANK_STOPPED_FILLING events every 30-60 minutes during slow well recovery
+  - Root cause: 60-minute window with 10-gallon threshold too sensitive for 6 gal/15min fill rate
+  - Solution: Increased window to 120 minutes and threshold to 15 gallons
+  - Now only alerts when tank truly stops filling, not during normal slow periods
+
+### Changed
+- **Backflush Detection Window**: Widened from 2 to 3 snapshots (30min → 45min)
+  - Provides better detection of backflush events that may span multiple snapshots
+  - Helps catch events that start/end between snapshot times
+  - Configuration: `NOTIFY_BACKFLUSH_WINDOW_SNAPSHOTS = 3`
+
+### Technical
+- Modified `check_backflush_status()` in notifications.py to remove cooldown check
+- Added `tank_fetch_failures` and `max_tank_failures` tracking to SimplifiedMonitor
+- Enhanced tank polling logic with consecutive failure counting and recovery detection
+- All changes maintain backward compatibility with existing configurations
+
+### Investigation Notes
+This release addresses issues discovered through log analysis on 2025-12-21:
+1. **Missing backflush at 1:15am**: 117 gallons lost but not detected due to hourly check timing
+2. **Recovery alert at 7:15am**: False positive from slow fill pattern (1132→1203 gal overnight)
+3. **Many TANK_STOPPED_FILLING**: 8 events in 8 hours during normal slow refill
+4. **Tank unreadable alert**: Single transient network failure triggered immediate safety shutdown
+5. **Suspected high water usage**: Backflush every 2 days suggests 29 gal/hour usage (needs metering)
+
 ## [2.12.0] - 2025-12-21
 
 ### Added
