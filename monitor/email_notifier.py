@@ -28,11 +28,14 @@ from monitor.config import (
     ENABLE_EMAIL_NOTIFICATIONS,
     EMAIL_TO,
     EMAIL_FROM,
+    EMAIL_FRIENDLY_NAME,
     EMAIL_SMTP_SERVER,
     EMAIL_SMTP_PORT,
     EMAIL_SMTP_USER,
     EMAIL_SMTP_PASSWORD,
     DASHBOARD_URL,
+    DASHBOARD_EMAIL_URL,
+    DAILY_STATUS_EMAIL_CHART_HOURS,
     TANK_HEIGHT_INCHES,
     TANK_CAPACITY_GALLONS,
     TANK_URL,
@@ -81,7 +84,11 @@ def send_email_notification(subject, message, priority='default', dashboard_url=
         # Create message
         msg = MIMEMultipart('related')
         msg['Subject'] = subject
-        msg['From'] = EMAIL_FROM
+        # Use friendly name in From field if configured
+        if EMAIL_FRIENDLY_NAME:
+            msg['From'] = f"{EMAIL_FRIENDLY_NAME} <{EMAIL_FROM}>"
+        else:
+            msg['From'] = EMAIL_FROM
         msg['To'] = EMAIL_TO
         msg['Date'] = datetime.now().strftime('%a, %d %b %Y %H:%M:%S %z')
 
@@ -365,6 +372,9 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
     stats = status_data.get('stats') if status_data else None
     events_data = status_data.get('events') if status_data else None
 
+    # Get the dashboard link to use in the email
+    email_dashboard_url = DASHBOARD_EMAIL_URL if DASHBOARD_EMAIL_URL else f"{dashboard_url}?hours={DAILY_STATUS_EMAIL_CHART_HOURS}"
+
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -398,6 +408,23 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
             margin: 0;
             font-size: 20px;
             font-weight: bold;
+        }}
+        .dashboard-link {{
+            background: #1a1a1a;
+            border: 1px solid #444;
+            padding: 12px;
+            margin: 20px 0 0 0;
+            border-radius: 4px;
+            text-align: center;
+        }}
+        .dashboard-link a {{
+            color: #4CAF50;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 14px;
+        }}
+        .dashboard-link a:hover {{
+            text-decoration: underline;
         }}
         .content {{
             padding: 20px;
@@ -580,6 +607,17 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
         </div>
 
         <div class="content">
+"""
+
+    # Add dashboard link at the top if available
+    if dashboard_url:
+        html += f"""
+            <div class="dashboard-link">
+                <a href="{email_dashboard_url}">📊 View Dashboard</a>
+            </div>
+"""
+
+    html += f"""
             <div class="alert-box">
                 <p class="alert-message">{message}</p>
             </div>
@@ -780,6 +818,9 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
             </div>
 """
 
+    # Use friendly name in footer
+    footer_text = f"{EMAIL_FRIENDLY_NAME} Monitoring System" if EMAIL_FRIENDLY_NAME else "Pumphouse Monitoring System"
+
     html += f"""
             <div class="timestamp">
                 Sent: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
@@ -787,7 +828,7 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
         </div>
 
         <div class="footer">
-            Blackberry Hill Pumphouse Monitoring System
+            {footer_text}
         </div>
     </div>
 </body>

@@ -13,7 +13,8 @@ from monitor.config import (
     OVERRIDE_ON_THRESHOLD,
     NOTIFY_OVERRIDE_SHUTOFF, NOTIFY_WELL_RECOVERY_THRESHOLD,
     TANK_FILLING_WINDOW_MINUTES, TANK_FILLING_THRESHOLD,
-    DASHBOARD_URL
+    DASHBOARD_URL,
+    ENABLE_DAILY_STATUS_EMAIL, DAILY_STATUS_EMAIL_TIME, DAILY_STATUS_EMAIL_CHART_HOURS
 )
 from monitor.gpio_helpers import read_pressure, read_float_sensor
 from monitor.tank import get_tank_data
@@ -36,13 +37,33 @@ def get_next_snapshot_time(current_time, interval_minutes):
     # Round up to next interval
     minutes = ((dt.minute // interval_minutes) + 1) * interval_minutes
     if minutes >= 60:
-        next_dt = dt.replace(hour=dt.hour + 1 if dt.hour < 23 else 0, 
+        next_dt = dt.replace(hour=dt.hour + 1 if dt.hour < 23 else 0,
                             minute=0, second=0, microsecond=0)
         if dt.hour == 23:
             next_dt = next_dt.replace(day=dt.day + 1)
     else:
         next_dt = dt.replace(minute=minutes, second=0, microsecond=0)
     return next_dt.timestamp()
+
+def get_next_daily_status_time(current_time, target_time_str):
+    """
+    Return next daily status email time based on target_time_str (HH:MM format).
+    If current time is past target time today, returns target time tomorrow.
+    """
+    dt = datetime.fromtimestamp(current_time)
+    try:
+        target_hour, target_minute = map(int, target_time_str.split(':'))
+        # Set to today's target time
+        target_dt = dt.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
+
+        # If we're past today's target time, move to tomorrow
+        if current_time >= target_dt.timestamp():
+            target_dt = target_dt.replace(day=dt.day + 1)
+
+        return target_dt.timestamp()
+    except (ValueError, AttributeError):
+        # If parsing fails, default to 6am tomorrow
+        return dt.replace(hour=6, minute=0, second=0, microsecond=0, day=dt.day + 1).timestamp()
 
 class SnapshotTracker:
     """Track data for snapshot intervals"""
@@ -139,6 +160,7 @@ class SimplifiedMonitor:
         self.last_tank_check = 0
         self.tank_last_updated = None
         self.next_snapshot_time = None
+        self.next_daily_status_time = None
 
         # Tank tracking for delta
         self.last_snapshot_tank_gallons = None
@@ -316,10 +338,20 @@ class SimplifiedMonitor:
         
         # Initialize snapshot timing
         self.next_snapshot_time = get_next_snapshot_time(
-            time.time(), 
+            time.time(),
             self.snapshot_interval
         )
-        
+
+        # Initialize daily status email timing
+        if ENABLE_DAILY_STATUS_EMAIL:
+            self.next_daily_status_time = get_next_daily_status_time(
+                time.time(),
+                DAILY_STATUS_EMAIL_TIME
+            )
+            if self.debug:
+                next_daily_dt = datetime.fromtimestamp(self.next_daily_status_time)
+                print(f"Next daily status email at: {next_daily_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+
         if self.debug:
             next_dt = datetime.fromtimestamp(self.next_snapshot_time)
             print(f"First snapshot at: {next_dt.strftime('%H:%M:%S')}")
@@ -397,7 +429,7 @@ class SimplifiedMonitor:
                                 if NOTIFY_OVERRIDE_SHUTOFF and self.notification_manager.can_notify('override_shutoff_safety'):
                                     self.send_alert(
                                         'NOTIFY_OVERRIDE_OFF',
-                                        f"⚠️ Override Safety Shutoff - Tank Unreadable",
+                                        f"⚠️ Override OFF - Tank Unreadable",
                                         f"Override turned off because tank level cannot be read (possible internet outage). This prevents overflow.",
                                         priority='urgent'
                                     )
@@ -422,11 +454,11 @@ class SimplifiedMonitor:
                                     if self.notification_manager.can_notify(f'tank_{direction}_{level}'):
                                         current_gal = self.state.tank_gallons
                                         if direction == 'decreasing':
-                                            title = f"🚰 Tank Dropping - {current_gal:.0f} gal"
+                                            title = f"{current_gal:.0f} gal - Tank < {level}"
                                             msg = f"Tank is now < {level} gallons (currently at {current_gal:.0f} gal)"
                                             priority = 'high'
                                         else:
-                                            title = f"🚰 Tank Filling - {current_gal:.0f} gal"
+                                            title = f"{current_gal:.0f} gal - Tank > {level}"
                                             msg = f"Tank is now > {level} gallons (currently at {current_gal:.0f} gal)"
                                             priority = 'default'
                                         self.send_alert(
@@ -456,7 +488,7 @@ class SimplifiedMonitor:
                                 current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
                                 self.send_alert(
                                     'NOTIFY_FLOAT_FULL',
-                                    f"💧 Tank Full Confirmed - {current_gal:.0f} gal",
+                                    f"{current_gal:.0f} gal - Tank Full",
                                     "Float sensor confirmed FULL for 3+ readings"
                                 )
 
@@ -486,7 +518,7 @@ class SimplifiedMonitor:
                                         if NOTIFY_OVERRIDE_SHUTOFF and self.notification_manager.can_notify('override_auto_on'):
                                             self.send_alert(
                                                 'NOTIFY_OVERRIDE_ON',
-                                                f"💧 Override Auto-On - {self.state.tank_gallons:.0f} gal",
+                                                f"{self.state.tank_gallons:.0f} gal - Override ON",
                                                 f"Tank dropped to {self.state.tank_gallons:.0f} gal (threshold: {self.override_on_threshold}), override turned on",
                                                 priority='default'
                                             )
@@ -516,7 +548,7 @@ class SimplifiedMonitor:
                                     if NOTIFY_OVERRIDE_SHUTOFF and self.notification_manager.can_notify('override_shutoff'):
                                         self.send_alert(
                                             'NOTIFY_OVERRIDE_OFF',
-                                            f"⚠️ Override Auto-Shutoff - {self.state.tank_gallons:.0f} gal",
+                                            f"{self.state.tank_gallons:.0f} gal - Override OFF",
                                             f"Tank reached {self.state.tank_gallons:.0f} gal (threshold: {self.override_shutoff_threshold}), override turned off",
                                             priority='high'
                                         )
@@ -533,7 +565,7 @@ class SimplifiedMonitor:
                             current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
                             self.send_alert(
                                 'NOTIFY_WELL_RECOVERY',
-                                f"💧 Well Recovery Detected - {current_gal:.0f} gal",
+                                f"{current_gal:.0f} gal - Well Recovery",
                                 f"Tank gained {NOTIFY_WELL_RECOVERY_THRESHOLD}+ gallons after stagnation period"
                             )
 
@@ -541,7 +573,7 @@ class SimplifiedMonitor:
                             current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
                             self.send_alert(
                                 'NOTIFY_WELL_DRY',
-                                f"⚠️ Well May Be Dry - {current_gal:.0f} gal",
+                                f"{current_gal:.0f} gal - Well May Be Dry",
                                 f"No {NOTIFY_WELL_RECOVERY_THRESHOLD}+ gallon refill in {value:.1f} days",
                                 priority='urgent',
                                 chart_hours=168
@@ -555,7 +587,7 @@ class SimplifiedMonitor:
                             current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
                             self.send_alert(
                                 'NOTIFY_HIGH_FLOW',
-                                f"💧 High Flow Detected - {current_gal:.0f} gal",
+                                f"{current_gal:.0f} gal - High Flow {gph:.0f} GPH",
                                 f"Tank filling at {gph:.0f} GPH (fast fill mode active)",
                                 priority='default'
                             )
@@ -568,7 +600,7 @@ class SimplifiedMonitor:
                             current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
                             self.send_alert(
                                 'NOTIFY_BACKFLUSH',
-                                f"🔧 Backflush Detected - {current_gal:.0f} gal",
+                                f"{current_gal:.0f} gal - Backflush",
                                 f"Carbon filter backflush used ~{gallons_used:.0f} gallons",
                                 priority='default'
                             )
@@ -650,10 +682,42 @@ class SimplifiedMonitor:
                     # Reset for next interval
                     self.snapshot_tracker.reset()
                     self.next_snapshot_time = get_next_snapshot_time(
-                        current_time, 
+                        current_time,
                         self.snapshot_interval
                     )
-                
+
+                # DAILY STATUS EMAIL
+                if ENABLE_DAILY_STATUS_EMAIL and self.next_daily_status_time and current_time >= self.next_daily_status_time:
+                    current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
+
+                    if self.debug:
+                        print(f"\n{datetime.now().strftime('%H:%M:%S')} - DAILY STATUS EMAIL")
+                        print(f"  Sending daily status email...")
+
+                    # Send daily status email
+                    send_email_notification(
+                        subject=f"{current_gal:.0f} gal - Daily Status",
+                        message=f"Daily status report for {datetime.now().strftime('%A, %B %d, %Y')}",
+                        priority='default',
+                        dashboard_url=DASHBOARD_URL,
+                        chart_url=f"{DASHBOARD_URL}api/chart.png?hours={DAILY_STATUS_EMAIL_CHART_HOURS}",
+                        debug=self.debug,
+                        include_status=True
+                    )
+
+                    # Log the daily status email
+                    self.log_state_event('DAILY_STATUS_EMAIL', f'Daily status email sent - {current_gal:.0f} gal')
+
+                    # Schedule next daily status email (same time tomorrow)
+                    self.next_daily_status_time = get_next_daily_status_time(
+                        current_time,
+                        DAILY_STATUS_EMAIL_TIME
+                    )
+
+                    if self.debug:
+                        next_daily_dt = datetime.fromtimestamp(self.next_daily_status_time)
+                        print(f"  Next daily status email at: {next_daily_dt.strftime('%Y-%m-%d %H:%M:%S')}\n")
+
                 time.sleep(self.poll_interval)
         
         except Exception as e:
