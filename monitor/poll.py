@@ -169,6 +169,10 @@ class SimplifiedMonitor:
         self.tank_was_filling = False
         self.tank_gallons_history = []  # Store (timestamp, gallons) tuples
 
+        # Tank fetch failure tracking
+        self.tank_fetch_failures = 0
+        self.max_tank_failures = 3  # Require 3 consecutive failures before safety shutdown
+
         # Relay control
         self.relay_control_enabled = False
 
@@ -413,26 +417,41 @@ class SimplifiedMonitor:
                     prev_gallons = self.state.tank_gallons
                     tank_fetch_success = self.fetch_tank_data()
 
-                    # SAFETY: Turn off override if we can't read tank level
-                    if not tank_fetch_success and self.relay_control_enabled:
+                    # Track consecutive failures
+                    if not tank_fetch_success:
+                        self.tank_fetch_failures += 1
+                        if self.debug:
+                            print(f"  Tank fetch failed ({self.tank_fetch_failures}/{self.max_tank_failures})")
+                    else:
+                        # Success - reset failure counter
+                        if self.tank_fetch_failures > 0:
+                            if self.debug:
+                                print(f"  Tank fetch recovered (was {self.tank_fetch_failures} failures)")
+                        self.tank_fetch_failures = 0
+
+                    # SAFETY: Turn off override only after multiple consecutive failures
+                    if self.tank_fetch_failures >= self.max_tank_failures and self.relay_control_enabled:
                         relay_status = self.get_relay_status()
                         if relay_status['supply_override'] == 'ON':
                             if self.debug:
-                                print(f"  → SAFETY: Cannot read tank level, turning off override to prevent overflow")
+                                print(f"  → SAFETY: Cannot read tank level after {self.tank_fetch_failures} attempts, turning off override to prevent overflow")
 
                             from monitor.relay import set_supply_override
                             if set_supply_override('OFF', debug=self.debug):
                                 self.log_state_event('OVERRIDE_SHUTOFF',
-                                    'Safety shutoff: cannot read tank level (possible internet outage)')
+                                    f'Safety shutoff: cannot read tank level after {self.tank_fetch_failures} attempts (possible internet outage)')
 
                                 # Send urgent notification
                                 if NOTIFY_OVERRIDE_SHUTOFF and self.notification_manager.can_notify('override_shutoff_safety'):
                                     self.send_alert(
                                         'NOTIFY_OVERRIDE_OFF',
                                         f"⚠️ Override OFF - Tank Unreadable",
-                                        f"Override turned off because tank level cannot be read (possible internet outage). This prevents overflow.",
+                                        f"Override turned off because tank level cannot be read after {self.tank_fetch_failures} attempts (possible internet outage). This prevents overflow.",
                                         priority='urgent'
                                     )
+
+                                # Reset counter after taking action
+                                self.tank_fetch_failures = 0
 
                     if tank_fetch_success:
                         # Log tank level change
