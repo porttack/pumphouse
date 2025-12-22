@@ -17,13 +17,17 @@ from monitor.config import (
     DASHBOARD_MAX_EVENTS, DASHBOARD_DEFAULT_HOURS,
     SECRET_OVERRIDE_ON_TOKEN, SECRET_OVERRIDE_OFF_TOKEN,
     SECRET_BYPASS_ON_TOKEN, SECRET_BYPASS_OFF_TOKEN,
-    SECRET_PURGE_TOKEN
+    SECRET_PURGE_TOKEN, MANAGEMENT_FEE_PERCENT
 )
 from monitor.gpio_helpers import read_pressure, read_float_sensor, init_gpio, cleanup_gpio
 from monitor.tank import get_tank_data
 from monitor.check import read_temp_humidity, format_pressure_state, format_float_state
 from monitor.relay import get_all_relay_status, set_supply_override, set_bypass
 from monitor.stats import find_last_refill
+from monitor.occupancy import (
+    get_occupancy_status, get_current_and_upcoming_reservations,
+    load_reservations, format_date_short
+)
 
 # Matplotlib imports for chart generation
 import matplotlib
@@ -225,27 +229,73 @@ def chart_data():
             rows = list(reader)
 
         if len(rows) == 0:
-            return jsonify({'timestamps': [], 'gallons': []})
+            return jsonify({'timestamps': [], 'gallons': [], 'pointColors': []})
 
         # Filter by time range
         now = datetime.now()
         cutoff = now.timestamp() - (hours * 3600)
 
-        timestamps = []
-        gallons = []
+        # Import stagnation parameters
+        from monitor.config import NOTIFY_WELL_RECOVERY_STAGNATION_HOURS, NOTIFY_WELL_RECOVERY_MAX_STAGNATION_GAIN
 
+        # First pass: collect all data points in time range
+        data_points = []
         for row in rows:
             try:
                 ts = datetime.fromisoformat(row['timestamp'])
                 if ts.timestamp() >= cutoff:
-                    timestamps.append(ts.strftime('%a %H:%M')) # Format as Day HH:MM
-                    gallons.append(float(row['tank_gallons']))
+                    data_points.append({
+                        'timestamp': ts,
+                        'gallons': float(row['tank_gallons'])
+                    })
             except:
                 continue
 
+        if len(data_points) == 0:
+            return jsonify({'timestamps': [], 'gallons': [], 'pointColors': []})
+
+        # Second pass: identify stagnant periods
+        # Use simpler logic: for each point, look back 6 hours and check if gain ≤ 30 gal
+        stagnation_window_seconds = NOTIFY_WELL_RECOVERY_STAGNATION_HOURS * 3600
+
+        timestamps = []
+        gallons = []
+        point_colors = []
+
+        for i, point in enumerate(data_points):
+            timestamps.append(point['timestamp'].strftime('%a %H:%M'))
+            gallons.append(point['gallons'])
+
+            # Find the earliest point within the 6-hour lookback window
+            lookback_cutoff = point['timestamp'].timestamp() - stagnation_window_seconds
+            lookback_gallons = None
+
+            for j in range(i, -1, -1):  # Search backwards from current point
+                if data_points[j]['timestamp'].timestamp() >= lookback_cutoff:
+                    lookback_gallons = data_points[j]['gallons']
+                else:
+                    break  # Found the earliest point in window
+
+            # If we have 6+ hours of history
+            if lookback_gallons is not None and i > 0:
+                time_span = point['timestamp'].timestamp() - data_points[max(0, i - 25)]['timestamp'].timestamp()
+
+                # Only consider it stagnant if we have close to 6 hours of data
+                if time_span >= stagnation_window_seconds * 0.9:  # At least 90% of 6 hours
+                    gain = point['gallons'] - lookback_gallons
+                    if gain <= NOTIFY_WELL_RECOVERY_MAX_STAGNATION_GAIN:
+                        point_colors.append('#ff9800')  # Orange - stagnant
+                    else:
+                        point_colors.append('#4CAF50')  # Green - filling
+                else:
+                    point_colors.append('#4CAF50')  # Not enough history
+            else:
+                point_colors.append('#4CAF50')  # Not enough history
+
         return jsonify({
             'timestamps': timestamps,
-            'gallons': gallons
+            'gallons': gallons,
+            'pointColors': point_colors
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -379,6 +429,114 @@ def index():
     # Get relay status
     relay_status = get_all_relay_status()
 
+    # Get occupancy status and reservations
+    reservations_csv = 'reservations.csv'
+    occupancy_status = get_occupancy_status(reservations_csv)
+
+    # Get all reservations (for repeat guest detection across all reservations)
+    reservations = load_reservations(reservations_csv)
+
+    # Also load ALL reservations including checked out ones (for the table display)
+    all_reservations = []
+    import csv as csv_module
+    if os.path.exists(reservations_csv):
+        try:
+            with open(reservations_csv, 'r') as f:
+                reader = csv_module.DictReader(f)
+                all_reservations = list(reader)
+        except Exception as e:
+            print(f"Error loading all reservations: {e}")
+
+    # Add repeat guest detection using ALL reservations
+    guest_counts = {}
+    for res in all_reservations:
+        guest = res.get('Guest', '')
+        if guest:
+            guest_counts[guest] = guest_counts.get(guest, 0) + 1
+
+    # Get reservations with checkout in current month or next month
+    from monitor.occupancy import parse_date
+    now = datetime.now()
+
+    # Calculate current month (full month from day 1) and next month ranges
+    current_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if now.month == 12:
+        next_month_start = current_month_start.replace(year=now.year + 1, month=1)
+    else:
+        next_month_start = current_month_start.replace(month=now.month + 1)
+
+    if next_month_start.month == 12:
+        month_after_next = next_month_start.replace(year=next_month_start.year + 1, month=1)
+    else:
+        month_after_next = next_month_start.replace(month=next_month_start.month + 1)
+
+    # Check if totals parameter matches secret
+    from monitor.config import SECRET_TOTALS_TOKEN
+    show_totals = request.args.get('totals') == SECRET_TOTALS_TOKEN if SECRET_TOTALS_TOKEN else False
+
+    # Filter reservations - ONLY based on checkout month, using ALL reservations including checked out
+    reservation_list = []
+    for res in all_reservations:
+        checkout_date = parse_date(res.get('Checkout'))
+
+        if checkout_date:
+            # Include ONLY if checkout is in current or next month
+            if current_month_start <= checkout_date < month_after_next:
+
+                # Calculate net income (subtract management fee)
+                try:
+                    gross_income = float(res.get('Income', '0'))
+                    net_income = gross_income * (1 - MANAGEMENT_FEE_PERCENT / 100)
+                    res['gross_income'] = gross_income
+                    res['net_income'] = net_income
+                except:
+                    res['gross_income'] = 0
+                    res['net_income'] = 0
+
+                # Mark repeat guests
+                guest = res.get('Guest', '')
+                if guest and guest_counts.get(guest, 0) > 1:
+                    res['repeat_guest'] = 'Yes'
+                else:
+                    res['repeat_guest'] = 'No'
+
+                reservation_list.append(res)
+
+    # Sort by checkout date
+    reservation_list.sort(key=lambda x: parse_date(x.get('Checkout')) or datetime.min)
+
+    # Calculate monthly totals based on checkout month
+    monthly_totals = {}
+    for res in reservation_list:
+        checkout_date = parse_date(res.get('Checkout'))
+        if checkout_date:
+            month_key = checkout_date.strftime('%Y-%m')
+            if month_key not in monthly_totals:
+                monthly_totals[month_key] = {'gross': 0, 'net': 0, 'month_name': checkout_date.strftime('%B %Y')}
+
+            try:
+                gross = float(res.get('Income', '0'))
+                monthly_totals[month_key]['gross'] += gross
+                monthly_totals[month_key]['net'] += res.get('net_income', 0)
+            except:
+                pass
+
+    # Add running total field to each reservation
+    running_total = 0
+    current_checkout_month = None
+    for res in reservation_list:
+        checkout_date = parse_date(res.get('Checkout'))
+        if checkout_date:
+            checkout_month = checkout_date.strftime('%Y-%m')
+
+            # Reset running total on month change
+            if current_checkout_month != checkout_month:
+                running_total = 0
+                current_checkout_month = checkout_month
+
+            running_total += res.get('net_income', 0)
+            res['monthly_total'] = running_total
+
     return render_template('status.html',
                          version=__version__,
                          sensor_data=sensor_data,
@@ -393,8 +551,12 @@ def index():
                          event_rows=event_rows,
                          stats=stats,
                          relay_status=relay_status,
+                         occupancy_status=occupancy_status,
+                         reservation_list=reservation_list,
+                         show_totals=show_totals,
                          format_pressure_state=format_pressure_state,
                          format_float_state=format_float_state,
+                         format_date_short=format_date_short,
                          now=datetime.now(),
                          startup_time=STARTUP_TIME,
                          default_hours=DASHBOARD_DEFAULT_HOURS)

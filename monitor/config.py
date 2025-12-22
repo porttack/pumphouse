@@ -81,10 +81,6 @@ NOTIFY_BACKFLUSH_WINDOW_SNAPSHOTS = 3  # Look back N snapshots (2=30min, 3=45min
 NOTIFY_BACKFLUSH_TIME_START = "00:00"  # Start of backflush window (HH:MM)
 NOTIFY_BACKFLUSH_TIME_END = "04:30"  # End of backflush window (HH:MM)
 
-# Tank Stopped Filling Detection
-TANK_FILLING_WINDOW_MINUTES = 120  # Look back this long to determine if filling
-TANK_FILLING_THRESHOLD = 15  # Gallons gained over window to be considered "filling"
-
 # Notification Cooldowns (prevent spam)
 MIN_NOTIFICATION_INTERVAL = 300  # Minimum 5 minutes between same notification type
 
@@ -96,6 +92,9 @@ MAX_PRESSURE_LOG_INTERVAL = 1800  # Log at least every 30 minutes when pressure 
 # Common types: TANK_LEVEL, PRESSURE_HIGH, PRESSURE_LOW, INIT, SHUTDOWN, FLOAT_CALLING, FLOAT_FULL
 DASHBOARD_HIDE_EVENT_TYPES = ['TANK_LEVEL']  # Hide noisy tank level change events
 DASHBOARD_MAX_EVENTS = 500  # Maximum number of events to show in dashboard and emails (~7 days)
+
+# Reservation/Rental Income Configuration
+MANAGEMENT_FEE_PERCENT = 36  # Percentage paid to management company (subtracted from displayed income)
 
 # Default file paths
 DEFAULT_LOG_FILE = 'pressure_log.txt'
@@ -148,6 +147,7 @@ SECRET_OVERRIDE_OFF_TOKEN = ''
 SECRET_BYPASS_ON_TOKEN = ''
 SECRET_BYPASS_OFF_TOKEN = ''
 SECRET_PURGE_TOKEN = ''
+SECRET_TOTALS_TOKEN = ''  # Token to show income totals on dashboard
 
 # Load secrets from secrets file
 SECRETS_FILE = Path.home() / '.config' / 'pumphouse' / 'secrets.conf'
@@ -183,5 +183,7 @@ if SECRETS_FILE.exists():
                         SECRET_BYPASS_OFF_TOKEN = value
                     elif key == 'SECRET_PURGE_TOKEN':
                         SECRET_PURGE_TOKEN = value
+                    elif key == 'SECRET_TOTALS_TOKEN':
+                        SECRET_TOTALS_TOKEN = value
     except Exception as e:
         print(f"Warning: Could not load secrets file {SECRETS_FILE}: {e}")

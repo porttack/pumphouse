@@ -313,6 +313,17 @@
                     <div class="status-value">{{ "%.1f"|format(sensor_data.temp) }}°F / {{ "%.1f"|format(sensor_data.humidity) }}%</div>
                 </div>
                 {% endif %}
+                <div class="status-item">
+                    <div class="status-label">Occupancy</div>
+                    <div class="status-value {{ 'calling' if occupancy_status.occupied else 'full' }}">
+                        {{ occupancy_status.status_text }}
+                    </div>
+                    {% if occupancy_status.next_checkin %}
+                    <div class="status-label" style="margin-top: 8px; font-size: 11px;">
+                        Next check-in: {{ occupancy_status.next_checkin }}
+                    </div>
+                    {% endif %}
+                </div>
             </div>
         </div>
         {% endif %}
@@ -332,6 +343,49 @@
                 <canvas id="tankChart"></canvas>
             </div>
         </div>
+
+        <!-- Reservations Section -->
+        {% if reservation_list %}
+        <div class="section">
+            <h2>RESERVATIONS - CURRENT & NEXT MONTH</h2>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Check-In</th>
+                            <th>Check-Out</th>
+                            <th>Nights</th>
+                            <th>Guest Type</th>
+                            {% if show_totals %}
+                            <th>Repeat</th>
+                            <th>Booking</th>
+                            <th>Gross</th>
+                            <th>Net</th>
+                            <th>Total</th>
+                            {% endif %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for res in reservation_list %}
+                        <tr>
+                            <td>{{ format_date_short(res['Check-In']) }}</td>
+                            <td>{{ format_date_short(res['Checkout']) }}</td>
+                            <td style="text-align: center;">{{ res['Nights'] }}</td>
+                            <td>{{ 'Owner' if 'Owner' in res['Type'] else 'Guest' }}</td>
+                            {% if show_totals %}
+                            <td style="text-align: center;">{{ res.get('repeat_guest', '?') }}</td>
+                            <td>{{ res['Type'] }}</td>
+                            <td style="text-align: right;">${{ "%.0f"|format(res.get('gross_income', 0)) }}</td>
+                            <td style="text-align: right;">${{ "%.0f"|format(res.get('net_income', 0)) }}</td>
+                            <td style="text-align: right; font-weight: bold;">${{ "%.0f"|format(res.get('monthly_total', 0)) }}</td>
+                            {% endif %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
 
         <!-- Snapshots Section -->
         {% if snapshot_headers %}
@@ -441,7 +495,9 @@
                         fill: true,
                         tension: 0.1,
                         pointRadius: 2,
-                        pointHoverRadius: 5
+                        pointHoverRadius: 5,
+                        pointBackgroundColor: data.pointColors || '#4CAF50',
+                        pointBorderColor: data.pointColors || '#4CAF50'
                     }]
                 },
                 options: {

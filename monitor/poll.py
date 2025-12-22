@@ -12,7 +12,6 @@ from monitor.config import (
     ENABLE_OVERRIDE_SHUTOFF, OVERRIDE_SHUTOFF_THRESHOLD,
     OVERRIDE_ON_THRESHOLD,
     NOTIFY_OVERRIDE_SHUTOFF, NOTIFY_WELL_RECOVERY_THRESHOLD,
-    TANK_FILLING_WINDOW_MINUTES, TANK_FILLING_THRESHOLD,
     DASHBOARD_URL,
     ENABLE_DAILY_STATUS_EMAIL, DAILY_STATUS_EMAIL_TIME, DAILY_STATUS_EMAIL_CHART_HOURS
 )
@@ -23,6 +22,7 @@ from monitor.state import SystemState
 from monitor.notifications import NotificationManager
 from monitor.ntfy import send_notification
 from monitor.email_notifier import send_email_notification
+from monitor.occupancy import is_occupied, load_reservations
 
 def estimate_gallons(duration_seconds):
     """Estimate gallons pumped based on pressure duration"""
@@ -164,10 +164,6 @@ class SimplifiedMonitor:
 
         # Tank tracking for delta
         self.last_snapshot_tank_gallons = None
-
-        # Tank stopped filling detection
-        self.tank_was_filling = False
-        self.tank_gallons_history = []  # Store (timestamp, gallons) tuples
 
         # Tank fetch failure tracking
         self.tank_fetch_failures = 0
@@ -641,6 +637,17 @@ class SimplifiedMonitor:
                     if self.state.tank_gallons is not None and self.last_snapshot_tank_gallons is not None:
                         tank_gallons_delta = self.state.tank_gallons - self.last_snapshot_tank_gallons
 
+                    # Check occupancy status
+                    occupied_status = 'NO'
+                    try:
+                        reservations = load_reservations('reservations.csv')
+                        occupancy = is_occupied(reservations)
+                        if occupancy['occupied']:
+                            occupied_status = 'YES'
+                    except Exception as e:
+                        if self.debug:
+                            print(f"Could not check occupancy: {e}")
+
                     log_snapshot(
                         self.snapshots_file,
                         snapshot_data['duration'],
@@ -654,42 +661,15 @@ class SimplifiedMonitor:
                         snapshot_data['pressure_high_percent'],
                         snapshot_data['estimated_gallons'],
                         snapshot_data['purge_count'],
-                        snapshot_data['relay_status']
+                        snapshot_data['relay_status'],
+                        occupied_status
                     )
 
                     # Update last snapshot tank gallons for next delta calculation
                     self.last_snapshot_tank_gallons = self.state.tank_gallons
 
-                    # Track tank filling status for stopped filling detection
-                    if self.state.tank_gallons is not None:
-                        # Add current reading to history
-                        self.tank_gallons_history.append((current_time, self.state.tank_gallons))
-
-                        # Keep only last TANK_FILLING_WINDOW_MINUTES of history
-                        cutoff_time = current_time - (TANK_FILLING_WINDOW_MINUTES * 60)
-                        self.tank_gallons_history = [
-                            (ts, gal) for ts, gal in self.tank_gallons_history
-                            if ts >= cutoff_time
-                        ]
-
-                        # Calculate net change over the window
-                        if len(self.tank_gallons_history) >= 2:
-                            oldest_gallons = self.tank_gallons_history[0][1]
-                            current_gallons = self.tank_gallons_history[-1][1]
-                            net_change = current_gallons - oldest_gallons
-
-                            # Determine if currently filling
-                            currently_filling = net_change > TANK_FILLING_THRESHOLD
-
-                            # Detect transition from filling to not filling
-                            if self.tank_was_filling and not currently_filling:
-                                self.log_state_event('TANK_STOPPED_FILLING',
-                                    f'Stopped at {self.state.tank_gallons:.0f} gal (was filling, now flat)')
-                                if self.debug:
-                                    print(f"  Tank stopped filling at {self.state.tank_gallons:.0f} gal")
-
-                            # Update state
-                            self.tank_was_filling = currently_filling
+                    # TANK_STOPPED_FILLING detection removed - consolidated with 6-hour well stagnation logic
+                    # Well recovery notifications already handle stagnant period detection
 
                     if self.debug:
                         print(f"\n{datetime.now().strftime('%H:%M:%S')} - SNAPSHOT")
