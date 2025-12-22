@@ -1,0 +1,382 @@
+#!/usr/bin/env python3
+"""
+Check for new reservations and alert via notification system.
+
+Compares current reservations.csv with previous snapshot to detect new bookings.
+Logs new reservations to events.csv and sends notifications.
+
+Usage:
+    python check_new_reservations.py [--debug]
+"""
+
+import argparse
+import csv
+import os
+import sys
+from datetime import datetime
+from pathlib import Path
+
+# Add monitor module to path
+sys.path.insert(0, str(Path(__file__).parent / 'monitor'))
+
+def load_reservations_csv(filepath):
+    """
+    Load reservations from CSV file.
+
+    Returns:
+        dict: {reservation_id: reservation_data_dict}
+    """
+    reservations = {}
+
+    if not os.path.exists(filepath):
+        return reservations
+
+    try:
+        with open(filepath, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                res_id = row.get('Reservation Id')
+                if res_id:
+                    reservations[res_id] = row
+    except Exception as e:
+        print(f"ERROR reading {filepath}: {e}")
+
+    return reservations
+
+def save_snapshot(current_csv, snapshot_csv):
+    """Save current reservations as snapshot for next comparison."""
+    try:
+        import shutil
+        shutil.copy2(current_csv, snapshot_csv)
+        return True
+    except Exception as e:
+        print(f"ERROR saving snapshot: {e}")
+        return False
+
+def detect_new_reservations(current_file, snapshot_file, debug=False):
+    """
+    Compare current reservations with snapshot to find new bookings.
+
+    Args:
+        current_file: Path to current reservations.csv
+        snapshot_file: Path to previous snapshot
+        debug: Print debug info
+
+    Returns:
+        list: List of new reservation dicts
+    """
+    current = load_reservations_csv(current_file)
+    previous = load_reservations_csv(snapshot_file)
+
+    if debug:
+        print(f"Current reservations: {len(current)}")
+        print(f"Previous reservations: {len(previous)}")
+
+    # Find reservation IDs that are in current but not in previous
+    new_ids = set(current.keys()) - set(previous.keys())
+
+    new_reservations = [current[rid] for rid in new_ids]
+
+    # Sort by Check-In date (newest first)
+    new_reservations.sort(key=lambda x: x.get('Check-In', ''), reverse=True)
+
+    return new_reservations
+
+def log_new_reservation(reservation):
+    """
+    Log new reservation to events.csv.
+
+    Args:
+        reservation: Dict with reservation data
+    """
+    try:
+        events_file = Path(__file__).parent / 'events.csv'
+
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        guest = reservation.get('Guest', 'Unknown')
+        checkin = reservation.get('Check-In', 'Unknown')
+        checkout = reservation.get('Checkout', 'Unknown')
+        nights = reservation.get('Nights', '?')
+        res_type = reservation.get('Type', 'Unknown')
+        income = reservation.get('Income', '0')
+
+        event_data = {
+            'timestamp': timestamp,
+            'event_type': 'NEW_RESERVATION',
+            'pressure_state': '',
+            'float_state': '',
+            'tank_gallons': '',
+            'tank_depth': '',
+            'tank_percentage': '',
+            'estimated_gallons': '',
+            'relay_bypass': '',
+            'relay_supply_override': '',
+            'notes': f"{guest} | {checkin} to {checkout} ({nights}n) | {res_type} | ${income}"
+        }
+
+        # Check if file exists to determine if we need headers
+        file_exists = events_file.exists()
+
+        with open(events_file, 'a', newline='') as f:
+            # Read first line to get field names from existing file
+            if file_exists:
+                with open(events_file, 'r') as rf:
+                    reader = csv.DictReader(rf)
+                    fieldnames = reader.fieldnames
+            else:
+                # Match the existing events.csv format
+                fieldnames = ['timestamp', 'event_type', 'pressure_state', 'float_state',
+                             'tank_gallons', 'tank_depth', 'tank_percentage', 'estimated_gallons',
+                             'relay_bypass', 'relay_supply_override', 'notes']
+
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
+
+            if not file_exists:
+                writer.writeheader()
+
+            writer.writerow(event_data)
+
+        return True
+
+    except Exception as e:
+        print(f"ERROR logging to events.csv: {e}")
+        return False
+
+def send_notification(reservation, debug=False):
+    """
+    Send notification for new reservation.
+
+    Args:
+        reservation: Dict with reservation data
+        debug: Print debug info
+    """
+    try:
+        # Import notification modules
+        from monitor.config import ENABLE_NOTIFICATIONS
+        from monitor.ntfy import send_notification as ntfy_send
+
+        if not ENABLE_NOTIFICATIONS:
+            if debug:
+                print("Notifications disabled in config")
+            return
+
+        guest = reservation.get('Guest', 'Unknown')
+        checkin = reservation.get('Check-In', 'Unknown')
+        checkout = reservation.get('Checkout', 'Unknown')
+        nights = reservation.get('Nights', '?')
+        res_type = reservation.get('Type', 'Unknown')
+        income = reservation.get('Income', '0')
+        booked_date = reservation.get('Booked Date', 'Unknown')
+
+        title = f"New Reservation - {guest}"
+        message = (
+            f"Check-in: {checkin}\n"
+            f"Check-out: {checkout}\n"
+            f"Nights: {nights}\n"
+            f"Type: {res_type}\n"
+            f"Income: ${income}\n"
+            f"Booked: {booked_date}"
+        )
+
+        # Send ntfy notification
+        try:
+            ntfy_send(title, message, tags=['calendar', 'house'])
+            if debug:
+                print(f"✓ Sent ntfy notification")
+        except Exception as e:
+            if debug:
+                print(f"ntfy notification failed: {e}")
+
+    except Exception as e:
+        print(f"ERROR sending notification: {e}")
+
+def check_checkin_checkout_events(events_file, debug=False):
+    """
+    Check if we need to log CHECK-IN or CHECK-OUT events based on occupancy changes.
+
+    Args:
+        events_file: Path to events.csv
+        debug: Print debug info
+
+    Returns:
+        tuple: (checkin_event, checkout_event) - either can be dict or None
+    """
+    try:
+        from monitor.occupancy import is_occupied, load_reservations, get_checkin_datetime, get_checkout_datetime
+        from datetime import datetime, timedelta
+
+        reservations = load_reservations('reservations.csv')
+        now = datetime.now()
+
+        # Check recent CHECK-IN events (within last 4 hours)
+        for res in reservations:
+            checkin = get_checkin_datetime(res.get('Check-In'))
+            if checkin:
+                # If check-in was within the last 4 hours, log it if not already logged
+                time_since_checkin = (now - checkin).total_seconds()
+                if 0 < time_since_checkin < 14400:  # 4 hours = 14400 seconds
+                    # Check if we already logged this check-in
+                    if not was_event_logged(events_file, 'CHECK-IN', res.get('Guest'), within_hours=24):
+                        if debug:
+                            print(f"CHECK-IN event detected for {res.get('Guest')}")
+                        return ({'type': 'CHECK-IN', 'reservation': res}, None)
+
+        # Check recent CHECK-OUT events (within last 4 hours)
+        for res in reservations:
+            checkout = get_checkout_datetime(res.get('Checkout'))
+            if checkout:
+                # If check-out was within the last 4 hours, log it if not already logged
+                time_since_checkout = (now - checkout).total_seconds()
+                if 0 < time_since_checkout < 14400:  # 4 hours
+                    if not was_event_logged(events_file, 'CHECK-OUT', res.get('Guest'), within_hours=24):
+                        if debug:
+                            print(f"CHECK-OUT event detected for {res.get('Guest')}")
+                        return (None, {'type': 'CHECK-OUT', 'reservation': res})
+
+    except Exception as e:
+        if debug:
+            print(f"Error checking CHECK-IN/OUT events: {e}")
+
+    return (None, None)
+
+def was_event_logged(events_file, event_type, guest_name, within_hours=24):
+    """Check if an event was already logged recently for a guest."""
+    try:
+        from datetime import datetime, timedelta
+
+        cutoff_time = datetime.now() - timedelta(hours=within_hours)
+
+        with open(events_file, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row.get('event_type') == event_type:
+                    # Check if notes contain guest name
+                    if guest_name in row.get('notes', ''):
+                        # Check timestamp
+                        try:
+                            ts = datetime.strptime(row['timestamp'], '%Y-%m-%d %H:%M:%S')
+                            if ts >= cutoff_time:
+                                return True
+                        except:
+                            pass
+    except:
+        pass
+
+    return False
+
+def log_checkin_checkout_event(event_data, events_file):
+    """Log CHECK-IN or CHECK-OUT event to events.csv."""
+    try:
+        from datetime import datetime
+
+        res = event_data['reservation']
+        event_type = event_data['type']
+
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        guest = res.get('Guest', 'Unknown')
+        checkin = res.get('Check-In', '')
+        checkout = res.get('Checkout', '')
+        nights = res.get('Nights', '')
+        res_type = res.get('Type', '')
+
+        event_row = {
+            'timestamp': timestamp,
+            'event_type': event_type,
+            'pressure_state': '',
+            'float_state': '',
+            'tank_gallons': '',
+            'tank_depth': '',
+            'tank_percentage': '',
+            'estimated_gallons': '',
+            'relay_bypass': '',
+            'relay_supply_override': '',
+            'notes': f"{guest} | {checkin} to {checkout} ({nights}n) | {res_type}"
+        }
+
+        # Check if file exists
+        file_exists = Path(events_file).exists()
+
+        with open(events_file, 'a', newline='') as f:
+            if file_exists:
+                with open(events_file, 'r') as rf:
+                    reader = csv.DictReader(rf)
+                    fieldnames = reader.fieldnames
+            else:
+                fieldnames = ['timestamp', 'event_type', 'pressure_state', 'float_state',
+                             'tank_gallons', 'tank_depth', 'tank_percentage', 'estimated_gallons',
+                             'relay_bypass', 'relay_supply_override', 'notes']
+
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(event_row)
+
+        print(f"✓ Logged {event_type} for {guest}")
+        return True
+
+    except Exception as e:
+        print(f"ERROR logging {event_data['type']}: {e}")
+        return False
+
+def main():
+    parser = argparse.ArgumentParser(description='Check for new reservations')
+    parser.add_argument('--debug', action='store_true', help='Enable debug output')
+    args = parser.parse_args()
+
+    script_dir = Path(__file__).parent
+    current_file = script_dir / 'reservations.csv'
+    snapshot_file = script_dir / 'reservations_snapshot.csv'
+    events_file = script_dir / 'events.csv'
+
+    if not current_file.exists():
+        print(f"No reservations file found at {current_file}")
+        print("Run scrape_reservations.py first")
+        return 1
+
+    # Check for CHECK-IN/CHECK-OUT events
+    checkin_event, checkout_event = check_checkin_checkout_events(events_file, debug=args.debug)
+
+    if checkin_event:
+        log_checkin_checkout_event(checkin_event, events_file)
+
+    if checkout_event:
+        log_checkin_checkout_event(checkout_event, events_file)
+
+    # Detect new reservations
+    new_reservations = detect_new_reservations(current_file, snapshot_file, debug=args.debug)
+
+    if new_reservations:
+        print(f"Found {len(new_reservations)} new reservation(s)!")
+        print()
+
+        for res in new_reservations:
+            guest = res.get('Guest', 'Unknown')
+            checkin = res.get('Check-In', 'Unknown')
+            checkout = res.get('Checkout', 'Unknown')
+            res_type = res.get('Type', 'Unknown')
+            income = res.get('Income', '0')
+
+            print(f"  {guest}")
+            print(f"  {checkin} → {checkout}")
+            print(f"  {res_type} | ${income}")
+            print()
+
+            # Log to events.csv
+            log_new_reservation(res)
+
+            # Send notification
+            send_notification(res, debug=args.debug)
+
+        print(f"✓ Logged {len(new_reservations)} new reservation(s) to events.csv")
+
+    else:
+        if args.debug:
+            print("No new reservations found")
+
+    # Save current as snapshot for next run
+    save_snapshot(current_file, snapshot_file)
+
+    return 0
+
+if __name__ == '__main__':
+    sys.exit(main())

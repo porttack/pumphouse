@@ -29,7 +29,7 @@ def initialize_snapshots_csv(filepath):
                 'float_state', 'float_ever_calling', 'float_always_full',
                 'pressure_high_seconds', 'pressure_high_percent',
                 'estimated_gallons_pumped', 'purge_count',
-                'relay_bypass', 'relay_supply_override'
+                'relay_bypass', 'relay_supply_override', 'occupied'
             ])
         return True
     except FileExistsError:
@@ -63,7 +63,7 @@ def log_event(filepath, event_type, pressure_state, float_state, tank_gallons,
 def log_snapshot(filepath, duration, tank_gallons, tank_gallons_delta, tank_data_age,
                 float_state, float_ever_calling, float_always_full,
                 pressure_high_seconds, pressure_high_percent,
-                estimated_gallons, purge_count, relay_status):
+                estimated_gallons, purge_count, relay_status, occupied=''):
     """Log a snapshot to snapshots.csv"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
 
@@ -88,5 +88,6 @@ def log_snapshot(filepath, duration, tank_gallons, tank_gallons_delta, tank_data
             f'{estimated_gallons:+.2f}',  # Always includes sign
             purge_count,
             relay_status.get('bypass', ''),
-            relay_status.get('supply_override', '')
+            relay_status.get('supply_override', ''),
+            occupied or ''
         ])
