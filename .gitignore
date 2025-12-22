@@ -34,3 +34,8 @@ secrets.conf
 .env
 notification_state.json
 relay_state.json
+
+# Debug and backup files
+*_old.py
+*_debug.html
+reservations_debug.html
