@@ -332,12 +332,12 @@
         <div class="section">
             <h2>TANK LEVEL HISTORY</h2>
             <div style="margin-bottom: 15px;">
-                <a href="?hours=6" class="time-btn" data-hours="6">6h</a>
-                <a href="?hours=12" class="time-btn" data-hours="12">12h</a>
-                <a href="?hours=24" class="time-btn" data-hours="24">24h</a>
-                <a href="?hours=72" class="time-btn" data-hours="72">3d</a>
-                <a href="?hours=168" class="time-btn" data-hours="168">7d</a>
-                <a href="?hours=336" class="time-btn" data-hours="336">14d</a>
+                <a href="#" class="time-btn" data-hours="6">6h</a>
+                <a href="#" class="time-btn" data-hours="12">12h</a>
+                <a href="#" class="time-btn" data-hours="24">24h</a>
+                <a href="#" class="time-btn" data-hours="72">3d</a>
+                <a href="#" class="time-btn" data-hours="168">7d</a>
+                <a href="#" class="time-btn" data-hours="336">14d</a>
             </div>
             <div style="position: relative; height: 300px;">
                 <canvas id="tankChart"></canvas>
@@ -560,6 +560,23 @@
                 } else {
                     btn.classList.remove('active');
                 }
+            });
+
+            // Add click handlers to time buttons to preserve other URL parameters
+            document.querySelectorAll('.time-btn').forEach(btn => {
+                btn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const newHours = parseInt(this.dataset.hours);
+
+                    // Get current URL parameters
+                    const urlParams = new URLSearchParams(window.location.search);
+
+                    // Update hours parameter
+                    urlParams.set('hours', newHours);
+
+                    // Navigate to new URL with all parameters preserved
+                    window.location.search = urlParams.toString();
+                });
             });
 
             // Load chart with selected duration
