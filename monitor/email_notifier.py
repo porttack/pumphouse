@@ -45,7 +45,8 @@ from monitor.config import (
     SECRET_OVERRIDE_OFF_TOKEN,
     SECRET_BYPASS_ON_TOKEN,
     SECRET_BYPASS_OFF_TOKEN,
-    SECRET_PURGE_TOKEN
+    SECRET_PURGE_TOKEN,
+    SECRET_TOTALS_TOKEN
 )
 
 
@@ -290,11 +291,14 @@ def get_recent_events(filepath='events.csv', max_rows=None, hide_types=None):
 
 
 def fetch_system_status(debug=False):
-    """Fetch current system status (tank, sensors, stats, relays, events)"""
+    """Fetch current system status (tank, sensors, stats, relays, events, occupancy, reservations)"""
     try:
         from monitor.tank import get_tank_data
         from monitor.gpio_helpers import read_pressure, read_float_sensor
         from monitor.relay import get_all_relay_status
+        from monitor.occupancy import get_occupancy_status, load_reservations, get_current_and_upcoming_reservations, parse_date, format_date_short
+        import os
+        import csv
 
         # Fetch tank data
         tank_data = get_tank_data(TANK_URL)
@@ -317,13 +321,54 @@ def fetch_system_status(debug=False):
         # Get recent events
         event_headers, event_rows = get_recent_events()
 
+        # Get occupancy status and reservations
+        occupancy_status = None
+        reservation_list = []
+        try:
+            reservations_csv = 'reservations.csv'
+            occupancy_status = get_occupancy_status(reservations_csv)
+
+            # Load all reservations including checked out
+            all_reservations = []
+            if os.path.exists(reservations_csv):
+                with open(reservations_csv, 'r') as f:
+                    reader = csv.DictReader(f)
+                    all_reservations = list(reader)
+
+            # Filter for current and next month checkouts
+            now = datetime.now()
+            current_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            if now.month == 12:
+                next_month_start = current_month_start.replace(year=now.year + 1, month=1)
+            else:
+                next_month_start = current_month_start.replace(month=now.month + 1)
+
+            if next_month_start.month == 12:
+                month_after_next = next_month_start.replace(year=next_month_start.year + 1, month=1)
+            else:
+                month_after_next = next_month_start.replace(month=next_month_start.month + 1)
+
+            for res in all_reservations:
+                checkout_date = parse_date(res.get('Checkout'))
+                if checkout_date and current_month_start <= checkout_date < month_after_next:
+                    reservation_list.append(res)
+
+            # Sort by checkout date
+            reservation_list.sort(key=lambda x: parse_date(x.get('Checkout')) or datetime.min)
+
+        except Exception as e:
+            if debug:
+                print(f"Warning: Could not get occupancy/reservations: {e}", file=sys.stderr)
+
         return {
             'tank': tank_data,
             'pressure': pressure,
             'float': float_state,
             'relay': relay_status,
             'stats': stats,
-            'events': {'headers': event_headers, 'rows': event_rows}
+            'events': {'headers': event_headers, 'rows': event_rows},
+            'occupancy': occupancy_status,
+            'reservations': reservation_list
         }
     except Exception as e:
         if debug:
@@ -371,9 +416,21 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
     relay_status = status_data.get('relay') if status_data else None
     stats = status_data.get('stats') if status_data else None
     events_data = status_data.get('events') if status_data else None
+    occupancy_status = status_data.get('occupancy') if status_data else None
+    reservation_list = status_data.get('reservations') if status_data else None
 
     # Get the dashboard link to use in the email
-    email_dashboard_url = DASHBOARD_EMAIL_URL if DASHBOARD_EMAIL_URL else f"{dashboard_url}?hours={DAILY_STATUS_EMAIL_CHART_HOURS}"
+    # Add totals parameter if secret token is configured
+    if DASHBOARD_EMAIL_URL:
+        email_dashboard_url = DASHBOARD_EMAIL_URL
+        # Add totals parameter if not already present and token exists
+        if SECRET_TOTALS_TOKEN and 'totals=' not in email_dashboard_url:
+            separator = '&' if '?' in email_dashboard_url else '?'
+            email_dashboard_url = f"{email_dashboard_url}{separator}totals={SECRET_TOTALS_TOKEN}"
+    else:
+        email_dashboard_url = f"{dashboard_url}?hours={DAILY_STATUS_EMAIL_CHART_HOURS}"
+        if SECRET_TOTALS_TOKEN:
+            email_dashboard_url += f"&totals={SECRET_TOTALS_TOKEN}"
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -735,6 +792,22 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
                         <div class="status-value">{stats['pressure_high_min_24hr']:.0f} min</div>
                     </div>
 """
+        if occupancy_status:
+            occupancy_color = '#ff9800' if occupancy_status.get('occupied') else '#4CAF50'
+            html += f"""
+                    <div class="status-item" style="border-left-color: {occupancy_color};">
+                        <div class="status-label">Occupancy</div>
+                        <div class="status-value">{occupancy_status.get('status_text', 'UNKNOWN')}</div>
+"""
+            if occupancy_status.get('next_checkin'):
+                html += f"""
+                        <div class="status-label" style="margin-top: 8px; font-size: 11px;">
+                            Next check-in: {occupancy_status.get('next_checkin')}
+                        </div>
+"""
+            html += """
+                    </div>
+"""
         html += """
                 </div>
             </div>
@@ -747,6 +820,43 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
                 <h2>TANK LEVEL HISTORY</h2>
                 <div style="text-align: center;">
                     <img src="cid:chart_image" alt="Tank Level Chart" style="max-width: 100%; height: auto; border: 1px solid #444; border-radius: 4px;">
+                </div>
+            </div>
+"""
+
+    # Add reservations table if available
+    if reservation_list:
+        from monitor.occupancy import format_date_short
+        html += f"""
+            <div class="section">
+                <h2>RESERVATIONS - CURRENT & NEXT MONTH</h2>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Check-In</th>
+                                <th>Check-Out</th>
+                                <th>Nights</th>
+                                <th>Guest Type</th>
+                                <th>Booking</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+"""
+        for res in reservation_list:
+            guest_type = 'Owner' if 'Owner' in res.get('Type', '') else 'Guest'
+            html += f"""
+                            <tr>
+                                <td>{format_date_short(res.get('Check-In', ''))}</td>
+                                <td>{format_date_short(res.get('Checkout', ''))}</td>
+                                <td style="text-align: center;">{res.get('Nights', '')}</td>
+                                <td>{guest_type}</td>
+                                <td>{res.get('Type', '')}</td>
+                            </tr>
+"""
+        html += """
+                        </tbody>
+                    </table>
                 </div>
             </div>
 """
@@ -788,9 +898,15 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
 
     # Add dashboard and camera links if available
     if dashboard_url:
+        # Add totals parameter to dashboard button if configured
+        full_dashboard_url = dashboard_url
+        if SECRET_TOTALS_TOKEN:
+            separator = '&' if '?' in full_dashboard_url else '?'
+            full_dashboard_url = f"{full_dashboard_url}{separator}totals={SECRET_TOTALS_TOKEN}"
+
         html += f"""
             <div style="text-align: center; margin: 20px 0;">
-                <a href="{dashboard_url}" class="button">View Full Dashboard</a>
+                <a href="{full_dashboard_url}" class="button">View Full Dashboard</a>
                 <a href="https://my.wyze.com/live" class="button" style="background: #607D8B; margin-left: 10px;">📹 View Camera</a>
             </div>
 """
