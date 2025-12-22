@@ -2,6 +2,37 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.14.0] - 2025-12-21
+
+### Added
+- **Chart Visual Stagnation Detection**: Tank level chart now shows stagnant periods with color-coded dots
+  - Orange dots: Stagnant period (≤30 gal gain over past 6 hours)
+  - Green dots: Filling period (>30 gal gain over past 6 hours)
+  - Uses same 6-hour stagnation definition as well recovery notifications
+  - Helps visualize when well is not producing water
+- **Reservation Privacy Protection**: Current & next month reservations table now hides sensitive columns by default
+  - Public view (no token): Shows only Check-In, Check-Out, Nights, Guest Type
+  - Owner view (?totals=income): Shows all columns including Repeat, Booking, Gross, Net, Total
+  - Uses same `SECRET_TOTALS_TOKEN` authentication as income totals
+
+### Changed
+- **Consolidated Stagnation Logic**: Unified all "stagnant" definitions to single 6-hour standard
+  - Removed `TANK_STOPPED_FILLING` event type (was using 120-minute/15-gallon threshold)
+  - Now uses only `NOTIFY_WELL_RECOVERY_STAGNATION_HOURS` (6 hours) for all stagnation detection
+  - Reduces alert spam - single notification per 6+ hour stagnation period
+  - Well recovery notifications remain unchanged (already using 6-hour logic)
+- **Configuration Cleanup**: Removed conflicting stagnation parameters
+  - Removed: `TANK_FILLING_WINDOW_MINUTES` (was 120)
+  - Removed: `TANK_FILLING_THRESHOLD` (was 15)
+  - Single source of truth: `NOTIFY_WELL_RECOVERY_STAGNATION_HOURS` and `NOTIFY_WELL_RECOVERY_MAX_STAGNATION_GAIN`
+
+### Technical
+- Added `/api/chart_data` endpoint with per-point stagnation calculation
+- Modified Chart.js configuration to use dynamic point colors via `pointBackgroundColor` and `pointBorderColor`
+- Removed TANK_STOPPED_FILLING detection from poll.py monitoring loop
+- Chart colors calculated server-side using 6-hour lookback window for each data point
+- Reservations table columns wrapped in `{% if show_totals %}` conditional blocks
+
 ## [2.13.0] - 2025-12-21
 
 ### Fixed

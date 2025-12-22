@@ -214,7 +214,6 @@ timestamp,event_type,pressure_state,float_state,tank_gallons,tank_depth,tank_per
 - **NOTIFY_WELL_DRY**: Email notification sent for potential well dry condition
 - **NOTIFY_HIGH_FLOW**: Email notification sent for high flow rate detection (fast fill mode)
 - **NOTIFY_BACKFLUSH**: Email notification sent for backflush event detection
-- **TANK_STOPPED_FILLING**: Event logged when tank stops filling (no alert)
 - **SHUTDOWN**: Clean shutdown
 
 ### Snapshots CSV (snapshots.csv)
@@ -304,12 +303,14 @@ python -m monitor.web
 ### Features
 
 - Live sensor readings (pressure, float, temperature, humidity)
-- Tank level with visual progress bar
+- Tank level with visual progress bar and current occupancy status
 - Interactive time-series chart with selectable time ranges (6h, 12h, 24h, 3d, 7d, 14d)
+- **Visual stagnation detection**: Orange dots indicate 6-hour stagnant periods (≤30 gal gain), green dots indicate filling
 - Configurable default time range (default: 72 hours / 3 days)
 - Aggregate statistics: tank level changes (1hr/24hr), pressure HIGH percentages, last 50+ gallon refill
+- Current & next month reservations table with privacy protection (detailed columns hidden unless authenticated)
 - Recent snapshots (last 10)
-- Recent events (last 20)
+- Recent events (last 20, excluding noisy TANK_LEVEL events by default)
 - Auto-refresh every 5 minutes
 - Dark theme optimized for monitoring
 
