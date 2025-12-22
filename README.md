@@ -704,6 +704,23 @@ The simplified architecture makes it easy to add:
 - Additional sensors (flow meter, leak detection)
 - Web Push notifications (notification infrastructure is already modular)
 
+## System Health Monitoring
+
+The system includes health monitoring to help diagnose unexpected reboots and system issues. See [SYSTEM_HEALTH.md](SYSTEM_HEALTH.md) for complete documentation.
+
+**Quick commands:**
+```bash
+# View recent health logs
+tail -50 system_health.log
+
+# Check current system status
+vcgencmd measure_temp
+vcgencmd get_throttled
+
+# View boot history
+journalctl --list-boots
+```
+
 ## Troubleshooting
 
 ### "GPIO busy" error
