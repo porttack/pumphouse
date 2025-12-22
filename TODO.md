@@ -14,24 +14,21 @@
 
 ### Medium Priority
 
-- [ ] Change email from address
-- [ ] Shorten email subject lines
-- [ ] Commit messages should include entire claude conversation
+- [ ] Every 6-hours, determine if float is really calling (turn overflow off temporarily)
+- [ ] Read Ecobee heat and vacation settings - automate vacation mode
 - [ ] Tank Full Confirmed - 1430 gal (this should be 3 tank reads, not 3 60-sec heartbeats)
-- [ ] What does the alert "Tank Filling" actually mean?
-- [ ] Log an event when we do a backflush
 - [ ] Log estimated GPH
 - [ ] Estimate chlorine use
 - [ ] Ignore fluctuating sensor readings - pressure & float
   - Or maybe these went away after refactoring gpio stuff ~12/13/25
-- [ ] Just show me 6 days (more than that and days of week get confusing)
-- [ ] Do we even need snapshot logs?
-  - Can help identify when float starts/stops calling
-  - Put sensor changes into graph?
+- [ ] Put sensor changes into graph? (override, occupied, bypass)
 - [ ] Matplotlib stuff should not go all the way to zero
 - [ ] Make a widget out of it for my phone and desktop
 - [ ] Camera link should go to the app on iOS
 - [ ] Is gpiozero better (less contention, no false readings)
+- [ ] Roll and compress logs
+- [ ] Backup private config (secrets.conf, etc.) in private github repo?
+- [ ] Stagnation region should restart if water drops > 20 gallons (house use)
 
 ### Low Priority
 
@@ -44,6 +41,17 @@
 ---
 
 ## Completed Items
+
+### Recent
+- [x] Remove Repeat and Booking columns unless authenticated with token (2025-12-21)
+- [x] Occupancy tracking and reservation display (2025-12-21)
+- [x] Visual stagnation detection on chart with color-coded dots (2025-12-21)
+- [x] Consolidated stagnation logic to single 6-hour definition (2025-12-21)
+- [x] Log an event when we do a backflush
+- [x] What does the alert "Tank Filling" actually mean?
+- [x] Change email from address
+- [x] Shorten email subject lines
+- [x] Commit messages should include entire claude conversation
 
 ### 2025-12-20 - Version 2.10.0
 - [x] turn on override below a threshold
