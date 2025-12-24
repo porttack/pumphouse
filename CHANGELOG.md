@@ -2,6 +2,28 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.15.0] - 2025-12-24
+
+### Added
+- **Smart Check-in/Checkout Reminders**: Automated thermostat management alerts integrated with reservations
+  - **Daily Status Email Enhancement**: At 6:00 AM, checks for same-day check-ins
+    - Normal days: Subject remains `{xxx} gal - Daily Status`
+    - Check-in days: Subject changes to `{xxx} gal - Turn on heat!`
+    - Check-in days: Message includes `⚠️ REMINDER: Tenant checking in today - turn on the heat!`
+  - **Checkout Reminder**: New 11:00 AM daily check for same-day checkouts
+    - Only sends email if someone is checking out today
+    - Subject: `{xxx} gal - Turn down thermostat!`
+    - Message: `⚠️ REMINDER: {Guest Name} checking out today - turn down the thermostat after checkout!`
+  - Both reminders include full system status, tank charts, and sensor readings
+  - Configurable via `ENABLE_CHECKOUT_REMINDER` and `CHECKOUT_REMINDER_TIME` in config.py
+
+### Technical
+- Added `CHECKOUT_REMINDER_TIME` and `ENABLE_CHECKOUT_REMINDER` configuration options
+- Integrated occupancy detection from reservations.csv into daily email workflows
+- Added `next_checkout_reminder_time` tracking to SimplifiedMonitor class
+- Both reminders use `get_next_daily_status_time()` for consistent scheduling
+- Events logged as `DAILY_STATUS_EMAIL` (with check-in flag) and `CHECKOUT_REMINDER`
+
 ## [2.14.0] - 2025-12-21
 
 ### Added
