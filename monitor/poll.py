@@ -13,7 +13,8 @@ from monitor.config import (
     OVERRIDE_ON_THRESHOLD,
     NOTIFY_OVERRIDE_SHUTOFF, NOTIFY_WELL_RECOVERY_THRESHOLD,
     DASHBOARD_URL,
-    ENABLE_DAILY_STATUS_EMAIL, DAILY_STATUS_EMAIL_TIME, DAILY_STATUS_EMAIL_CHART_HOURS
+    ENABLE_DAILY_STATUS_EMAIL, DAILY_STATUS_EMAIL_TIME, DAILY_STATUS_EMAIL_CHART_HOURS,
+    ENABLE_CHECKOUT_REMINDER, CHECKOUT_REMINDER_TIME
 )
 from monitor.gpio_helpers import read_pressure, read_float_sensor
 from monitor.tank import get_tank_data
@@ -22,7 +23,7 @@ from monitor.state import SystemState
 from monitor.notifications import NotificationManager
 from monitor.ntfy import send_notification
 from monitor.email_notifier import send_email_notification
-from monitor.occupancy import is_occupied, load_reservations
+from monitor.occupancy import is_occupied, load_reservations, get_checkout_datetime, get_checkin_datetime, parse_date
 
 def estimate_gallons(duration_seconds):
     """Estimate gallons pumped based on pressure duration"""
@@ -161,6 +162,7 @@ class SimplifiedMonitor:
         self.tank_last_updated = None
         self.next_snapshot_time = None
         self.next_daily_status_time = None
+        self.next_checkout_reminder_time = None
 
         # Tank tracking for delta
         self.last_snapshot_tank_gallons = None
@@ -352,6 +354,16 @@ class SimplifiedMonitor:
                 next_daily_dt = datetime.fromtimestamp(self.next_daily_status_time)
                 print(f"Next daily status email at: {next_daily_dt.strftime('%Y-%m-%d %H:%M:%S')}")
 
+        # Initialize checkout reminder timing
+        if ENABLE_CHECKOUT_REMINDER:
+            self.next_checkout_reminder_time = get_next_daily_status_time(
+                time.time(),
+                CHECKOUT_REMINDER_TIME
+            )
+            if self.debug:
+                next_checkout_dt = datetime.fromtimestamp(self.next_checkout_reminder_time)
+                print(f"Next checkout reminder at: {next_checkout_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+
         if self.debug:
             next_dt = datetime.fromtimestamp(self.next_snapshot_time)
             print(f"First snapshot at: {next_dt.strftime('%H:%M:%S')}")
@@ -498,11 +510,12 @@ class SimplifiedMonitor:
                             last_float_state = self.state.float_state
 
                         # Check for float confirmation (CLOSED→OPEN for N consecutive times)
+                        # This serves as backup if override is disabled or already off
                         if self.notification_manager.check_float_confirmation(self.state.float_state):
-                            if self.notification_manager.can_notify('float_full_confirmed'):
+                            if self.notification_manager.can_notify('tank_full'):
                                 current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
                                 self.send_alert(
-                                    'NOTIFY_FLOAT_FULL',
+                                    'NOTIFY_TANK_FULL',
                                     f"{current_gal:.0f} gal - Tank Full",
                                     "Float sensor confirmed FULL for 3+ readings"
                                 )
@@ -559,11 +572,11 @@ class SimplifiedMonitor:
                                     self.log_state_event('OVERRIDE_SHUTOFF',
                                         f'Auto-shutoff: tank at {self.state.tank_gallons:.0f} gal (threshold: {self.override_shutoff_threshold})')
 
-                                    # Send notification
-                                    if NOTIFY_OVERRIDE_SHUTOFF and self.notification_manager.can_notify('override_shutoff'):
+                                    # Send consolidated tank full notification (primary method)
+                                    if NOTIFY_OVERRIDE_SHUTOFF and self.notification_manager.can_notify('tank_full'):
                                         self.send_alert(
-                                            'NOTIFY_OVERRIDE_OFF',
-                                            f"{self.state.tank_gallons:.0f} gal - Override OFF",
+                                            'NOTIFY_TANK_FULL',
+                                            f"{self.state.tank_gallons:.0f} gal - Tank Full",
                                             f"Tank reached {self.state.tank_gallons:.0f} gal (threshold: {self.override_shutoff_threshold}), override turned off",
                                             priority='high'
                                         )
@@ -693,14 +706,38 @@ class SimplifiedMonitor:
                 if ENABLE_DAILY_STATUS_EMAIL and self.next_daily_status_time and current_time >= self.next_daily_status_time:
                     current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
 
+                    # Check if there's a check-in today
+                    checkin_today = False
+                    try:
+                        reservations = load_reservations('reservations.csv')
+                        today = datetime.now().date()
+                        for res in reservations:
+                            checkin_date = parse_date(res.get('Check-In'))
+                            if checkin_date and checkin_date.date() == today:
+                                checkin_today = True
+                                break
+                    except Exception as e:
+                        if self.debug:
+                            print(f"Could not check for check-ins today: {e}")
+
                     if self.debug:
                         print(f"\n{datetime.now().strftime('%H:%M:%S')} - DAILY STATUS EMAIL")
                         print(f"  Sending daily status email...")
+                        if checkin_today:
+                            print(f"  Check-in today - adding heat reminder")
+
+                    # Customize subject and message based on check-in
+                    if checkin_today:
+                        subject = f"{current_gal:.0f} gal - Turn on heat!"
+                        message = f"⚠️ REMINDER: Tenant checking in today - turn on the heat!\n\nDaily status report for {datetime.now().strftime('%A, %B %d, %Y')}"
+                    else:
+                        subject = f"{current_gal:.0f} gal - Daily Status"
+                        message = f"Daily status report for {datetime.now().strftime('%A, %B %d, %Y')}"
 
                     # Send daily status email
                     send_email_notification(
-                        subject=f"{current_gal:.0f} gal - Daily Status",
-                        message=f"Daily status report for {datetime.now().strftime('%A, %B %d, %Y')}",
+                        subject=subject,
+                        message=message,
                         priority='default',
                         dashboard_url=DASHBOARD_URL,
                         chart_url=f"{DASHBOARD_URL}api/chart.png?hours={DAILY_STATUS_EMAIL_CHART_HOURS}",
@@ -709,7 +746,7 @@ class SimplifiedMonitor:
                     )
 
                     # Log the daily status email
-                    self.log_state_event('DAILY_STATUS_EMAIL', f'Daily status email sent - {current_gal:.0f} gal')
+                    self.log_state_event('DAILY_STATUS_EMAIL', f'Daily status email sent - {current_gal:.0f} gal' + (' - Check-in today' if checkin_today else ''))
 
                     # Schedule next daily status email (same time tomorrow)
                     self.next_daily_status_time = get_next_daily_status_time(
@@ -720,6 +757,56 @@ class SimplifiedMonitor:
                     if self.debug:
                         next_daily_dt = datetime.fromtimestamp(self.next_daily_status_time)
                         print(f"  Next daily status email at: {next_daily_dt.strftime('%Y-%m-%d %H:%M:%S')}\n")
+
+                # CHECKOUT REMINDER
+                if ENABLE_CHECKOUT_REMINDER and self.next_checkout_reminder_time and current_time >= self.next_checkout_reminder_time:
+                    current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
+
+                    # Check if there's a checkout today
+                    checkout_today = False
+                    checkout_guest = None
+                    try:
+                        reservations = load_reservations('reservations.csv')
+                        today = datetime.now().date()
+                        for res in reservations:
+                            checkout_date = parse_date(res.get('Checkout'))
+                            if checkout_date and checkout_date.date() == today:
+                                checkout_today = True
+                                checkout_guest = res.get('Guest', 'Unknown')
+                                break
+                    except Exception as e:
+                        if self.debug:
+                            print(f"Could not check for checkouts today: {e}")
+
+                    # Only send if there's a checkout today
+                    if checkout_today:
+                        if self.debug:
+                            print(f"\n{datetime.now().strftime('%H:%M:%S')} - CHECKOUT REMINDER")
+                            print(f"  Sending checkout reminder - {checkout_guest} checking out today")
+
+                        # Send checkout reminder email
+                        send_email_notification(
+                            subject=f"{current_gal:.0f} gal - Turn down thermostat!",
+                            message=f"⚠️ REMINDER: {checkout_guest} checking out today - turn down the thermostat after checkout!",
+                            priority='default',
+                            dashboard_url=DASHBOARD_URL,
+                            chart_url=f"{DASHBOARD_URL}api/chart.png?hours={DAILY_STATUS_EMAIL_CHART_HOURS}",
+                            debug=self.debug,
+                            include_status=True
+                        )
+
+                        # Log the checkout reminder
+                        self.log_state_event('CHECKOUT_REMINDER', f'Checkout reminder sent - {checkout_guest} checking out')
+
+                    # Schedule next checkout reminder (same time tomorrow)
+                    self.next_checkout_reminder_time = get_next_daily_status_time(
+                        current_time,
+                        CHECKOUT_REMINDER_TIME
+                    )
+
+                    if self.debug:
+                        next_checkout_dt = datetime.fromtimestamp(self.next_checkout_reminder_time)
+                        print(f"  Next checkout reminder at: {next_checkout_dt.strftime('%Y-%m-%d %H:%M:%S')}\n")
 
                 time.sleep(self.poll_interval)
         

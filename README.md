@@ -360,6 +360,10 @@ Receive rich HTML email alerts with full system status, tank charts, and sensor 
    DAILY_STATUS_EMAIL_TIME = "06:00"  # Time in HH:MM format (24-hour)
    DAILY_STATUS_EMAIL_CHART_HOURS = 72  # Hours of history in chart (3 days)
 
+   # Checkout reminder (optional - integrates with reservations.csv)
+   ENABLE_CHECKOUT_REMINDER = True  # Send reminder when tenant checks out
+   CHECKOUT_REMINDER_TIME = "11:00"  # Time in HH:MM format (24-hour)
+
    # Dashboard settings
    DASHBOARD_DEFAULT_HOURS = 72  # Default time range for web dashboard
    DASHBOARD_EMAIL_URL = None  # Custom URL for email links (optional)
@@ -386,6 +390,9 @@ Receive rich HTML email alerts with full system status, tank charts, and sensor 
 - Priority-based formatting (green/orange/red)
 - Daily status email at configurable time (default: 6am)
 - Shortened subject lines with gallons first for better mobile display
+- **Smart Check-in/Checkout Reminders** (integrates with reservations.csv):
+  - Daily status email changes to "Turn on heat!" when tenant checks in today
+  - Checkout reminder at 11am when tenant checks out today to turn down thermostat
 
 See [EMAIL_SETUP.md](EMAIL_SETUP.md) for detailed setup instructions and troubleshooting.
 

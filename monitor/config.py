@@ -45,8 +45,8 @@ DASHBOARD_DEFAULT_HOURS = 72  # Default time range for web dashboard (hours)
 # Email Notification Configuration
 # See EMAIL_SETUP.md and secrets.conf.template for detailed configuration instructions
 ENABLE_EMAIL_NOTIFICATIONS = True  # Enable email alerts
-EMAIL_TO = "onblackberryhill@gmail.com"  # Recipient email address
-EMAIL_FROM = "onblackberryhill@gmail.com"  # Sender email address
+EMAIL_TO = "onblackberryhill+alert@gmail.com"  # Recipient email address
+EMAIL_FROM = "onblackberryhill+pumphouse@gmail.com"  # Sender email address
 EMAIL_FRIENDLY_NAME = "Pumphouse"  # Friendly name shown in email headers and footers
 EMAIL_SMTP_SERVER = ""  # SMTP server - loaded from secrets file
 EMAIL_SMTP_PORT = 587  # SMTP port - can be overridden in secrets file
@@ -58,9 +58,13 @@ ENABLE_DAILY_STATUS_EMAIL = True  # Send a daily status email
 DAILY_STATUS_EMAIL_TIME = "06:00"  # Time to send daily status email (HH:MM in 24-hour format)
 DAILY_STATUS_EMAIL_CHART_HOURS = 72  # Hours of history to show in daily status chart (default: 72 = 3 days)
 
+# Checkout Reminder Configuration
+ENABLE_CHECKOUT_REMINDER = True  # Send checkout reminder to turn down thermostat
+CHECKOUT_REMINDER_TIME = "11:00"  # Time to send checkout reminder (HH:MM in 24-hour format)
+
 # Notification Rules - Which events trigger notifications
 NOTIFY_TANK_DECREASING = [1300, 1150, 1000, 700, 500, 250]  # Alert when tank crosses these levels going DOWN
-NOTIFY_TANK_INCREASING = [500, 750, 1000, 1200, 1400]  # Alert when tank crosses these levels going UP
+NOTIFY_TANK_INCREASING = [500, 750, 1000, 1200, 1300]  # Alert when tank crosses these levels going UP
 NOTIFY_WELL_RECOVERY_THRESHOLD = 50  # Gallons gained to count as recovery
 NOTIFY_WELL_RECOVERY_STAGNATION_HOURS = 6  # Hours of flat/declining before recovery
 NOTIFY_WELL_RECOVERY_MAX_STAGNATION_GAIN = 30  # Max gallons gained during stagnation period (to filter slow fill)
