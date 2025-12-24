@@ -40,6 +40,7 @@ class NotificationManager:
             'increasing': set(),  # Set of levels we've alerted for going up
         }
         self.float_state_history = []  # Last N float states for confirmation
+        self.float_full_alerted = False  # Track if we've already alerted for current tank full
         self.last_refill_check = 0
         self.well_dry_alerted = False
         self.well_recovery_alerted_ts = None  # Timestamp of last recovery we alerted for
@@ -97,6 +98,10 @@ class NotificationManager:
         if len(self.float_state_history) > NOTIFY_FLOAT_CONFIRMATIONS + 1:
             self.float_state_history.pop(0)
 
+        # If float goes back to CLOSED, reset the alert flag for next fill cycle
+        if current_float_state == 'CLOSED/CALLING':
+            self.float_full_alerted = False
+
         # Check if we have enough history
         if len(self.float_state_history) < NOTIFY_FLOAT_CONFIRMATIONS + 1:
             return False
@@ -104,9 +109,12 @@ class NotificationManager:
         # Check pattern: was CLOSED, now OPEN for N consecutive times
         if (self.float_state_history[0] == 'CLOSED/CALLING' and
             all(s == 'OPEN/FULL' for s in self.float_state_history[1:])):
-            # Clear history so we don't alert again
-            self.float_state_history = []
-            return True
+            # Only alert once per CLOSED→OPEN transition
+            if not self.float_full_alerted:
+                self.float_full_alerted = True
+                # Clear history so pattern doesn't keep matching
+                self.float_state_history = []
+                return True
 
         return False
 
