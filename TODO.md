@@ -11,6 +11,8 @@
   - Include event details and current relay states in email body
 - [ ] one email per day (morning)
 - [ ] Option to turn on overide N times per day if < certain value
+- [ ] Email notification on new reservations
+- [ ] Change color of dots again on fast-fill
 
 ### Medium Priority
 
@@ -29,6 +31,7 @@
 - [ ] Roll and compress logs
 - [ ] Backup private config (secrets.conf, etc.) in private github repo?
 - [ ] Stagnation region should restart if water drops > 20 gallons (house use)
+- [ ] Put availability calendar on web page too? (or more months of reservations)
 
 ### Low Priority
 
