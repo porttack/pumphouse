@@ -217,6 +217,61 @@ def get_sensor_data():
 
     return data
 
+
+def get_cached_ecobee_temp(max_age_hours=24):
+    """Get cached Ecobee temperature data from CSV"""
+    try:
+        import csv as csv_module
+        from pathlib import Path
+
+        cache_file = Path(__file__).parent.parent / 'ecobee_temp_cache.csv'
+
+        if not cache_file.exists():
+            return None
+
+        with open(cache_file, 'r') as f:
+            reader = csv_module.DictReader(f)
+            rows = list(reader)
+
+        if not rows:
+            return None
+
+        # Check age using first row's timestamp
+        cache_time = datetime.fromisoformat(rows[0]['timestamp'])
+        age_hours = (datetime.now() - cache_time).total_seconds() / 3600
+
+        if max_age_hours is not None and age_hours > max_age_hours:
+            return None
+
+        # Calculate age string
+        age_minutes = (datetime.now() - cache_time).total_seconds() / 60
+        if age_minutes < 60:
+            age_str = f"{int(age_minutes)}m ago"
+        else:
+            age_str = f"{age_minutes/60:.1f}h ago"
+
+        # Convert to a dict format for easier use in templates
+        # Format: {'timestamp': '...', 'age_str': '...', 'thermostats': {'Name': {'temperature': 72, ...}}}
+        result = {
+            'timestamp': rows[0]['timestamp'],
+            'age_str': age_str,
+            'thermostats': {}
+        }
+
+        for row in rows:
+            result['thermostats'][row['thermostat_name']] = {
+                'temperature': float(row['temperature']),
+                'heat_setpoint': float(row['heat_setpoint']) if row.get('heat_setpoint') else None,
+                'cool_setpoint': float(row['cool_setpoint']) if row.get('cool_setpoint') else None,
+                'system_mode': row.get('system_mode'),
+                'hold_text': row.get('hold_text'),
+                'vacation_mode': row.get('vacation_mode') == 'True'
+            }
+
+        return result
+    except Exception:
+        return None
+
 @app.route('/api/chart_data')
 # @requires_auth
 def chart_data():
@@ -433,6 +488,9 @@ def index():
     reservations_csv = 'reservations.csv'
     occupancy_status = get_occupancy_status(reservations_csv)
 
+    # Get cached Ecobee temperature
+    ecobee_temp = get_cached_ecobee_temp(max_age_hours=24)
+
     # Get all reservations (for repeat guest detection across all reservations)
     reservations = load_reservations(reservations_csv)
 
@@ -559,7 +617,8 @@ def index():
                          format_date_short=format_date_short,
                          now=datetime.now(),
                          startup_time=STARTUP_TIME,
-                         default_hours=DASHBOARD_DEFAULT_HOURS)
+                         default_hours=DASHBOARD_DEFAULT_HOURS,
+                         ecobee_temp=ecobee_temp)
 
 @app.route('/control/<token>')
 def control(token):

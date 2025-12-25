@@ -324,6 +324,23 @@
                     </div>
                     {% endif %}
                 </div>
+                {% if ecobee_temp and ecobee_temp.thermostats %}
+                <div class="status-item" style="border-left-color: #FF9800;">
+                    <div class="status-label">House Temps</div>
+                    <div class="status-value">
+                        {% for name, data in ecobee_temp.thermostats.items() %}
+                        {% if data.temperature is not none %}
+                        {{ "%.0f"|format(data.temperature) }}°F{% if not loop.last %} / {% endif %}
+                        {% endif %}
+                        {% endfor %}
+                    </div>
+                    {% if ecobee_temp.age_str %}
+                    <div class="status-label" style="margin-top: 4px; font-size: 10px; color: #666;">
+                        Updated {{ ecobee_temp.age_str }}
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
             </div>
         </div>
         {% endif %}

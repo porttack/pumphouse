@@ -290,6 +290,54 @@ def get_recent_events(filepath='events.csv', max_rows=None, hide_types=None):
         return None, None
 
 
+def get_cached_ecobee_temp(max_age_hours=24):
+    """Get cached Ecobee temperature data from CSV"""
+    try:
+        import csv
+        from pathlib import Path
+
+        cache_file = Path(__file__).parent.parent / 'ecobee_temp_cache.csv'
+
+        if not cache_file.exists():
+            return None
+
+        with open(cache_file, 'r') as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+        if not rows:
+            return None
+
+        # Check age using first row's timestamp
+        if max_age_hours is not None:
+            cache_time = datetime.fromisoformat(rows[0]['timestamp'])
+            age_hours = (datetime.now() - cache_time).total_seconds() / 3600
+
+            if age_hours > max_age_hours:
+                return None
+
+        # Convert to a dict format for easier use in templates
+        # Format: {'timestamp': '...', 'thermostats': {'Name': {'temperature': 72, ...}}}
+        result = {
+            'timestamp': rows[0]['timestamp'],
+            'thermostats': {}
+        }
+
+        for row in rows:
+            result['thermostats'][row['thermostat_name']] = {
+                'temperature': float(row['temperature']),
+                'heat_setpoint': float(row['heat_setpoint']) if row.get('heat_setpoint') else None,
+                'cool_setpoint': float(row['cool_setpoint']) if row.get('cool_setpoint') else None,
+                'system_mode': row.get('system_mode'),
+                'hold_text': row.get('hold_text'),
+                'vacation_mode': row.get('vacation_mode') == 'True'
+            }
+
+        return result
+    except Exception:
+        return None
+
+
 def fetch_system_status(debug=False):
     """Fetch current system status (tank, sensors, stats, relays, events, occupancy, reservations)"""
     try:
@@ -360,6 +408,14 @@ def fetch_system_status(debug=False):
             if debug:
                 print(f"Warning: Could not get occupancy/reservations: {e}", file=sys.stderr)
 
+        # Get cached Ecobee temperature
+        ecobee_temp = None
+        try:
+            ecobee_temp = get_cached_ecobee_temp(max_age_hours=24)
+        except Exception as e:
+            if debug:
+                print(f"Warning: Could not get Ecobee temperature: {e}", file=sys.stderr)
+
         return {
             'tank': tank_data,
             'pressure': pressure,
@@ -368,7 +424,8 @@ def fetch_system_status(debug=False):
             'stats': stats,
             'events': {'headers': event_headers, 'rows': event_rows},
             'occupancy': occupancy_status,
-            'reservations': reservation_list
+            'reservations': reservation_list,
+            'ecobee_temp': ecobee_temp
         }
     except Exception as e:
         if debug:
@@ -418,6 +475,7 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
     events_data = status_data.get('events') if status_data else None
     occupancy_status = status_data.get('occupancy') if status_data else None
     reservation_list = status_data.get('reservations') if status_data else None
+    ecobee_temp = status_data.get('ecobee_temp') if status_data else None
 
     # Get the dashboard link to use in the email
     # Add totals parameter if secret token is configured
@@ -806,6 +864,30 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
                         </div>
 """
             html += """
+                    </div>
+"""
+        # Add Ecobee temperature if available
+        if ecobee_temp and ecobee_temp.get('thermostats'):
+            cache_time = datetime.fromisoformat(ecobee_temp['timestamp'])
+            age_minutes = (datetime.now() - cache_time).total_seconds() / 60
+            age_str = f"{int(age_minutes)}m ago" if age_minutes < 60 else f"{age_minutes/60:.1f}h ago"
+
+            # Combine all temps into one box
+            temps = []
+            for name, data in ecobee_temp['thermostats'].items():
+                temp = data.get('temperature')
+                if temp is not None:
+                    temps.append(f"{temp:.0f}°F")
+
+            if temps:
+                temps_str = " / ".join(temps)
+                html += f"""
+                    <div class="status-item" style="border-left-color: #FF9800;">
+                        <div class="status-label">House Temps</div>
+                        <div class="status-value">{temps_str}</div>
+                        <div class="status-label" style="margin-top: 4px; font-size: 10px; color: #666;">
+                            Updated {age_str}
+                        </div>
                     </div>
 """
         html += """
