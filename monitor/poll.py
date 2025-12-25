@@ -16,7 +16,10 @@ from monitor.config import (
     ENABLE_DAILY_STATUS_EMAIL, DAILY_STATUS_EMAIL_TIME, DAILY_STATUS_EMAIL_CHART_HOURS,
     ENABLE_CHECKOUT_REMINDER, CHECKOUT_REMINDER_TIME
 )
-from monitor.gpio_helpers import read_pressure, read_float_sensor
+from monitor.gpio_helpers import (
+    read_pressure, read_float_sensor,
+    FLOAT_STATE_FULL, FLOAT_STATE_CALLING
+)
 from monitor.tank import get_tank_data
 from monitor.logger import log_event, log_snapshot
 from monitor.state import SystemState
@@ -109,9 +112,9 @@ class SnapshotTracker:
         """Get snapshot data for logging"""
         duration = time.time() - self.start_time
 
-        float_ever_calling = 'CLOSED/CALLING' in self.float_states
+        float_ever_calling = FLOAT_STATE_CALLING in self.float_states
         float_always_full = (len(self.float_states) > 0 and
-                            all(s == 'OPEN/FULL' for s in self.float_states))
+                            all(s == FLOAT_STATE_FULL for s in self.float_states))
 
         pressure_high_percent = (self.pressure_high_time / duration * 100) if duration > 0 else 0
 
@@ -497,7 +500,7 @@ class SimplifiedMonitor:
                         
                         # Check for float state change
                         if self.state.float_state != last_float_state:
-                            if self.state.float_state == 'CLOSED/CALLING':
+                            if self.state.float_state == FLOAT_STATE_CALLING:
                                 self.log_state_event('FLOAT_CALLING', '⚠️ Tank calling for water!')
                                 if self.debug:
                                     print(f"{datetime.now().strftime('%H:%M:%S')} - "

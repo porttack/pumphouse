@@ -286,7 +286,7 @@
             <div class="status-grid">
                 <div class="status-item">
                     <div class="status-label">Float Switch</div>
-                    <div class="status-value {{ 'full' if sensor_data.float == 'OPEN/FULL' else 'calling' }}">
+                    <div class="status-value {{ 'full' if sensor_data.float == FLOAT_STATE_FULL else 'calling' }}">
                         {{ format_float_state(sensor_data.float) }}
                     </div>
                     {% if relay_status.supply_override == 'ON' %}
