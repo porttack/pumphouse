@@ -22,13 +22,8 @@ except (ImportError, NotImplementedError):
     TEMP_SENSOR_AVAILABLE = False
 
 def format_float_state(state):
-    """Format float state with explanation"""
-    if state == FLOAT_STATE_CALLING:
-        return f"{state} (tank needs water)"
-    elif state == FLOAT_STATE_FULL:
-        return f"{state} (tank is full)"
-    else:
-        return state
+    """Format float state"""
+    return state if state else "UNKNOWN"
 
 def format_pressure_state(state):
     """Format pressure state with explanation"""

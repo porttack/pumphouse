@@ -437,15 +437,8 @@ def fetch_system_status(debug=False):
 
 
 def format_float_state(state):
-    """Format float state with explanation"""
-    from monitor.gpio_helpers import FLOAT_STATE_FULL, FLOAT_STATE_CALLING
-
-    if state == FLOAT_STATE_CALLING:
-        return "CALLING (tank needs water)"
-    elif state == FLOAT_STATE_FULL:
-        return "FULL (tank is full)"
-    else:
-        return state if state else "UNKNOWN"
+    """Format float state"""
+    return state if state else "UNKNOWN"
 
 
 def format_pressure_state(state):
