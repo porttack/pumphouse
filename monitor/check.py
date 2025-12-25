@@ -6,7 +6,10 @@ import argparse
 from datetime import datetime
 
 from monitor.config import TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS, NTFY_TOPIC
-from monitor.gpio_helpers import read_pressure, read_float_sensor, init_gpio, cleanup_gpio
+from monitor.gpio_helpers import (
+    read_pressure, read_float_sensor, init_gpio, cleanup_gpio,
+    FLOAT_STATE_FULL, FLOAT_STATE_CALLING
+)
 from monitor.tank import get_tank_data
 from monitor.relay import get_all_relay_status
 
@@ -20,9 +23,9 @@ except (ImportError, NotImplementedError):
 
 def format_float_state(state):
     """Format float state with explanation"""
-    if state == 'CLOSED/CALLING':
+    if state == FLOAT_STATE_CALLING:
         return f"{state} (tank needs water)"
-    elif state == 'OPEN/FULL':
+    elif state == FLOAT_STATE_FULL:
         return f"{state} (tank is full)"
     else:
         return state

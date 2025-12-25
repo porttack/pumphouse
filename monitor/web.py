@@ -19,7 +19,10 @@ from monitor.config import (
     SECRET_BYPASS_ON_TOKEN, SECRET_BYPASS_OFF_TOKEN,
     SECRET_PURGE_TOKEN, MANAGEMENT_FEE_PERCENT
 )
-from monitor.gpio_helpers import read_pressure, read_float_sensor, init_gpio, cleanup_gpio
+from monitor.gpio_helpers import (
+    read_pressure, read_float_sensor, init_gpio, cleanup_gpio,
+    FLOAT_STATE_FULL, FLOAT_STATE_CALLING
+)
 from monitor.tank import get_tank_data
 from monitor.check import read_temp_humidity, format_pressure_state, format_float_state
 from monitor.relay import get_all_relay_status, set_supply_override, set_bypass
@@ -618,7 +621,9 @@ def index():
                          now=datetime.now(),
                          startup_time=STARTUP_TIME,
                          default_hours=DASHBOARD_DEFAULT_HOURS,
-                         ecobee_temp=ecobee_temp)
+                         ecobee_temp=ecobee_temp,
+                         FLOAT_STATE_FULL=FLOAT_STATE_FULL,
+                         FLOAT_STATE_CALLING=FLOAT_STATE_CALLING)
 
 @app.route('/control/<token>')
 def control(token):

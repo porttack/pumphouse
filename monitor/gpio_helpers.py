@@ -15,6 +15,13 @@ except (ImportError, RuntimeError):
 
 from monitor.config import PRESSURE_PIN, FLOAT_PIN
 
+# Float sensor state constants
+# When GPIO reads HIGH (1): Float switch is OPEN, meaning tank is FULL
+# When GPIO reads LOW (0): Float switch is CLOSED, meaning tank is CALLING for water
+FLOAT_STATE_FULL = 'FULL'        # Tank is full (float switch OPEN/HIGH)
+FLOAT_STATE_CALLING = 'CALLING'  # Tank needs water (float switch CLOSED/LOW)
+FLOAT_STATE_UNKNOWN = 'UNKNOWN'  # Cannot read sensor
+
 # Global lock for thread-safe GPIO access
 _gpio_lock = threading.Lock()
 _gpio_initialized = False
@@ -111,21 +118,21 @@ def read_pressure():
 def read_float_sensor():
     """
     Read float sensor with thread-safe access.
-    Returns 'OPEN/FULL', 'CLOSED/CALLING', or 'UNKNOWN'.
+    Returns FLOAT_STATE_FULL, FLOAT_STATE_CALLING, or FLOAT_STATE_UNKNOWN.
 
     HIGH (1) = Float switch OPEN = Tank is FULL
     LOW (0) = Float switch CLOSED = Tank NOT full (calling for water)
     """
     if not GPIO_AVAILABLE:
-        return 'UNKNOWN'
+        return FLOAT_STATE_UNKNOWN
 
     # Try RPi.GPIO first
     if _gpio_initialized:
         with _gpio_lock:
             try:
                 state = GPIO.input(FLOAT_PIN)
-                # HIGH = OPEN/FULL, LOW = CLOSED/CALLING
-                return 'OPEN/FULL' if state else 'CLOSED/CALLING'
+                # HIGH = FULL, LOW = CALLING
+                return FLOAT_STATE_FULL if state else FLOAT_STATE_CALLING
             except Exception as e:
                 print(f"Error reading float sensor: {e}", file=sys.stderr)
                 # Fall through to gpio command
@@ -133,8 +140,8 @@ def read_float_sensor():
     # Fallback to gpio command
     state = _read_pin_via_gpio_command(FLOAT_PIN)
     if state is None:
-        return 'UNKNOWN'
-    return 'OPEN/FULL' if state else 'CLOSED/CALLING'
+        return FLOAT_STATE_UNKNOWN
+    return FLOAT_STATE_FULL if state else FLOAT_STATE_CALLING
 
 def cleanup_gpio():
     """Clean up GPIO on shutdown"""

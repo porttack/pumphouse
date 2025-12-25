@@ -20,6 +20,7 @@ from monitor.config import (
     NOTIFY_BACKFLUSH_TIME_START, NOTIFY_BACKFLUSH_TIME_END,
     MIN_NOTIFICATION_INTERVAL
 )
+from monitor.gpio_helpers import FLOAT_STATE_FULL, FLOAT_STATE_CALLING
 from monitor.stats import find_last_refill, find_high_flow_event, find_backflush_event
 
 class NotificationManager:
@@ -98,18 +99,18 @@ class NotificationManager:
         if len(self.float_state_history) > NOTIFY_FLOAT_CONFIRMATIONS + 1:
             self.float_state_history.pop(0)
 
-        # If float goes back to CLOSED, reset the alert flag for next fill cycle
-        if current_float_state == 'CLOSED/CALLING':
+        # If float goes back to CALLING, reset the alert flag for next fill cycle
+        if current_float_state == FLOAT_STATE_CALLING:
             self.float_full_alerted = False
 
         # Check if we have enough history
         if len(self.float_state_history) < NOTIFY_FLOAT_CONFIRMATIONS + 1:
             return False
 
-        # Check pattern: was CLOSED, now OPEN for N consecutive times
-        if (self.float_state_history[0] == 'CLOSED/CALLING' and
-            all(s == 'OPEN/FULL' for s in self.float_state_history[1:])):
-            # Only alert once per CLOSED→OPEN transition
+        # Check pattern: was CALLING, now FULL for N consecutive times
+        if (self.float_state_history[0] == FLOAT_STATE_CALLING and
+            all(s == FLOAT_STATE_FULL for s in self.float_state_history[1:])):
+            # Only alert once per CALLING→FULL transition
             if not self.float_full_alerted:
                 self.float_full_alerted = True
                 # Clear history so pattern doesn't keep matching

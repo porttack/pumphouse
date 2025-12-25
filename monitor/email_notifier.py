@@ -342,7 +342,10 @@ def fetch_system_status(debug=False):
     """Fetch current system status (tank, sensors, stats, relays, events, occupancy, reservations)"""
     try:
         from monitor.tank import get_tank_data
-        from monitor.gpio_helpers import read_pressure, read_float_sensor
+        from monitor.gpio_helpers import (
+            read_pressure, read_float_sensor,
+            FLOAT_STATE_FULL, FLOAT_STATE_CALLING
+        )
         from monitor.relay import get_all_relay_status
         from monitor.occupancy import get_occupancy_status, load_reservations, get_current_and_upcoming_reservations, parse_date, format_date_short
         import os
@@ -435,10 +438,12 @@ def fetch_system_status(debug=False):
 
 def format_float_state(state):
     """Format float state with explanation"""
-    if state == 'CLOSED/CALLING':
-        return "CLOSED/CALLING (tank needs water)"
-    elif state == 'OPEN/FULL':
-        return "OPEN/FULL (tank is full)"
+    from monitor.gpio_helpers import FLOAT_STATE_FULL, FLOAT_STATE_CALLING
+
+    if state == FLOAT_STATE_CALLING:
+        return "CALLING (tank needs water)"
+    elif state == FLOAT_STATE_FULL:
+        return "FULL (tank is full)"
     else:
         return state if state else "UNKNOWN"
 
@@ -821,7 +826,8 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
                 <div class="status-grid">
 """
         if float_state is not None:
-            float_color = '#4CAF50' if float_state == 'OPEN/FULL' else '#ff9800'
+            from monitor.gpio_helpers import FLOAT_STATE_FULL
+            float_color = '#4CAF50' if float_state == FLOAT_STATE_FULL else '#ff9800'
             html += f"""
                     <div class="status-item" style="border-left-color: {float_color};">
                         <div class="status-label">Float Switch</div>
