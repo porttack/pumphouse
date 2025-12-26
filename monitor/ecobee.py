@@ -366,6 +366,26 @@ class EcobeeController:
             self.driver = self._create_driver()
             self._login()
 
+    def close(self):
+        """Close the browser session if open."""
+        try:
+            if self.driver:
+                self.driver.quit()
+        except Exception:
+            pass
+        finally:
+            self.driver = None
+
+    def __enter__(self):
+        """Support 'with EcobeeController(...) as ecobee'."""
+        self._ensure_logged_in()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        """Ensure browser closes on context exit; do not suppress exceptions."""
+        self.close()
+        return False
+
     def get_all_thermostats(self, house_name=None):
         """
         Get data for all thermostats in the house.
@@ -1090,16 +1110,39 @@ class EcobeeController:
                     items = self.driver.find_elements(By.XPATH, '//div[contains(@class, "menu-list__item")]')
                 if not items:
                     if self.debug:
-                        print(f"  Could not find vacation items for {name}")
-                    continue
-                target = items[0]
-                try:
-                    target.click()
-                except Exception:
-                    self.driver.execute_script("arguments[0].click();", target)
-                time.sleep(2)
+                        print(f"  No list items; trying page-level delete button for {name}")
+                    # Try finding delete directly on the page without opening an item
+                    delete_button = None
+                    for sel in [
+                        '//button[contains(text(), "Delete Vacation")]',
+                        '//button[contains(text(), "Delete")]',
+                        '//button[contains(text(), "Remove")]',
+                        '//button[contains(@aria-label, "Delete")]',
+                        '//button[contains(@aria-label, "delete")]'
+                    ]:
+                        try:
+                            delete_button = self.driver.find_element(By.XPATH, sel)
+                            break
+                        except NoSuchElementException:
+                            continue
+                    if not delete_button:
+                        if self.debug:
+                            print(f"  Could not find vacation items or delete button for {name}")
+                        continue
+                    try:
+                        delete_button.click()
+                    except Exception:
+                        self.driver.execute_script("arguments[0].click();", delete_button)
+                    time.sleep(2)
+                else:
+                    target = items[0]
+                    try:
+                        target.click()
+                    except Exception:
+                        self.driver.execute_script("arguments[0].click();", target)
+                    time.sleep(2)
 
-                # Find a delete button and confirm
+                    # Find a delete button and confirm
                 delete_button = None
                 for sel in [
                     '//button[contains(text(), "Delete")]',
@@ -1171,7 +1214,7 @@ class EcobeeController:
                         print(f"  Existing vacation detected for {name}; skipping")
                     continue
 
-                # New Vacation
+                # Click New Vacation
                 try:
                     new_btn = WebDriverWait(self.driver, 6).until(
                         EC.element_to_be_clickable((By.XPATH, '//button[contains(text(), "New Vacation")]'))
@@ -1186,32 +1229,56 @@ class EcobeeController:
                         print(f"  New Vacation button not found for {name}")
                     continue
 
-                # Fill dates and setpoints (best-effort)
-                def _fill(by, sel, value):
-                    try:
-                        elem = WebDriverWait(self.driver, 3).until(EC.presence_of_element_located((by, sel)))
-                        elem.clear()
-                        elem.send_keys(value)
-                        time.sleep(0.5)
-                        return True
-                    except Exception:
-                        return False
+                # Fill dates and setpoints
+                def _fill_input(selectors, value_str):
+                    for by, sel in selectors:
+                        try:
+                            elem = WebDriverWait(self.driver, 4).until(
+                                EC.presence_of_element_located((by, sel))
+                            )
+                            elem.clear()
+                            elem.send_keys(value_str)
+                            time.sleep(0.5)
+                            return True
+                        except TimeoutException:
+                            continue
+                        except Exception:
+                            continue
+                    return False
 
                 start_str = start_dt.strftime('%Y-%m-%d')
                 end_str = end_dt.strftime('%Y-%m-%d')
-                _fill(By.CSS_SELECTOR, 'input[name*="start" i]', start_str) or \
-                    _fill(By.XPATH, "//input[contains(@placeholder,'Start') or contains(@aria-label,'Start') or contains(@name,'start')]", start_str)
-                _fill(By.CSS_SELECTOR, 'input[name*="end" i]', end_str) or \
-                    _fill(By.XPATH, "//input[contains(@placeholder,'End') or contains(@aria-label,'End') or contains(@name,'end')]", end_str)
+                date_selectors = [
+                    (By.CSS_SELECTOR, 'input[name*="start" i]'),
+                    (By.CSS_SELECTOR, 'input[aria-label*="Start" i]'),
+                    (By.XPATH, "//input[contains(@placeholder,'Start') or contains(@aria-label,'Start') or contains(@name,'start')]"),
+                ]
+                end_selectors = [
+                    (By.CSS_SELECTOR, 'input[name*="end" i]'),
+                    (By.CSS_SELECTOR, 'input[aria-label*="End" i]'),
+                    (By.XPATH, "//input[contains(@placeholder,'End') or contains(@aria-label,'End') or contains(@name,'end')]"),
+                ]
+                _fill_input(date_selectors, start_str)
+                _fill_input(end_selectors, end_str)
 
-                _fill(By.XPATH, "//input[contains(@name,'heat') or contains(@aria-label,'Heat') or contains(@placeholder,'Heat')]", str(int(heat)))
-                _fill(By.XPATH, "//input[contains(@name,'cool') or contains(@aria-label,'Cool') or contains(@placeholder,'Cool')]", str(int(cool)))
+                heat_selectors = [
+                    (By.XPATH, "//input[contains(@name,'heat') or contains(@aria-label,'Heat') or contains(@placeholder,'Heat')]")
+                ]
+                cool_selectors = [
+                    (By.XPATH, "//input[contains(@name,'cool') or contains(@aria-label,'Cool') or contains(@placeholder,'Cool')]")
+                ]
+                _fill_input(heat_selectors, str(int(heat)))
+                _fill_input(cool_selectors, str(int(cool)))
 
-                # Submit
+                # Submit the form
                 submitted = False
-                for by, sel in [(By.XPATH, "//button[contains(text(),'Save') or contains(text(),'Create') or contains(text(),'Done') or contains(text(),'Add')]")]:
+                for by, sel in [
+                    (By.XPATH, "//button[contains(text(),'Save') or contains(text(),'Create') or contains(text(),'Done') or contains(text(),'Add')]")
+                ]:
                     try:
-                        btn = WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable((by, sel)))
+                        btn = WebDriverWait(self.driver, 5).until(
+                            EC.element_to_be_clickable((by, sel))
+                        )
                         try:
                             btn.click()
                         except Exception:
@@ -1224,18 +1291,18 @@ class EcobeeController:
 
                 if not submitted:
                     if self.debug:
-                        print(f"  Could not submit form for {name}")
+                        print(f"  Could not submit vacation form for {name}")
                     continue
 
-                # Verify success
-                if 'no scheduled vacations' in self.driver.page_source.lower():
+                # Verify creation
+                page_text = self.driver.page_source
+                if 'There are no scheduled vacations' not in page_text:
+                    created_count += 1
                     if self.debug:
-                        print(f"  Creation may have failed for {name}")
-                    continue
-
-                created_count += 1
-                if self.debug:
-                    print(f"  ✓ Created vacation for {name}")
+                        print(f"  ✓ Created vacation for {name}")
+                else:
+                    if self.debug:
+                        print(f"  ✗ Creation not confirmed for {name}")
 
             except Exception as e:
                 if self.debug:
@@ -1243,37 +1310,3 @@ class EcobeeController:
                 continue
 
         return created_count
-
-    def close(self):
-        """Close the browser session."""
-        if self.driver:
-            self.driver.quit()
-            self.driver = None
-
-    def __enter__(self):
-        """Context manager entry."""
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
-        self.close()
-
-
-if __name__ == '__main__':
-    # Test the library
-    print("Testing Ecobee Controller")
-    print("=" * 60)
-
-    with EcobeeController(headless=True, debug=True) as ecobee:
-        print("\nGetting all thermostats...")
-        thermostats = ecobee.get_all_thermostats()
-
-        print(f"\nFound {len(thermostats)} thermostats:")
-        for tstat in thermostats:
-            print(f"\n{tstat['name']}:")
-            print(f"  Temperature: {tstat['temperature']}°F")
-            print(f"  Heat Setpoint: {tstat['heat_setpoint']}")
-            print(f"  Cool Setpoint: {tstat['cool_setpoint']}")
-            print(f"  System Mode: {tstat['system_mode']}")
-            print(f"  Hold: {tstat['hold_text'] or 'None'}")
-            print(f"  Vacation: {tstat['vacation_mode']}")
