@@ -9,16 +9,12 @@
   - Email should confirm the action was successful with current system status
   - Subject: e.g., "✓ Override Turned ON - 1320 gal"
   - Include event details and current relay states in email body
-- [ ] one email per day (morning)
-- [ ] Option to turn on overide N times per day if < certain value
-- [ ] Email notification on new reservations
 - [ ] Change color of dots again on fast-fill
 
 ### Medium Priority
 
 - [ ] Every 6-hours, determine if float is really calling (turn overflow off temporarily)
-- [ ] Read Ecobee heat and vacation settings - automate vacation mode
-- [ ] Tank Full Confirmed - 1430 gal (this should be 3 tank reads, not 3 60-sec heartbeats)
+- [ ] automate vacation mode
 - [ ] Log estimated GPH
 - [ ] Estimate chlorine use
 - [ ] Ignore fluctuating sensor readings - pressure & float
@@ -32,6 +28,7 @@
 - [ ] Backup private config (secrets.conf, etc.) in private github repo?
 - [ ] Stagnation region should restart if water drops > 20 gallons (house use)
 - [ ] Put availability calendar on web page too? (or more months of reservations)
+- [ ] Log all data to a google sheet
 
 ### Low Priority
 
@@ -46,6 +43,8 @@
 ## Completed Items
 
 ### Recent
+- [x] one email per day (morning)
+- [x] Email notification on new reservations
 - [x] Remove Repeat and Booking columns unless authenticated with token (2025-12-21)
 - [x] Occupancy tracking and reservation display (2025-12-21)
 - [x] Visual stagnation detection on chart with color-coded dots (2025-12-21)
