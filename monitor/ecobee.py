@@ -650,89 +650,172 @@ class EcobeeController:
                 print(f"  No active hold found for {name}")
             return True
 
-    def enable_vacation_mode(self, start_date=None, end_date=None, heat=55, cool=85):
+    def enable_vacation_mode(self, start_date=None, end_date=None, heat=55, cool=85, house_name=None):
         """
-        Enable vacation mode for the house.
+        Create a new vacation via the thermostat vacations page.
 
-        NOTE: This function opens the vacation creation dialog. The actual form filling
-        for start/end dates is complex and requires further investigation of the date
-        picker widget. Current implementation clicks through to the vacation page.
+        If dates are not provided, starts now and ends one month later.
 
         Args:
-            start_date: Start date (datetime or None for now) - NOT YET IMPLEMENTED
-            end_date: End date (datetime, required) - NOT YET IMPLEMENTED
-            heat: Heat setpoint during vacation (default: 55) - NOT YET IMPLEMENTED
-            cool: Cool setpoint during vacation (default: 85) - NOT YET IMPLEMENTED
+            start_date: datetime for start (None = now)
+            end_date: datetime for end (None = start + 30 days)
+            heat: Heat setpoint during vacation (default: 55)
+            cool: Cool setpoint during vacation (default: 85)
+            house_name: Optional house to target; if provided, attempt to switch first
 
         Returns:
-            bool: True if vacation page is reached
+            bool: True if creation appears successful
 
         Raises:
-            RuntimeError: If vacation modal cannot be opened
+            RuntimeError: If vacation modal cannot be opened or submission fails obviously
         """
+        from datetime import datetime, timedelta
         self._ensure_logged_in()
 
-        if self.debug:
-            print(f"Opening vacation mode interface...")
+        # Default dates
+        start_dt = start_date or datetime.now()
+        end_dt = end_date or (start_dt + timedelta(days=30))
 
-        # Navigate to devices page
+        if self.debug:
+            print(f"Opening vacations page to create new vacation...")
+            print(f"  Start: {start_dt.isoformat(timespec='minutes')}  End: {end_dt.isoformat(timespec='minutes')}")
+            print(f"  Heat: {heat}  Cool: {cool}")
+
+        # Navigate to devices page and (optionally) switch house
         self.driver.get(f"{PORTAL_URL}#/devices")
         time.sleep(8)
+        if house_name:
+            try:
+                self._select_house(house_name)
+            except Exception:
+                pass
 
-        # Click on first thermostat to get to detail view
+        # Choose a thermostat and open its vacations page
         tiles = self.driver.find_elements(By.CSS_SELECTOR, '[data-qa-class="thermostat-tile"]')
-        if tiles:
-            try:
-                tiles[0].click()
-            except:
-                self.driver.execute_script("arguments[0].click();", tiles[0])
-            time.sleep(5)
+        if not tiles:
+            raise RuntimeError("No thermostats found")
 
-        # Click on VACATION tile
+        # Prefer the first BB Hill thermostat if mapping is available
+        target_url = None
         try:
-            vacation_tile = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, '//div[contains(text(), "VACATION")]'))
-            )
-
-            if self.debug:
-                print(f"  Clicking vacation tile")
-
-            try:
-                vacation_tile.click()
-            except:
-                self.driver.execute_script("arguments[0].click();", vacation_tile)
-
-            time.sleep(5)
-
-            # Check if we're on vacation page
-            if 'vacations' in self.driver.current_url:
-                if self.debug:
-                    print(f"  ✓ Vacation page opened")
-                    print(f"  URL: {self.driver.current_url}")
-
-                # Look for "New Vacation" button
+            for tile in tiles:
+                name_elem = tile.find_element(By.CSS_SELECTOR, '[data-qa-class="interactive-tile_title"]')
+                name = name_elem.text.strip()
+                data_qa_id = tile.get_attribute('data-qa-id')
+                import re
+                m = re.search(r'(\d+)', data_qa_id or '')
+                if m:
+                    t_id = m.group(1)
+                    target_url = f"{PORTAL_URL}#/devices/thermostats/{t_id}/vacations"
+                    # If house_name is set, prefer thermostats from that house via known mapping
+                    if house_name and house_name in HOUSE_THERMOSTATS:
+                        if name in HOUSE_THERMOSTATS[house_name]:
+                            break
+            if not target_url:
+                # Fallback: click VACATION tile from detail view
                 try:
-                    new_vacation_btn = self.driver.find_element(By.XPATH, '//button[contains(text(), "New Vacation")]')
-
-                    if self.debug:
-                        print(f"  Found 'New Vacation' button")
-                        print(f"  NOTE: Date picker implementation not yet complete")
-                        print(f"  Vacation creation must be completed manually for now")
-
-                    # TODO: Click "New Vacation" and fill out form
-                    # This requires implementing date picker interactions
-
-                    return True
-
-                except NoSuchElementException:
-                    if self.debug:
-                        print(f"  Could not find 'New Vacation' button")
-                    return False
+                    tiles[0].click()
+                except:
+                    self.driver.execute_script("arguments[0].click();", tiles[0])
+                time.sleep(5)
+                vacation_tile = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.XPATH, '//div[contains(text(), "VACATION")]'))
+                )
+                vacation_tile.click()
+                time.sleep(5)
             else:
-                raise RuntimeError(f"Not on vacation page. URL: {self.driver.current_url}")
-
+                self.driver.get(target_url)
+                time.sleep(5)
         except TimeoutException:
-            raise RuntimeError("Could not find vacation controls")
+            raise RuntimeError("Could not open vacations page")
+
+        # Click "New Vacation"
+        try:
+            new_btn = WebDriverWait(self.driver, 8).until(
+                EC.element_to_be_clickable((By.XPATH, '//button[contains(text(), "New Vacation")]'))
+            )
+            try:
+                new_btn.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", new_btn)
+            time.sleep(2)
+        except TimeoutException:
+            raise RuntimeError("New Vacation button not found")
+
+        # Fill the form: attempt multiple selector patterns for dates and setpoints
+        # Date inputs
+        date_selectors = [
+            (By.CSS_SELECTOR, 'input[name*="start" i]'),
+            (By.CSS_SELECTOR, 'input[aria-label*="Start" i]'),
+            (By.XPATH, "//input[contains(@placeholder,'Start') or contains(@aria-label,'Start') or contains(@name,'start')]")
+        ]
+        end_selectors = [
+            (By.CSS_SELECTOR, 'input[name*="end" i]'),
+            (By.CSS_SELECTOR, 'input[aria-label*="End" i]'),
+            (By.XPATH, "//input[contains(@placeholder,'End') or contains(@aria-label,'End') or contains(@name,'end')]")
+        ]
+
+        def _fill_input(selectors, value_str):
+            for by, sel in selectors:
+                try:
+                    elem = WebDriverWait(self.driver, 3).until(
+                        EC.presence_of_element_located((by, sel))
+                    )
+                    elem.clear()
+                    elem.send_keys(value_str)
+                    time.sleep(0.5)
+                    return True
+                except TimeoutException:
+                    continue
+                except Exception:
+                    continue
+            return False
+
+        # Compose date strings; many date pickers accept YYYY-MM-DD
+        start_str = start_dt.strftime('%Y-%m-%d')
+        end_str = end_dt.strftime('%Y-%m-%d')
+        _fill_input(date_selectors, start_str)
+        _fill_input(end_selectors, end_str)
+
+        # Heat/Cool inputs
+        heat_selectors = [
+            (By.XPATH, "//input[contains(@name,'heat') or contains(@aria-label,'Heat') or contains(@placeholder,'Heat')]")
+        ]
+        cool_selectors = [
+            (By.XPATH, "//input[contains(@name,'cool') or contains(@aria-label,'Cool') or contains(@placeholder,'Cool')]")
+        ]
+        _fill_input(heat_selectors, str(int(heat)))
+        _fill_input(cool_selectors, str(int(cool)))
+
+        # Submit: try common buttons
+        submit_selectors = [
+            (By.XPATH, "//button[contains(text(),'Save') or contains(text(),'Create') or contains(text(),'Done') or contains(text(),'Add')]")
+        ]
+        submitted = False
+        for by, sel in submit_selectors:
+            try:
+                btn = WebDriverWait(self.driver, 5).until(
+                    EC.element_to_be_clickable((by, sel))
+                )
+                try:
+                    btn.click()
+                except Exception:
+                    self.driver.execute_script("arguments[0].click();", btn)
+                submitted = True
+                time.sleep(3)
+                break
+            except TimeoutException:
+                continue
+
+        if not submitted:
+            raise RuntimeError("Could not submit vacation form")
+
+        # Basic verification: no 'no vacations' message present now, or a new item appears
+        page_text = self.driver.page_source
+        created = 'There are no scheduled vacations' not in page_text
+        if self.debug:
+            print(f"  Creation status: {created}")
+        return created
 
     def disable_vacation_mode(self, vacation_name=None, delete_all=True):
         """

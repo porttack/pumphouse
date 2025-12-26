@@ -142,12 +142,9 @@ def cmd_vacation(args):
 
     with EcobeeController(headless=not args.show_browser, debug=args.debug) as ecobee:
         if args.enable:
-            if not args.end:
-                print("ERROR: --end date required when enabling vacation mode")
-                return 1
-
+            # Default: one-month vacation if --end not provided
             start_date = datetime.fromisoformat(args.start) if args.start else None
-            end_date = datetime.fromisoformat(args.end)
+            end_date = datetime.fromisoformat(args.end) if args.end else None
 
             print(f"\nEnabling vacation mode:")
             print(f"  Start: {start_date or 'Now'}")
