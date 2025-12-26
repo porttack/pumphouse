@@ -186,6 +186,35 @@ class EcobeeController:
             print("⚠️ Could not switch house; continuing with current selection.")
         return False
 
+    def _get_house_thermostat_ids(self, house_name=None):
+        """Return a list of thermostats with their Ecobee IDs for a house.
+
+        Each item: {'name': <display name>, 'id': <numeric string>}
+        """
+        self._ensure_logged_in()
+        self.driver.get(f"{PORTAL_URL}#/devices")
+        time.sleep(8)
+        if house_name:
+            try:
+                self._select_house(house_name)
+            except Exception:
+                pass
+
+        results = []
+        tiles = self.driver.find_elements(By.CSS_SELECTOR, '[data-qa-class="thermostat-tile"]')
+        import re
+        for tile in tiles:
+            try:
+                name_elem = tile.find_element(By.CSS_SELECTOR, '[data-qa-class="interactive-tile_title"]')
+                name = name_elem.text.strip()
+                data_qa_id = tile.get_attribute('data-qa-id') or ''
+                m = re.search(r'(\d+)', data_qa_id)
+                if m:
+                    results.append({'name': name, 'id': m.group(1)})
+            except Exception:
+                continue
+        return results
+
     def _create_driver(self):
         """Create and return a Selenium WebDriver instance."""
         options = Options()
@@ -1029,6 +1058,191 @@ class EcobeeController:
             print(f"\n  Deleted {deleted_count} vacation(s)")
 
         return deleted_count
+
+    def delete_vacations_for_house(self, house_name, first_only=False):
+        """Delete vacation(s) for each thermostat in the specified house.
+
+        Returns the total number of vacations deleted across thermostats.
+        Assumes at most one vacation per thermostat.
+        """
+        self._ensure_logged_in()
+
+        total_deleted = 0
+        for item in self._get_house_thermostat_ids(house_name):
+            t_id = item['id']
+            name = item['name']
+            try:
+                vac_url = f"{PORTAL_URL}#/devices/thermostats/{t_id}/vacations"
+                if self.debug:
+                    print(f"Deleting vacations for {name} at {vac_url}")
+                self.driver.get(vac_url)
+                time.sleep(5)
+
+                # If no vacations, continue
+                if 'no scheduled vacations' in self.driver.page_source.lower():
+                    if self.debug:
+                        print(f"  No vacations for {name}")
+                    continue
+
+                # Open first/only vacation item
+                items = self.driver.find_elements(By.CSS_SELECTOR, '.vacation-menu-item .menu-list__item')
+                if not items:
+                    items = self.driver.find_elements(By.XPATH, '//div[contains(@class, "menu-list__item")]')
+                if not items:
+                    if self.debug:
+                        print(f"  Could not find vacation items for {name}")
+                    continue
+                target = items[0]
+                try:
+                    target.click()
+                except Exception:
+                    self.driver.execute_script("arguments[0].click();", target)
+                time.sleep(2)
+
+                # Find a delete button and confirm
+                delete_button = None
+                for sel in [
+                    '//button[contains(text(), "Delete")]',
+                    '//button[contains(text(), "Remove")]',
+                    '//button[contains(@aria-label, "Delete")]',
+                    '//button[contains(@aria-label, "delete")]',
+                    '.delete-button',
+                    '[data-qa-class*="delete"]']:
+                    try:
+                        delete_button = self.driver.find_element(By.XPATH, sel) if sel.startswith('//') else self.driver.find_element(By.CSS_SELECTOR, sel)
+                        break
+                    except NoSuchElementException:
+                        continue
+                if not delete_button:
+                    if self.debug:
+                        print(f"  Delete button not found for {name}")
+                    continue
+                try:
+                    delete_button.click()
+                except Exception:
+                    self.driver.execute_script("arguments[0].click();", delete_button)
+                time.sleep(2)
+
+                # Confirm
+                try:
+                    confirm = WebDriverWait(self.driver, 3).until(
+                        EC.presence_of_element_located((By.XPATH, '//button[contains(text(), "Yes") or contains(text(), "Confirm") or contains(text(), "Delete")]'))
+                    )
+                    try:
+                        confirm.click()
+                    except Exception:
+                        self.driver.execute_script("arguments[0].click();", confirm)
+                    time.sleep(2)
+                except TimeoutException:
+                    pass
+
+                total_deleted += 1
+                if self.debug:
+                    print(f"  ✓ Deleted vacation for {name}")
+
+            except Exception as e:
+                if self.debug:
+                    print(f"  ✗ Error deleting for {name}: {e}")
+                continue
+
+        return total_deleted
+
+    def create_vacations_for_house(self, house_name, start_date=None, end_date=None, heat=55, cool=85):
+        """Create a one-month (default) vacation for each thermostat without an active vacation."""
+        from datetime import datetime, timedelta
+        self._ensure_logged_in()
+        start_dt = start_date or datetime.now()
+        end_dt = end_date or (start_dt + timedelta(days=30))
+
+        created_count = 0
+        for item in self._get_house_thermostat_ids(house_name):
+            t_id = item['id']
+            name = item['name']
+            try:
+                vac_url = f"{PORTAL_URL}#/devices/thermostats/{t_id}/vacations"
+                if self.debug:
+                    print(f"Creating vacation for {name} at {vac_url}")
+                self.driver.get(vac_url)
+                time.sleep(5)
+
+                # Skip if a vacation already exists
+                if 'no scheduled vacations' not in self.driver.page_source.lower():
+                    if self.debug:
+                        print(f"  Existing vacation detected for {name}; skipping")
+                    continue
+
+                # New Vacation
+                try:
+                    new_btn = WebDriverWait(self.driver, 6).until(
+                        EC.element_to_be_clickable((By.XPATH, '//button[contains(text(), "New Vacation")]'))
+                    )
+                    try:
+                        new_btn.click()
+                    except Exception:
+                        self.driver.execute_script("arguments[0].click();", new_btn)
+                    time.sleep(2)
+                except TimeoutException:
+                    if self.debug:
+                        print(f"  New Vacation button not found for {name}")
+                    continue
+
+                # Fill dates and setpoints (best-effort)
+                def _fill(by, sel, value):
+                    try:
+                        elem = WebDriverWait(self.driver, 3).until(EC.presence_of_element_located((by, sel)))
+                        elem.clear()
+                        elem.send_keys(value)
+                        time.sleep(0.5)
+                        return True
+                    except Exception:
+                        return False
+
+                start_str = start_dt.strftime('%Y-%m-%d')
+                end_str = end_dt.strftime('%Y-%m-%d')
+                _fill(By.CSS_SELECTOR, 'input[name*="start" i]', start_str) or \
+                    _fill(By.XPATH, "//input[contains(@placeholder,'Start') or contains(@aria-label,'Start') or contains(@name,'start')]", start_str)
+                _fill(By.CSS_SELECTOR, 'input[name*="end" i]', end_str) or \
+                    _fill(By.XPATH, "//input[contains(@placeholder,'End') or contains(@aria-label,'End') or contains(@name,'end')]", end_str)
+
+                _fill(By.XPATH, "//input[contains(@name,'heat') or contains(@aria-label,'Heat') or contains(@placeholder,'Heat')]", str(int(heat)))
+                _fill(By.XPATH, "//input[contains(@name,'cool') or contains(@aria-label,'Cool') or contains(@placeholder,'Cool')]", str(int(cool)))
+
+                # Submit
+                submitted = False
+                for by, sel in [(By.XPATH, "//button[contains(text(),'Save') or contains(text(),'Create') or contains(text(),'Done') or contains(text(),'Add')]")]:
+                    try:
+                        btn = WebDriverWait(self.driver, 5).until(EC.element_to_be_clickable((by, sel)))
+                        try:
+                            btn.click()
+                        except Exception:
+                            self.driver.execute_script("arguments[0].click();", btn)
+                        submitted = True
+                        time.sleep(3)
+                        break
+                    except TimeoutException:
+                        continue
+
+                if not submitted:
+                    if self.debug:
+                        print(f"  Could not submit form for {name}")
+                    continue
+
+                # Verify success
+                if 'no scheduled vacations' in self.driver.page_source.lower():
+                    if self.debug:
+                        print(f"  Creation may have failed for {name}")
+                    continue
+
+                created_count += 1
+                if self.debug:
+                    print(f"  ✓ Created vacation for {name}")
+
+            except Exception as e:
+                if self.debug:
+                    print(f"  ✗ Error creating for {name}: {e}")
+                continue
+
+        return created_count
 
     def close(self):
         """Close the browser session."""

@@ -153,12 +153,22 @@ def cmd_vacation(args):
             print(f"  Cool: {args.cool}°F")
 
             try:
-                ecobee.enable_vacation_mode(
-                    start_date=start_date,
-                    end_date=end_date,
-                    heat=args.heat,
-                    cool=args.cool
-                )
+                if args.house:
+                    created = ecobee.create_vacations_for_house(
+                        house_name=args.house,
+                        start_date=start_date,
+                        end_date=end_date,
+                        heat=args.heat,
+                        cool=args.cool
+                    )
+                    print(f"\n✓ Created {created} vacation(s) for {args.house}")
+                else:
+                    ecobee.enable_vacation_mode(
+                        start_date=start_date,
+                        end_date=end_date,
+                        heat=args.heat,
+                        cool=args.cool
+                    )
                 print("\n✓ Vacation mode enabled")
                 return 0
             except Exception as e:
@@ -169,10 +179,16 @@ def cmd_vacation(args):
             print("\nDisabling vacation mode...")
 
             try:
-                deleted = ecobee.disable_vacation_mode(
-                    vacation_name=args.name,
-                    delete_all=not args.first_only
-                )
+                if args.house:
+                    deleted = ecobee.delete_vacations_for_house(
+                        house_name=args.house,
+                        first_only=args.first_only
+                    )
+                else:
+                    deleted = ecobee.disable_vacation_mode(
+                        vacation_name=args.name,
+                        delete_all=not args.first_only
+                    )
 
                 if deleted > 0:
                     print(f"✓ Deleted {deleted} vacation(s)")
@@ -217,6 +233,7 @@ def main():
     vacation_parser.add_argument('--cool', type=float, default=85, help='Cool setpoint (default: 85)')
     vacation_parser.add_argument('--name', help='Specific vacation name to delete (only with --disable)')
     vacation_parser.add_argument('--first-only', action='store_true', help='Delete only first vacation (only with --disable)')
+    vacation_parser.add_argument('--house', help='Operate on all thermostats in a house (e.g., "Blackberry Hill")')
 
     args = parser.parse_args()
 
