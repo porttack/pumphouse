@@ -640,6 +640,34 @@ class SimplifiedMonitor:
                                 priority='default'
                             )
 
+                    # Check for full-flow event (pressure ~100% continuously)
+                    full_flow_status = self.notification_manager.check_full_flow_status()
+                    if full_flow_status and full_flow_status.get('type') == 'full_flow':
+                        if self.notification_manager.can_notify('full_flow'):
+                            current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
+                            duration_hours = full_flow_status['duration_minutes'] / 60
+                            start_time_str = full_flow_status['start_ts'].strftime('%a %I:%M %p').replace(' 0', ' ')
+
+                            # Log full-flow event
+                            self.log_event(
+                                'FULL_FLOW',
+                                notes=f"Full-flow period detected. Started: {start_time_str}, "
+                                      f"Duration: {duration_hours:.1f}h, "
+                                      f"Pumped: {full_flow_status['total_gallons_pumped']:.0f} gal, "
+                                      f"Tank gain: {full_flow_status['tank_gain']:+.0f} gal, "
+                                      f"Est. GPH: {full_flow_status['estimated_gph']:.1f}"
+                            )
+
+                            # Send notification
+                            self.send_alert(
+                                'NOTIFY_FULL_FLOW',
+                                f"{current_gal:.0f} gal - Full Flow Active",
+                                f"System running at full capacity since {start_time_str} ({duration_hours:.1f}h). "
+                                f"Pumped {full_flow_status['total_gallons_pumped']:.0f} gal "
+                                f"(tank {full_flow_status['tank_gain']:+.0f} gal, ~{full_flow_status['estimated_gph']:.0f} GPH)",
+                                priority='default'
+                            )
+
                     tank_data_age = self.get_tank_data_age()
                     snapshot_data = self.snapshot_tracker.get_snapshot_data(
                         self.state.tank_gallons,

@@ -18,10 +18,12 @@ from monitor.config import (
     NOTIFY_HIGH_FLOW_AVERAGING,
     NOTIFY_BACKFLUSH_ENABLED, NOTIFY_BACKFLUSH_THRESHOLD, NOTIFY_BACKFLUSH_WINDOW_SNAPSHOTS,
     NOTIFY_BACKFLUSH_TIME_START, NOTIFY_BACKFLUSH_TIME_END,
+    NOTIFY_FULL_FLOW_ENABLED, NOTIFY_FULL_FLOW_PRESSURE_THRESHOLD,
+    NOTIFY_FULL_FLOW_DELAY_MINUTES, NOTIFY_FULL_FLOW_LOOKBACK_HOURS,
     MIN_NOTIFICATION_INTERVAL
 )
 from monitor.gpio_helpers import FLOAT_STATE_FULL, FLOAT_STATE_CALLING
-from monitor.stats import find_last_refill, find_high_flow_event, find_backflush_event
+from monitor.stats import find_last_refill, find_high_flow_event, find_backflush_event, find_full_flow_periods
 
 class NotificationManager:
     """
@@ -47,6 +49,7 @@ class NotificationManager:
         self.well_recovery_alerted_ts = None  # Timestamp of last recovery we alerted for
         self.high_flow_alerted_ts = None  # Timestamp of last high flow we alerted for
         self.backflush_alerted_ts = None  # Timestamp of last backflush we alerted for
+        self.full_flow_alerted_ts = None  # Timestamp of last full-flow we alerted for
 
         # Load persistent state
         self._load_state()
@@ -232,6 +235,56 @@ class NotificationManager:
 
         return None
 
+    def check_full_flow_status(self):
+        """
+        Check for full-flow periods (pressure_high_percent ~100%).
+        Returns dict with period details or None.
+
+        Only notifies if period has been running for at least NOTIFY_FULL_FLOW_DELAY_MINUTES.
+        This captures sustained full-flow events (neighbor receiving water at max capacity).
+        """
+        if not NOTIFY_FULL_FLOW_ENABLED:
+            return None
+
+        # Find all full-flow periods in lookback window
+        periods = find_full_flow_periods(
+            self.snapshots_file,
+            pressure_threshold=NOTIFY_FULL_FLOW_PRESSURE_THRESHOLD,
+            lookback_hours=NOTIFY_FULL_FLOW_LOOKBACK_HOURS
+        )
+
+        if not periods:
+            return None
+
+        # Get the most recent period (last in list)
+        latest_period = periods[-1]
+
+        # Only notify if period has been running for at least the delay threshold
+        if latest_period['duration_minutes'] < NOTIFY_FULL_FLOW_DELAY_MINUTES:
+            return None
+
+        # Check if we've already alerted for this period
+        period_ts_str = latest_period['start_ts'].isoformat()
+
+        if self.full_flow_alerted_ts != period_ts_str:
+            # This is a NEW full-flow period we haven't alerted about yet
+            self.full_flow_alerted_ts = period_ts_str
+            self._save_state()
+
+            # Return full period details for notification
+            return {
+                'type': 'full_flow',
+                'start_ts': latest_period['start_ts'],
+                'end_ts': latest_period['end_ts'],
+                'duration_minutes': latest_period['duration_minutes'],
+                'snapshot_count': latest_period['snapshot_count'],
+                'total_gallons_pumped': latest_period['total_gallons_pumped'],
+                'tank_gain': latest_period['tank_gain'],
+                'estimated_gph': latest_period['estimated_gph']
+            }
+
+        return None
+
     def _load_state(self):
         """Load persistent notification state from disk"""
         try:
@@ -242,10 +295,11 @@ class NotificationManager:
                     self.well_dry_alerted = state.get('well_dry_alerted', False)
                     self.high_flow_alerted_ts = state.get('high_flow_alerted_ts')
                     self.backflush_alerted_ts = state.get('backflush_alerted_ts')
+                    self.full_flow_alerted_ts = state.get('full_flow_alerted_ts')
                     if self.debug:
                         print(f"Loaded notification state: recovery_ts={self.well_recovery_alerted_ts}, "
                               f"dry={self.well_dry_alerted}, high_flow_ts={self.high_flow_alerted_ts}, "
-                              f"backflush_ts={self.backflush_alerted_ts}")
+                              f"backflush_ts={self.backflush_alerted_ts}, full_flow_ts={self.full_flow_alerted_ts}")
         except Exception as e:
             if self.debug:
                 print(f"Warning: Could not load notification state: {e}")
@@ -258,6 +312,7 @@ class NotificationManager:
                 'well_dry_alerted': self.well_dry_alerted,
                 'high_flow_alerted_ts': self.high_flow_alerted_ts,
                 'backflush_alerted_ts': self.backflush_alerted_ts,
+                'full_flow_alerted_ts': self.full_flow_alerted_ts,
                 'saved_at': datetime.now().isoformat()
             }
             with open(self.state_file, 'w') as f:

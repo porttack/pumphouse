@@ -85,6 +85,12 @@ NOTIFY_BACKFLUSH_WINDOW_SNAPSHOTS = 3  # Look back N snapshots (2=30min, 3=45min
 NOTIFY_BACKFLUSH_TIME_START = "00:00"  # Start of backflush window (HH:MM)
 NOTIFY_BACKFLUSH_TIME_END = "04:30"  # End of backflush window (HH:MM)
 
+# Full-Flow Detection (pressure_high_percent ~100%)
+NOTIFY_FULL_FLOW_ENABLED = True  # Enable full-flow detection and notifications
+NOTIFY_FULL_FLOW_PRESSURE_THRESHOLD = 90.0  # Pressure % to count as full-flow (default: 90%)
+NOTIFY_FULL_FLOW_DELAY_MINUTES = 30  # Minutes after full-flow starts before notifying (default: 30)
+NOTIFY_FULL_FLOW_LOOKBACK_HOURS = 24  # How far back to check for full-flow periods (default: 24)
+
 # Notification Cooldowns (prevent spam)
 MIN_NOTIFICATION_INTERVAL = 300  # Minimum 5 minutes between same notification type
 
