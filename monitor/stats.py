@@ -318,3 +318,131 @@ def find_backflush_event(snapshots_file, threshold_gallons=50, window_snapshots=
     except Exception as e:
         # Silently ignore errors
         return None, None
+
+
+def find_full_flow_periods(snapshots_file, pressure_threshold=90.0, lookback_hours=24):
+    """
+    Find periods where pressure_high_percent >= threshold, indicating full-flow.
+
+    Groups consecutive high-pressure snapshots into periods and calculates:
+    - Duration of each period
+    - Total gallons pumped (from estimated_gallons_pumped)
+    - Estimated GPH based on tank level changes
+
+    Args:
+        snapshots_file: Path to snapshots.csv
+        pressure_threshold: Min pressure_high_percent to count as full-flow (default: 90.0)
+        lookback_hours: How far back to search (default: 24)
+
+    Returns:
+        List of dicts, each containing:
+        {
+            'start_ts': datetime,
+            'end_ts': datetime,
+            'duration_minutes': float,
+            'snapshot_count': int,
+            'total_gallons_pumped': float,
+            'tank_start_gallons': float,
+            'tank_end_gallons': float,
+            'tank_gain': float,
+            'estimated_gph': float
+        }
+    """
+    if not os.path.exists(snapshots_file):
+        return []
+
+    try:
+        with open(snapshots_file, 'r') as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+        if len(rows) < 1:
+            return []
+
+        now = datetime.now()
+        cutoff = now.timestamp() - (lookback_hours * 3600)
+
+        # Parse snapshots with pressure data
+        snapshots = []
+        for row in rows:
+            try:
+                ts = datetime.fromisoformat(row['timestamp'])
+                if ts.timestamp() < cutoff:
+                    continue
+
+                pressure_pct = float(row['pressure_high_percent'])
+                tank_gallons = float(row['tank_gallons'])
+
+                # Parse estimated_gallons_pumped (might have + sign)
+                est_gal_str = row.get('estimated_gallons_pumped', '0')
+                est_gallons = float(est_gal_str.replace('+', '')) if est_gal_str else 0.0
+
+                snapshots.append({
+                    'ts': ts,
+                    'pressure_pct': pressure_pct,
+                    'tank_gallons': tank_gallons,
+                    'est_gallons': est_gallons
+                })
+            except (ValueError, KeyError):
+                continue
+
+        if len(snapshots) < 1:
+            return []
+
+        # Sort by timestamp
+        snapshots.sort(key=lambda x: x['ts'])
+
+        # Group consecutive high-pressure periods
+        periods = []
+        current_period = None
+
+        for snap in snapshots:
+            if snap['pressure_pct'] >= pressure_threshold:
+                if current_period is None:
+                    # Start new period
+                    current_period = {
+                        'start_ts': snap['ts'],
+                        'end_ts': snap['ts'],
+                        'snapshot_count': 1,
+                        'total_gallons_pumped': snap['est_gallons'],
+                        'tank_start_gallons': snap['tank_gallons'],
+                        'tank_end_gallons': snap['tank_gallons']
+                    }
+                else:
+                    # Extend current period
+                    current_period['end_ts'] = snap['ts']
+                    current_period['snapshot_count'] += 1
+                    current_period['total_gallons_pumped'] += snap['est_gallons']
+                    current_period['tank_end_gallons'] = snap['tank_gallons']
+            else:
+                if current_period is not None:
+                    # End of period - finalize and save
+                    _finalize_period(current_period)
+                    periods.append(current_period)
+                    current_period = None
+
+        # Handle last period if still active
+        if current_period is not None:
+            _finalize_period(current_period)
+            periods.append(current_period)
+
+        return periods
+
+    except Exception as e:
+        return []
+
+
+def _finalize_period(period):
+    """Calculate derived fields for a full-flow period"""
+    duration_seconds = (period['end_ts'] - period['start_ts']).total_seconds()
+    period['duration_minutes'] = duration_seconds / 60
+
+    # Tank gain during period
+    period['tank_gain'] = period['tank_end_gallons'] - period['tank_start_gallons']
+
+    # Estimate GPH based on tank readings
+    if duration_seconds > 0:
+        duration_hours = duration_seconds / 3600
+        period['estimated_gph'] = period['tank_gain'] / duration_hours
+    else:
+        period['estimated_gph'] = 0.0

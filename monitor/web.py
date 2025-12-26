@@ -103,6 +103,52 @@ def read_csv_tail(filepath, max_rows=20):
     except Exception as e:
         return [], []
 
+def read_events_by_time(filepath, hours=72):
+    """Read events from CSV file filtered by time window (hours)"""
+    if not os.path.exists(filepath):
+        return [], []
+
+    try:
+        with open(filepath, 'r') as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+
+            if len(rows) == 0:
+                return [], []
+
+            headers = rows[0]
+            data = rows[1:]  # Skip header
+
+            # Find timestamp column index
+            timestamp_idx = None
+            if 'timestamp' in headers:
+                timestamp_idx = headers.index('timestamp')
+
+            if timestamp_idx is None:
+                # Fallback to last N rows if no timestamp column
+                return headers, data[-500:]
+
+            # Filter by time
+            now = datetime.now()
+            cutoff = now.timestamp() - (hours * 3600)
+
+            filtered_data = []
+            for row in data:
+                if len(row) <= timestamp_idx:
+                    continue
+
+                try:
+                    ts = datetime.fromisoformat(row[timestamp_idx])
+                    if ts.timestamp() >= cutoff:
+                        filtered_data.append(row)
+                except:
+                    continue
+
+            return headers, filtered_data
+
+    except Exception as e:
+        return [], []
+
 def get_snapshots_stats(filepath='snapshots.csv'):
     """Calculate aggregate stats from snapshots.csv for 1hr and 24hr windows"""
     if not os.path.exists(filepath):
@@ -293,8 +339,13 @@ def chart_data():
         now = datetime.now()
         cutoff = now.timestamp() - (hours * 3600)
 
-        # Import stagnation parameters
-        from monitor.config import NOTIFY_WELL_RECOVERY_STAGNATION_HOURS, NOTIFY_WELL_RECOVERY_MAX_STAGNATION_GAIN
+        # Import stagnation and full-flow parameters
+        from monitor.config import (
+            NOTIFY_WELL_RECOVERY_STAGNATION_HOURS,
+            NOTIFY_WELL_RECOVERY_MAX_STAGNATION_GAIN,
+            NOTIFY_FULL_FLOW_PRESSURE_THRESHOLD,
+            OVERRIDE_ON_THRESHOLD
+        )
 
         # First pass: collect all data points in time range
         data_points = []
@@ -302,9 +353,11 @@ def chart_data():
             try:
                 ts = datetime.fromisoformat(row['timestamp'])
                 if ts.timestamp() >= cutoff:
+                    pressure_pct = float(row.get('pressure_high_percent', 0))
                     data_points.append({
                         'timestamp': ts,
-                        'gallons': float(row['tank_gallons'])
+                        'gallons': float(row['tank_gallons']),
+                        'pressure_pct': pressure_pct
                     })
             except:
                 continue
@@ -323,6 +376,17 @@ def chart_data():
         for i, point in enumerate(data_points):
             timestamps.append(point['timestamp'].strftime('%a %H:%M'))
             gallons.append(point['gallons'])
+
+            # PRIORITY 1: Check for full-flow (pressure >= threshold)
+            if point['pressure_pct'] >= NOTIFY_FULL_FLOW_PRESSURE_THRESHOLD:
+                point_colors.append('#f44336')  # Red - full flow
+                continue
+
+            # PRIORITY 2: Check for stagnation (skip if tank >= OVERRIDE_ON_THRESHOLD)
+            # If tank is full enough, we shouldn't mark as stagnant since override would be on
+            if OVERRIDE_ON_THRESHOLD and point['gallons'] >= OVERRIDE_ON_THRESHOLD:
+                point_colors.append('#4CAF50')  # Green - tank at override threshold
+                continue
 
             # Find the earliest point within the 6-hour lookback window
             lookback_cutoff = point['timestamp'].timestamp() - stagnation_window_seconds
@@ -460,6 +524,9 @@ def chart_image():
 # @requires_auth
 def index():
     """Main status page"""
+    # Get hours parameter for filtering events by time
+    hours = request.args.get('hours', DASHBOARD_DEFAULT_HOURS, type=int)
+
     # Get sensor data
     sensor_data = get_sensor_data()
 
@@ -474,7 +541,7 @@ def index():
 
     # Read CSV files
     snapshot_headers, snapshot_rows = read_csv_tail('snapshots.csv', max_rows=10)
-    event_headers, event_rows = read_csv_tail('events.csv', max_rows=DASHBOARD_MAX_EVENTS)
+    event_headers, event_rows = read_events_by_time('events.csv', hours=hours)
 
     # Filter events based on DASHBOARD_HIDE_EVENT_TYPES
     if event_headers and event_rows and 'event_type' in event_headers:
@@ -620,6 +687,7 @@ def index():
                          format_date_short=format_date_short,
                          now=datetime.now(),
                          startup_time=STARTUP_TIME,
+                         hours=hours,
                          default_hours=DASHBOARD_DEFAULT_HOURS,
                          ecobee_temp=ecobee_temp,
                          FLOAT_STATE_FULL=FLOAT_STATE_FULL,
