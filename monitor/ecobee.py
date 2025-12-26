@@ -65,6 +65,13 @@ DEFAULT_TEMPERATURES = {
     "Hallway": {"heat": 68, "cool": 75},
 }
 
+# Known thermostat names per house (used for filtering when house switch fails)
+HOUSE_THERMOSTATS = {
+    "Blackberry Hill": ["Living Room Ecobee", "Hallway"],
+    # Adjust these as needed for your second house
+    "Ashley St": ["Home", "Caboose"],
+}
+
 
 class EcobeeController:
     """Controller for Ecobee thermostats via web scraping."""
@@ -118,6 +125,67 @@ class EcobeeController:
         totp = pyotp.TOTP(self.totp_secret)
         return totp.now()
 
+    def _select_house(self, house_name):
+        """Ensure the specified house is selected on the devices page."""
+        if self.debug:
+            print(f"Selecting house: {house_name}")
+
+        # We're already on the devices page at this point
+        # Strategy: try clicking a visible element with exact text match; if not,
+        # open any likely selector/dropdown, then click the desired house.
+        try:
+            # Direct click if the house name element is clickable
+            target = WebDriverWait(self.driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, f"//*[normalize-space(text())='{house_name}']"))
+            )
+            try:
+                target.click()
+            except Exception:
+                self.driver.execute_script("arguments[0].click();", target)
+            time.sleep(2)
+            return True
+        except TimeoutException:
+            if self.debug:
+                print("House name element not directly clickable; trying selector menu...")
+
+        # Try opening a location/house selector and then clicking the house
+        try:
+            # Common patterns for location selectors (best-effort heuristics)
+            triggers = [
+                (By.CSS_SELECTOR, '[data-qa-class="location-selector"]'),
+                (By.CSS_SELECTOR, '[data-qa-class*="selector"]'),
+                (By.XPATH, "//button[contains(@aria-label,'Location') or contains(.,'Location') or contains(.,'Home')]")
+            ]
+            opened = False
+            for by, sel in triggers:
+                try:
+                    btn = WebDriverWait(self.driver, 3).until(
+                        EC.element_to_be_clickable((by, sel))
+                    )
+                    btn.click()
+                    opened = True
+                    time.sleep(1)
+                    break
+                except TimeoutException:
+                    continue
+
+            if opened:
+                target = WebDriverWait(self.driver, 5).until(
+                    EC.element_to_be_clickable((By.XPATH, f"//*[normalize-space(text())='{house_name}']"))
+                )
+                try:
+                    target.click()
+                except Exception:
+                    self.driver.execute_script("arguments[0].click();", target)
+                time.sleep(2)
+                return True
+        except TimeoutException:
+            pass
+
+        if self.debug:
+            print("⚠️ Could not switch house; continuing with current selection.")
+        return False
+
     def _create_driver(self):
         """Create and return a Selenium WebDriver instance."""
         options = Options()
@@ -131,7 +199,48 @@ class EcobeeController:
         options.add_argument('--window-size=1920,1080')
         options.add_argument('--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)')
 
-        service = Service('/usr/bin/chromedriver')
+        # Robustly detect chromedriver path
+        import shutil
+        import os
+        from pathlib import Path as _Path
+
+        candidates = []
+        # Allow override via environment
+        env_path = os.environ.get('CHROMEDRIVER_PATH')
+        if env_path:
+            candidates.append(env_path)
+
+        # Try PATH resolution
+        which_path = shutil.which('chromedriver')
+        if which_path:
+            candidates.append(which_path)
+
+        # Common macOS/Homebrew locations
+        candidates.extend([
+            '/opt/homebrew/bin/chromedriver',
+            '/usr/local/bin/chromedriver',
+            '/usr/bin/chromedriver'
+        ])
+
+        chromedriver_path = None
+        for p in candidates:
+            try:
+                if p and _Path(p).exists():
+                    chromedriver_path = p
+                    break
+            except Exception:
+                continue
+
+        if not chromedriver_path:
+            raise RuntimeError(
+                "chromedriver not found. Install via Homebrew: 'brew install chromedriver'. "
+                "If already installed, set CHROMEDRIVER_PATH to its location (e.g., /opt/homebrew/bin/chromedriver)."
+            )
+
+        if self.debug:
+            print(f"Using chromedriver at: {chromedriver_path}")
+
+        service = Service(chromedriver_path)
         return webdriver.Chrome(service=service, options=options)
 
     def _login(self):
@@ -228,7 +337,7 @@ class EcobeeController:
             self.driver = self._create_driver()
             self._login()
 
-    def get_all_thermostats(self):
+    def get_all_thermostats(self, house_name=None):
         """
         Get data for all thermostats in the house.
 
@@ -249,7 +358,22 @@ class EcobeeController:
         self.driver.get(f"{PORTAL_URL}#/devices")
         time.sleep(8)  # Wait for React to render
 
+        # Ensure we are on requested house if provided
+        if house_name:
+            try:
+                self._select_house(house_name)
+            except Exception:
+                pass
+
+        # Ensure we are on the correct house
+        try:
+            self._select_house(HOUSE_NAME)
+        except Exception:
+            # Non-fatal; proceed with current selection
+            pass
+
         thermostats = []
+        thermostat_ids = {}
         tiles = self.driver.find_elements(By.CSS_SELECTOR, '[data-qa-class="thermostat-tile"]')
 
         for tile in tiles:
@@ -298,6 +422,19 @@ class EcobeeController:
                 except NoSuchElementException:
                     pass
 
+                # Extract thermostat ID from tile's data-qa-id (e.g., ref521750262114)
+                try:
+                    data_qa_id = tile.get_attribute('data-qa-id')
+                    if data_qa_id:
+                        import re
+                        m = re.search(r'(\d+)', data_qa_id)
+                        if m:
+                            thermostat_ids[name] = m.group(1)
+                            if self.debug:
+                                print(f"  {name}: thermostat_id={thermostat_ids[name]}")
+                except Exception:
+                    pass
+
                 thermostats.append({
                     'name': name,
                     'temperature': temperature,
@@ -317,6 +454,42 @@ class EcobeeController:
                 if self.debug:
                     print(f"Error parsing thermostat tile: {e}")
                 continue
+
+        # Second pass: navigate to each thermostat's vacations page to detect status
+        for t in thermostats:
+            name = t['name']
+            t_id = thermostat_ids.get(name)
+            if not t_id:
+                continue
+            try:
+                vac_url = f"{PORTAL_URL}#/devices/thermostats/{t_id}/vacations"
+                if self.debug:
+                    print(f"  {name}: checking vacations at {vac_url}")
+                self.driver.get(vac_url)
+                time.sleep(3)
+                # If the 'no vacations' message exists, vacation_mode=False; else True
+                try:
+                    self.driver.find_element(By.XPATH, "//*[contains(text(), 'There are no scheduled vacations')]")
+                    t['vacation_mode'] = False
+                    if self.debug:
+                        print(f"  {name}: vacation_mode=False")
+                except NoSuchElementException:
+                    t['vacation_mode'] = True
+                    if self.debug:
+                        print(f"  {name}: vacation_mode=True")
+            except Exception as e:
+                if self.debug:
+                    print(f"  {name}: error checking vacation: {e}")
+                # Leave existing value or default to False
+                t['vacation_mode'] = t.get('vacation_mode', False)
+
+        # Optional filtering by house name if we couldn't switch houses reliably
+        if house_name and house_name in HOUSE_THERMOSTATS:
+            expected = set(HOUSE_THERMOSTATS[house_name])
+            filtered = [t for t in thermostats if t['name'] in expected]
+            if self.debug:
+                print(f"Filtered thermostats for {house_name}: {[t['name'] for t in filtered]}")
+            return filtered if filtered else thermostats
 
         return thermostats
 

@@ -19,13 +19,13 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from monitor.ecobee import EcobeeController
+from monitor.ecobee import EcobeeController, HOUSE_NAME
 
 # Cache file location
 CACHE_FILE = Path(__file__).parent / 'ecobee_temp_cache.csv'
 
 
-def fetch_and_cache_temperature(thermostat_name=None, debug=False):
+def fetch_and_cache_temperature(thermostat_name=None, house_name=None, debug=False):
     """
     Fetch current temperature from Ecobee and cache it to a CSV file.
 
@@ -48,7 +48,9 @@ def fetch_and_cache_temperature(thermostat_name=None, debug=False):
                     return None
                 thermostats = [tstat]
             else:
-                thermostats = ecobee.get_all_thermostats()
+                # Prefer a specific house if provided; default to configured HOUSE_NAME
+                target_house = house_name if house_name else HOUSE_NAME
+                thermostats = ecobee.get_all_thermostats(house_name=target_house)
 
             if not thermostats:
                 print("ERROR: No thermostats found", file=sys.stderr)
@@ -73,7 +75,7 @@ def fetch_and_cache_temperature(thermostat_name=None, debug=False):
                         'cool_setpoint': tstat.get('cool_setpoint', ''),
                         'system_mode': tstat.get('system_mode', ''),
                         'hold_text': tstat.get('hold_text', ''),
-                        'vacation_mode': tstat.get('vacation_mode', False)
+                        'vacation_mode': 'True' if tstat.get('vacation_mode', False) else 'False'
                     })
 
                     if debug:
@@ -135,11 +137,13 @@ def main():
     parser = argparse.ArgumentParser(description='Fetch and cache Ecobee temperature')
     parser.add_argument('--debug', action='store_true', help='Enable debug output')
     parser.add_argument('--thermostat', help='Specific thermostat name (default: all)')
+    parser.add_argument('--house', help='House name to scrape (default: Blackberry Hill)')
 
     args = parser.parse_args()
 
     result = fetch_and_cache_temperature(
         thermostat_name=args.thermostat,
+        house_name=args.house if args.house else HOUSE_NAME,
         debug=args.debug
     )
 
