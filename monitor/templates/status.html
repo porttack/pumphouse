@@ -308,6 +308,15 @@
                     <div class="status-value">{{ "%.1f"|format(stats.pressure_high_pct_1hr) }}% / {{ "%.0f"|format(stats.pressure_high_min_24hr) }} min</div>
                 </div>
                 {% endif %}
+                {% if gph_metrics and (gph_metrics.slow_fill_gph or gph_metrics.fast_fill_gph) %}
+                <div class="status-item">
+                    <div class="status-label">Well GPH (3-week avg)</div>
+                    <div class="status-value" style="font-size: 12px;">
+                        {% if gph_metrics.slow_fill_gph %}Slow: {{ "%.0f"|format(gph_metrics.slow_fill_gph) }}{% else %}Slow: N/A{% endif %}
+                        {% if gph_metrics.fast_fill_gph %} • Fast: {{ "%.0f"|format(gph_metrics.fast_fill_gph) }}{% else %} • Fast: N/A{% endif %}
+                    </div>
+                </div>
+                {% endif %}
                 {% if sensor_data.temp is not none %}
                 <div class="status-item">
                     <div class="status-label">Temp / Humidity</div>

@@ -419,6 +419,15 @@ def fetch_system_status(debug=False):
             if debug:
                 print(f"Warning: Could not get Ecobee temperature: {e}", file=sys.stderr)
 
+        # Get GPH metrics
+        gph_metrics = None
+        try:
+            from monitor.gph_calculator import get_cached_gph
+            gph_metrics = get_cached_gph(max_age_hours=24)
+        except Exception as e:
+            if debug:
+                print(f"Warning: Could not get GPH metrics: {e}", file=sys.stderr)
+
         return {
             'tank': tank_data,
             'pressure': pressure,
@@ -428,7 +437,8 @@ def fetch_system_status(debug=False):
             'events': {'headers': event_headers, 'rows': event_rows},
             'occupancy': occupancy_status,
             'reservations': reservation_list,
-            'ecobee_temp': ecobee_temp
+            'ecobee_temp': ecobee_temp,
+            'gph_metrics': gph_metrics
         }
     except Exception as e:
         if debug:
@@ -847,6 +857,24 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
                     <div class="status-item">
                         <div class="status-label">Pressure HIGH (24 hours)</div>
                         <div class="status-value">{stats['pressure_high_min_24hr']:.0f} min</div>
+                    </div>
+"""
+        # Add GPH metrics if available
+        gph_metrics = status_data.get('gph_metrics')
+        if gph_metrics and (gph_metrics.get('slow_fill_gph') or gph_metrics.get('fast_fill_gph')):
+            gph_parts = []
+            if gph_metrics.get('slow_fill_gph'):
+                gph_parts.append(f"Slow: {gph_metrics['slow_fill_gph']:.0f} GPH")
+            else:
+                gph_parts.append("Slow: N/A")
+            if gph_metrics.get('fast_fill_gph'):
+                gph_parts.append(f"Fast: {gph_metrics['fast_fill_gph']:.0f} GPH")
+            else:
+                gph_parts.append("Fast: N/A")
+            html += f"""
+                    <div class="status-item">
+                        <div class="status-label">Well GPH (3-week avg)</div>
+                        <div class="status-value" style="font-size: 12px;">{' • '.join(gph_parts)}</div>
                     </div>
 """
         if occupancy_status:

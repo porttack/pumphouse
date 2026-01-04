@@ -31,6 +31,7 @@ from monitor.occupancy import (
     get_occupancy_status, get_current_and_upcoming_reservations,
     load_reservations, format_date_short
 )
+from monitor.gph_calculator import get_cached_gph, format_gph_for_display
 
 # Matplotlib imports for chart generation
 import matplotlib
@@ -561,6 +562,9 @@ def index():
     # Get cached Ecobee temperature
     ecobee_temp = get_cached_ecobee_temp(max_age_hours=24)
 
+    # Get GPH metrics (cached, recalculated daily)
+    gph_metrics = get_cached_gph(max_age_hours=24)
+
     # Get all reservations (for repeat guest detection across all reservations)
     reservations = load_reservations(reservations_csv)
 
@@ -690,6 +694,7 @@ def index():
                          hours=hours,
                          default_hours=DASHBOARD_DEFAULT_HOURS,
                          ecobee_temp=ecobee_temp,
+                         gph_metrics=gph_metrics,
                          FLOAT_STATE_FULL=FLOAT_STATE_FULL,
                          FLOAT_STATE_CALLING=FLOAT_STATE_CALLING)
 
