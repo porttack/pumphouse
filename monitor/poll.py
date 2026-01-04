@@ -12,6 +12,9 @@ from monitor.config import (
     ENABLE_OVERRIDE_SHUTOFF, OVERRIDE_SHUTOFF_THRESHOLD,
     OVERRIDE_ON_THRESHOLD,
     NOTIFY_OVERRIDE_SHUTOFF, NOTIFY_WELL_RECOVERY_THRESHOLD,
+    NOTIFY_WELL_RECOVERY_STAGNATION_HOURS,
+    NOTIFY_HIGH_PRESSURE_ENABLED, NOTIFY_HIGH_PRESSURE_USE_EMAIL,
+    NOTIFY_PRESSURE_LOW_ENABLED,
     DASHBOARD_URL,
     ENABLE_DAILY_STATUS_EMAIL, DAILY_STATUS_EMAIL_TIME, DAILY_STATUS_EMAIL_CHART_HOURS,
     ENABLE_CHECKOUT_REMINDER, CHECKOUT_REMINDER_TIME
@@ -62,12 +65,12 @@ def get_next_daily_status_time(current_time, target_time_str):
 
         # If we're past today's target time, move to tomorrow
         if current_time >= target_dt.timestamp():
-            target_dt = target_dt.replace(day=dt.day + 1)
+            target_dt = target_dt + timedelta(days=1)
 
         return target_dt.timestamp()
     except (ValueError, AttributeError):
         # If parsing fails, default to 6am tomorrow
-        return dt.replace(hour=6, minute=0, second=0, microsecond=0, day=dt.day + 1).timestamp()
+        return (dt.replace(hour=6, minute=0, second=0, microsecond=0) + timedelta(days=1)).timestamp()
 
 class SnapshotTracker:
     """Track data for snapshot intervals"""
@@ -394,6 +397,33 @@ class SimplifiedMonitor:
                         self.log_state_event('PRESSURE_HIGH')
                         if self.debug:
                             print(f"{datetime.now().strftime('%H:%M:%S')} - Pressure HIGH")
+
+                        # Send high pressure alert if enabled
+                        if NOTIFY_HIGH_PRESSURE_ENABLED and self.notification_manager.can_notify('high_pressure'):
+                            current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
+
+                            # Send ntfy notification
+                            send_notification(
+                                title=f"{current_gal:.0f} gal - Pressure HIGH",
+                                message=f"Water pressure is HIGH (\u226510 PSI) - someone may be using water",
+                                priority='high',
+                                tags=['droplet', 'warning'],
+                                click_url=DASHBOARD_URL,
+                                attach_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
+                                debug=self.debug
+                            )
+
+                            # Optionally send email notification
+                            if NOTIFY_HIGH_PRESSURE_USE_EMAIL:
+                                send_email_notification(
+                                    subject=f"{current_gal:.0f} gal - Pressure HIGH",
+                                    message=f"Water pressure is HIGH (\u226510 PSI) - someone may be using water",
+                                    priority='high',
+                                    dashboard_url=DASHBOARD_URL,
+                                    chart_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
+                                    debug=self.debug,
+                                    include_status=True
+                                )
                     else:  # Went LOW
                         if self.pressure_high_start:
                             duration = current_time - self.pressure_high_start
@@ -403,6 +433,42 @@ class SimplifiedMonitor:
                             if self.debug:
                                 print(f"{datetime.now().strftime('%H:%M:%S')} - Pressure LOW "
                                      f"(was HIGH for {duration:.1f}s, ~{estimated:.1f} gal)")
+
+                            # Send pressure LOW alert with duration info
+                            if NOTIFY_PRESSURE_LOW_ENABLED and self.notification_manager.can_notify('pressure_low'):
+                                current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
+                                duration_minutes = duration / 60
+
+                                # Format duration nicely
+                                if duration_minutes >= 1:
+                                    duration_str = f"{duration_minutes:.1f} minutes"
+                                else:
+                                    duration_str = f"{duration:.0f} seconds"
+
+                                # Send ntfy notification
+                                send_notification(
+                                    title=f"{current_gal:.0f} gal - Pressure LOW",
+                                    message=f"Water usage ended. Pressure was HIGH for {duration_str} (~{estimated:.1f} gal)",
+                                    priority='default',
+                                    tags=['droplet'],
+                                    click_url=DASHBOARD_URL,
+                                    attach_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
+                                    debug=self.debug
+                                )
+
+                                # Send email notification with full details
+                                if NOTIFY_HIGH_PRESSURE_USE_EMAIL:
+                                    send_email_notification(
+                                        subject=f"{current_gal:.0f} gal - Water Usage Ended",
+                                        message=f"Water pressure returned to LOW (<10 PSI).\n\n"
+                                               f"Duration of HIGH pressure: {duration_str}\n"
+                                               f"Estimated water pumped: ~{estimated:.1f} gallons",
+                                        priority='default',
+                                        dashboard_url=DASHBOARD_URL,
+                                        chart_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
+                                        debug=self.debug,
+                                        include_status=True
+                                    )
 
                             # Trigger purge if enabled AND enough time has passed
                             if self.enable_purge and self.relay_control_enabled and estimated > 0:
