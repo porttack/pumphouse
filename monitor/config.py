@@ -91,6 +91,11 @@ NOTIFY_FULL_FLOW_PRESSURE_THRESHOLD = 90.0  # Pressure % to count as full-flow (
 NOTIFY_FULL_FLOW_DELAY_MINUTES = 30  # Minutes after full-flow starts before notifying (default: 30)
 NOTIFY_FULL_FLOW_LOOKBACK_HOURS = 24  # How far back to check for full-flow periods (default: 24)
 
+# High Pressure Detection (immediate alert when pressure goes high)
+NOTIFY_HIGH_PRESSURE_ENABLED = False  # Enable immediate high pressure alerts
+NOTIFY_HIGH_PRESSURE_USE_EMAIL = True  # Send email alerts (default: False, use ntfy only)
+NOTIFY_PRESSURE_LOW_ENABLED = False  # Send alert when pressure goes LOW with duration info
+
 # Notification Cooldowns (prevent spam)
 MIN_NOTIFICATION_INTERVAL = 300  # Minimum 5 minutes between same notification type
 
