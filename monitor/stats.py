@@ -10,10 +10,13 @@ def _find_recovery_in_data(snapshots, threshold_gallons, stagnation_hours, max_s
     Core algorithm to find recovery event in snapshot data.
     Separated for easier testing with synthetic data.
 
+    Detects: Stagnation (6hrs gaining ≤15 gal) followed by recovery (50+ gal gain in next 6hrs).
+    Uses FIXED time windows to prevent false positives from continuous slow fill.
+
     Args:
         snapshots: List of dicts with 'ts' (datetime) and 'gallons' (float)
         threshold_gallons: Min gallons to count as recovery
-        stagnation_hours: Length of stagnation period to verify
+        stagnation_hours: Length of stagnation period to verify (also used for recovery window)
         max_stagnation_gain: Max gain during stagnation to be considered "stagnant"
         lookback_hours: How far back to search for stagnation windows (default: 24)
 
@@ -93,8 +96,22 @@ def _find_recovery_in_data(snapshots, threshold_gallons, stagnation_hours, max_s
             continue  # Tank was filling during this period - not stagnant
 
         # CHECK #2: Did tank recover significantly after stagnation?
-        current_gallons = recent_snapshots[-1]['gallons']
-        recovery_gain = current_gallons - period_end_gallons
+        # Look for recovery within a fixed window (stagnation_hours) after stagnation ends
+        # This prevents false positives from continuous slow fill
+        recovery_end_time = period_end_time + (stagnation_hours * 3600)
+
+        # Find the snapshot closest to recovery_end_time
+        recovery_snapshot = None
+        for snapshot in recent_snapshots[end_idx:]:
+            if snapshot['ts'].timestamp() >= recovery_end_time:
+                recovery_snapshot = snapshot
+                break
+
+        # If we don't have data far enough ahead, use the last snapshot we have
+        if recovery_snapshot is None:
+            recovery_snapshot = recent_snapshots[-1]
+
+        recovery_gain = recovery_snapshot['gallons'] - period_end_gallons
 
         if recovery_gain >= threshold_gallons:
             # FOUND IT! Return start of stagnation as unique identifier
