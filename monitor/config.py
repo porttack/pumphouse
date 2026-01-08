@@ -9,9 +9,10 @@ PRESSURE_PIN = 17
 FLOAT_PIN = 21
 
 # Polling Intervals
-POLL_INTERVAL = 5  # Seconds between pressure sensor readings
-TANK_POLL_INTERVAL = 60  # Seconds between tank level checks (1 minute)
+POLL_INTERVAL = 10  # Seconds between pressure sensor readings
+TANK_POLL_INTERVAL = 300  # Seconds between tank level checks (5 minutes)
 SNAPSHOT_INTERVAL = 15  # Minutes between snapshots: 15 (production), 5 or 2 (debug)
+MAX_TANK_FETCH_FAILURES = 5  # Consecutive failures before safety shutoff (5 × 5min = 25min tolerance)
 
 # Tank Configuration
 TANK_HEIGHT_INCHES = 58
