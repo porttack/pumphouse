@@ -17,7 +17,8 @@ from monitor.config import (
     NOTIFY_PRESSURE_LOW_ENABLED,
     DASHBOARD_URL,
     ENABLE_DAILY_STATUS_EMAIL, DAILY_STATUS_EMAIL_TIME, DAILY_STATUS_EMAIL_CHART_HOURS,
-    ENABLE_CHECKOUT_REMINDER, CHECKOUT_REMINDER_TIME
+    ENABLE_CHECKOUT_REMINDER, CHECKOUT_REMINDER_TIME,
+    MAX_TANK_FETCH_FAILURES
 )
 from monitor.gpio_helpers import (
     read_pressure, read_float_sensor,
@@ -175,7 +176,7 @@ class SimplifiedMonitor:
 
         # Tank fetch failure tracking
         self.tank_fetch_failures = 0
-        self.max_tank_failures = 3  # Require 3 consecutive failures before safety shutdown
+        self.max_tank_failures = MAX_TANK_FETCH_FAILURES
 
         # Relay control
         self.relay_control_enabled = False
