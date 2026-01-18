@@ -97,6 +97,10 @@ NOTIFY_HIGH_PRESSURE_ENABLED = False  # Enable immediate high pressure alerts
 NOTIFY_HIGH_PRESSURE_USE_EMAIL = True  # Send email alerts (default: False, use ntfy only)
 NOTIFY_PRESSURE_LOW_ENABLED = False  # Send alert when pressure goes LOW with duration info
 
+# Tank Data Outage Detection
+NOTIFY_TANK_OUTAGE_ENABLED = True  # Enable tank data outage detection and notification
+NOTIFY_TANK_OUTAGE_THRESHOLD_MINUTES = 60  # Minimum outage duration (in minutes) to trigger notification
+
 # Notification Cooldowns (prevent spam)
 MIN_NOTIFICATION_INTERVAL = 300  # Minimum 5 minutes between same notification type
 

@@ -15,6 +15,7 @@ from monitor.config import (
     NOTIFY_WELL_RECOVERY_STAGNATION_HOURS,
     NOTIFY_HIGH_PRESSURE_ENABLED, NOTIFY_HIGH_PRESSURE_USE_EMAIL,
     NOTIFY_PRESSURE_LOW_ENABLED,
+    NOTIFY_TANK_OUTAGE_ENABLED, NOTIFY_TANK_OUTAGE_THRESHOLD_MINUTES,
     DASHBOARD_URL,
     ENABLE_DAILY_STATUS_EMAIL, DAILY_STATUS_EMAIL_TIME, DAILY_STATUS_EMAIL_CHART_HOURS,
     ENABLE_CHECKOUT_REMINDER, CHECKOUT_REMINDER_TIME,
@@ -177,6 +178,7 @@ class SimplifiedMonitor:
         # Tank fetch failure tracking
         self.tank_fetch_failures = 0
         self.max_tank_failures = MAX_TANK_FETCH_FAILURES
+        self.tank_outage_start = None  # Track when tank data became unavailable
 
         # Relay control
         self.relay_control_enabled = False
@@ -332,7 +334,63 @@ class SimplifiedMonitor:
             debug=self.debug,
             include_status=True  # Always include full status
         )
-    
+
+    def log_tank_outage_recovery(self, outage_duration_seconds):
+        """Log tank data outage recovery event with duration"""
+        outage_duration_minutes = outage_duration_seconds / 60
+
+        # Format duration for display
+        if outage_duration_minutes < 60:
+            duration_str = f"{outage_duration_minutes:.1f} minutes"
+        elif outage_duration_minutes < 1440:  # Less than 24 hours
+            hours = outage_duration_minutes / 60
+            duration_str = f"{hours:.1f} hours"
+        else:
+            days = outage_duration_minutes / 1440
+            duration_str = f"{days:.1f} days"
+
+        self.log_state_event('TANK_OUTAGE_RECOVERY',
+                            f'Tank data restored after {duration_str} outage')
+
+        if self.debug:
+            print(f"  → Tank outage recovery: {duration_str}")
+
+    def send_tank_outage_notification(self, outage_duration_seconds):
+        """Send notification about significant tank data outage"""
+        outage_duration_minutes = outage_duration_seconds / 60
+
+        # Format duration for display
+        if outage_duration_minutes < 60:
+            duration_str = f"{outage_duration_minutes:.0f} minutes"
+        elif outage_duration_minutes < 1440:  # Less than 24 hours
+            hours = outage_duration_minutes / 60
+            duration_str = f"{hours:.1f} hours"
+        else:
+            days = outage_duration_minutes / 1440
+            duration_str = f"{days:.1f} days"
+
+        # Determine priority based on duration
+        if outage_duration_minutes >= 1440:  # 24+ hours
+            priority = 'urgent'
+        elif outage_duration_minutes >= 360:  # 6+ hours
+            priority = 'high'
+        else:
+            priority = 'default'
+
+        title = f"📡 Tank Data Restored - {duration_str} Outage"
+        message = (f"Tank level monitoring has been restored after {duration_str}. "
+                  f"The system was unable to read tank data during this period, likely due to "
+                  f"an internet or network connectivity issue.")
+
+        if self.notification_manager.can_notify('tank_outage_recovery'):
+            self.send_alert(
+                'NOTIFY_TANK_OUTAGE',
+                title,
+                message,
+                priority=priority,
+                chart_hours=168  # Show 7 days to visualize the outage period
+            )
+
     def run(self):
         """Main monitoring loop"""
         # Enable relay control for status monitoring
@@ -498,13 +556,37 @@ class SimplifiedMonitor:
                     # Track consecutive failures
                     if not tank_fetch_success:
                         self.tank_fetch_failures += 1
+
+                        # Mark outage start time on first failure
+                        if self.tank_fetch_failures == 1 and self.tank_outage_start is None:
+                            self.tank_outage_start = current_time
+                            if self.debug:
+                                print(f"  Tank outage started at {datetime.fromtimestamp(current_time).strftime('%Y-%m-%d %H:%M:%S')}")
+
                         if self.debug:
                             print(f"  Tank fetch failed ({self.tank_fetch_failures}/{self.max_tank_failures})")
                     else:
-                        # Success - reset failure counter
+                        # Success - check if recovering from outage
                         if self.tank_fetch_failures > 0:
                             if self.debug:
                                 print(f"  Tank fetch recovered (was {self.tank_fetch_failures} failures)")
+
+                            # Calculate outage duration
+                            if self.tank_outage_start is not None:
+                                outage_duration_seconds = current_time - self.tank_outage_start
+                                outage_duration_minutes = outage_duration_seconds / 60
+
+                                # Log outage recovery event
+                                self.log_tank_outage_recovery(outage_duration_seconds)
+
+                                # Send notification if outage was significant
+                                if (NOTIFY_TANK_OUTAGE_ENABLED and
+                                    outage_duration_minutes >= NOTIFY_TANK_OUTAGE_THRESHOLD_MINUTES):
+                                    self.send_tank_outage_notification(outage_duration_seconds)
+
+                                # Reset outage tracking
+                                self.tank_outage_start = None
+
                         self.tank_fetch_failures = 0
 
                     # SAFETY: Turn off override only after multiple consecutive failures
