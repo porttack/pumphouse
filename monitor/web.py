@@ -451,8 +451,10 @@ def chart_image():
             try:
                 ts = datetime.fromisoformat(row['timestamp'])
                 if ts >= cutoff:
+                    gal = float(row['tank_gallons'])
+                    # Only append if both timestamp and gallons are valid
                     timestamps.append(ts)
-                    gallons.append(float(row['tank_gallons']))
+                    gallons.append(gal)
             except:
                 continue
 
