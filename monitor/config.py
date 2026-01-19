@@ -19,6 +19,13 @@ TANK_HEIGHT_INCHES = 58
 TANK_CAPACITY_GALLONS = 1400
 TANK_URL = "https://www.mypt.in/s/oyd95OEj/qbbBE9Loxo"
 
+# Ambient Weather Configuration
+ENABLE_AMBIENT_WEATHER = True  # Enable Ambient Weather integration
+AMBIENT_WEATHER_POLL_INTERVAL = 300  # Seconds between weather checks (5 minutes, respects 1 req/sec API limit)
+AMBIENT_WEATHER_API_KEY = ""  # User API key - loaded from secrets file
+AMBIENT_WEATHER_APPLICATION_KEY = ""  # Application key - loaded from secrets file
+AMBIENT_WEATHER_MAC_ADDRESS = "48:3F:DA:56:12:1E"  # Device MAC address
+
 # Water Volume Estimation Constants
 RESIDUAL_PRESSURE_SECONDS = 30  # Last N seconds are residual pressure (not pumping)
 SECONDS_PER_GALLON = 10 / 0.14   # 10 seconds = 0.14 gallons
@@ -193,6 +200,10 @@ if SECRETS_FILE.exists():
                         EMAIL_SMTP_USER = value
                     elif key == 'EMAIL_SMTP_PASSWORD' and not EMAIL_SMTP_PASSWORD:
                         EMAIL_SMTP_PASSWORD = value
+                    elif key == 'AMBIENT_WEATHER_API_KEY' and not AMBIENT_WEATHER_API_KEY:
+                        AMBIENT_WEATHER_API_KEY = value
+                    elif key == 'AMBIENT_WEATHER_APPLICATION_KEY' and not AMBIENT_WEATHER_APPLICATION_KEY:
+                        AMBIENT_WEATHER_APPLICATION_KEY = value
                     elif key == 'SECRET_OVERRIDE_ON_TOKEN':
                         SECRET_OVERRIDE_ON_TOKEN = value
                     elif key == 'SECRET_OVERRIDE_OFF_TOKEN':

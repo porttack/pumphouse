@@ -19,13 +19,16 @@ from monitor.config import (
     DASHBOARD_URL,
     ENABLE_DAILY_STATUS_EMAIL, DAILY_STATUS_EMAIL_TIME, DAILY_STATUS_EMAIL_CHART_HOURS,
     ENABLE_CHECKOUT_REMINDER, CHECKOUT_REMINDER_TIME,
-    MAX_TANK_FETCH_FAILURES
+    MAX_TANK_FETCH_FAILURES,
+    ENABLE_AMBIENT_WEATHER, AMBIENT_WEATHER_POLL_INTERVAL,
+    AMBIENT_WEATHER_API_KEY, AMBIENT_WEATHER_APPLICATION_KEY, AMBIENT_WEATHER_MAC_ADDRESS
 )
 from monitor.gpio_helpers import (
     read_pressure, read_float_sensor,
     FLOAT_STATE_FULL, FLOAT_STATE_CALLING
 )
 from monitor.tank import get_tank_data
+from monitor.ambient_weather import get_weather_data
 from monitor.logger import log_event, log_snapshot
 from monitor.state import SystemState
 from monitor.notifications import NotificationManager
@@ -180,6 +183,10 @@ class SimplifiedMonitor:
         self.max_tank_failures = MAX_TANK_FETCH_FAILURES
         self.tank_outage_start = None  # Track when tank data became unavailable
 
+        # Weather tracking
+        self.last_weather_check = 0
+        self.weather_interval = AMBIENT_WEATHER_POLL_INTERVAL
+
         # Relay control
         self.relay_control_enabled = False
 
@@ -260,6 +267,37 @@ class SimplifiedMonitor:
                 # Fallback if parsing failed
                 self.tank_last_updated = time.time()
             self.snapshot_tracker.update_float(data['float_state'])
+            return True
+        return False
+
+    def fetch_weather_data(self):
+        """Fetch and update weather data from Ambient Weather"""
+        if not ENABLE_AMBIENT_WEATHER:
+            return False
+
+        if not AMBIENT_WEATHER_API_KEY or not AMBIENT_WEATHER_APPLICATION_KEY:
+            if self.debug:
+                print("  Ambient Weather API keys not configured")
+            return False
+
+        data = get_weather_data(
+            AMBIENT_WEATHER_API_KEY,
+            AMBIENT_WEATHER_APPLICATION_KEY,
+            AMBIENT_WEATHER_MAC_ADDRESS,
+            debug=self.debug
+        )
+
+        if data['status'] == 'success':
+            self.state.update_weather(
+                data['outdoor_temp'],
+                data['indoor_temp'],
+                data['outdoor_humidity'],
+                data['indoor_humidity'],
+                data['baro_abs'],
+                data['baro_rel'],
+                data['wind_speed'],
+                data['wind_gust']
+            )
             return True
         return False
     
@@ -399,6 +437,7 @@ class SimplifiedMonitor:
         # Initial state
         self.last_pressure_state = read_pressure()
         self.fetch_tank_data()
+        self.fetch_weather_data()
 
         # Log initial state
         self.log_state_event('INIT', 'System startup')
@@ -734,7 +773,16 @@ class SimplifiedMonitor:
                                         )
 
                     self.last_tank_check = current_time
-                
+
+                # WEATHER POLLING
+                if ENABLE_AMBIENT_WEATHER and current_time - self.last_weather_check >= self.weather_interval:
+                    weather_fetch_success = self.fetch_weather_data()
+                    if weather_fetch_success and self.debug:
+                        print(f"{datetime.now().strftime('%H:%M:%S')} - Weather: "
+                             f"Outdoor {self.state.outdoor_temp}°F, "
+                             f"Indoor {self.state.indoor_temp}°F")
+                    self.last_weather_check = current_time
+
                 # SNAPSHOT
                 if current_time >= self.next_snapshot_time:
                     # Check for well status (recovery or dry)
@@ -855,7 +903,15 @@ class SimplifiedMonitor:
                         snapshot_data['estimated_gallons'],
                         snapshot_data['purge_count'],
                         snapshot_data['relay_status'],
-                        occupied_status
+                        occupied_status,
+                        self.state.outdoor_temp,
+                        self.state.indoor_temp,
+                        self.state.outdoor_humidity,
+                        self.state.indoor_humidity,
+                        self.state.baro_abs,
+                        self.state.baro_rel,
+                        self.state.wind_speed,
+                        self.state.wind_gust
                     )
 
                     # Update last snapshot tank gallons for next delta calculation
