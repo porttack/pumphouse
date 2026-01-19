@@ -292,10 +292,7 @@ class SimplifiedMonitor:
                 data['outdoor_temp'],
                 data['indoor_temp'],
                 data['outdoor_humidity'],
-                data['indoor_humidity'],
                 data['baro_abs'],
-                data['baro_rel'],
-                data['wind_speed'],
                 data['wind_gust']
             )
             return True
@@ -907,10 +904,7 @@ class SimplifiedMonitor:
                         self.state.outdoor_temp,
                         self.state.indoor_temp,
                         self.state.outdoor_humidity,
-                        self.state.indoor_humidity,
                         self.state.baro_abs,
-                        self.state.baro_rel,
-                        self.state.wind_speed,
                         self.state.wind_gust
                     )
 

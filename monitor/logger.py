@@ -30,8 +30,8 @@ def initialize_snapshots_csv(filepath):
                 'pressure_high_seconds', 'pressure_high_percent',
                 'estimated_gallons_pumped', 'purge_count',
                 'relay_bypass', 'relay_supply_override', 'occupied',
-                'outdoor_temp_f', 'indoor_temp_f', 'outdoor_humidity', 'indoor_humidity',
-                'baro_abs_inhg', 'baro_rel_inhg', 'wind_speed_mph', 'wind_gust_mph'
+                'outdoor_temp_f', 'indoor_temp_f', 'outdoor_humidity',
+                'baro_abs_inhg', 'wind_gust_mph'
             ])
         return True
     except FileExistsError:
@@ -66,8 +66,8 @@ def log_snapshot(filepath, duration, tank_gallons, tank_gallons_delta, tank_data
                 float_state, float_ever_calling, float_always_full,
                 pressure_high_seconds, pressure_high_percent,
                 estimated_gallons, purge_count, relay_status, occupied='',
-                outdoor_temp=None, indoor_temp=None, outdoor_humidity=None, indoor_humidity=None,
-                baro_abs=None, baro_rel=None, wind_speed=None, wind_gust=None):
+                outdoor_temp=None, indoor_temp=None, outdoor_humidity=None,
+                baro_abs=None, wind_gust=None):
     """Log a snapshot to snapshots.csv"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
 
@@ -97,9 +97,6 @@ def log_snapshot(filepath, duration, tank_gallons, tank_gallons_delta, tank_data
             f'{outdoor_temp:.1f}' if outdoor_temp is not None else '',
             f'{indoor_temp:.1f}' if indoor_temp is not None else '',
             f'{outdoor_humidity:.0f}' if outdoor_humidity is not None else '',
-            f'{indoor_humidity:.0f}' if indoor_humidity is not None else '',
             f'{baro_abs:.3f}' if baro_abs is not None else '',
-            f'{baro_rel:.3f}' if baro_rel is not None else '',
-            f'{wind_speed:.1f}' if wind_speed is not None else '',
             f'{wind_gust:.1f}' if wind_gust is not None else ''
         ])
