@@ -46,7 +46,8 @@ from monitor.config import (
     SECRET_BYPASS_ON_TOKEN,
     SECRET_BYPASS_OFF_TOKEN,
     SECRET_PURGE_TOKEN,
-    SECRET_TOTALS_TOKEN
+    SECRET_TOTALS_TOKEN,
+    AMBIENT_WEATHER_DASHBOARD_URL
 )
 
 
@@ -254,6 +255,36 @@ def get_snapshots_stats(filepath='snapshots.csv'):
         return None
 
 
+def get_outdoor_weather(filepath='snapshots.csv'):
+    """Get outdoor weather data from latest snapshot"""
+    import os
+    import csv
+
+    if not os.path.exists(filepath):
+        return None
+
+    try:
+        with open(filepath, 'r') as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+        if not rows:
+            return None
+
+        row = rows[-1]  # Most recent snapshot
+        outdoor_temp = row.get('outdoor_temp_f')
+        outdoor_humidity = row.get('outdoor_humidity')
+
+        if outdoor_temp and outdoor_humidity:
+            return {
+                'temp': float(outdoor_temp) if outdoor_temp else None,
+                'humidity': float(outdoor_humidity) if outdoor_humidity else None
+            }
+        return None
+    except Exception:
+        return None
+
+
 def get_recent_events(filepath='events.csv', max_rows=None, hide_types=None):
     """Get recent events with optional filtering"""
     import os
@@ -428,6 +459,14 @@ def fetch_system_status(debug=False):
             if debug:
                 print(f"Warning: Could not get GPH metrics: {e}", file=sys.stderr)
 
+        # Get outdoor weather from latest snapshot
+        outdoor_weather = None
+        try:
+            outdoor_weather = get_outdoor_weather()
+        except Exception as e:
+            if debug:
+                print(f"Warning: Could not get outdoor weather: {e}", file=sys.stderr)
+
         return {
             'tank': tank_data,
             'pressure': pressure,
@@ -438,7 +477,8 @@ def fetch_system_status(debug=False):
             'occupancy': occupancy_status,
             'reservations': reservation_list,
             'ecobee_temp': ecobee_temp,
-            'gph_metrics': gph_metrics
+            'gph_metrics': gph_metrics,
+            'outdoor_weather': outdoor_weather
         }
     except Exception as e:
         if debug:
@@ -914,6 +954,19 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
                         <div class="status-value">{temps_str}</div>
                         <div class="status-label" style="margin-top: 4px; font-size: 10px; color: #666;">
                             Updated {age_str}
+                        </div>
+                    </div>
+"""
+        # Add outdoor weather if available
+        outdoor_weather = status_data.get('outdoor_weather') if status_data else None
+        if outdoor_weather and outdoor_weather.get('temp') is not None:
+            weather_url = AMBIENT_WEATHER_DASHBOARD_URL
+            html += f"""
+                    <div class="status-item" style="border-left-color: #2196F3;">
+                        <div class="status-label">Outdoor Weather</div>
+                        <div class="status-value">{outdoor_weather['temp']:.0f}°F / {outdoor_weather['humidity']:.0f}%</div>
+                        <div class="status-label" style="margin-top: 4px; font-size: 10px;">
+                            <a href="{weather_url}" style="color: #2196F3;">View Dashboard ↗</a>
                         </div>
                     </div>
 """

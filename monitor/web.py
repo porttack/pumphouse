@@ -14,10 +14,11 @@ from functools import wraps
 from monitor import __version__
 from monitor.config import (
     TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS, DASHBOARD_HIDE_EVENT_TYPES,
-    DASHBOARD_MAX_EVENTS, DASHBOARD_DEFAULT_HOURS,
+    DASHBOARD_MAX_EVENTS, DASHBOARD_DEFAULT_HOURS, DASHBOARD_SNAPSHOT_COUNT,
     SECRET_OVERRIDE_ON_TOKEN, SECRET_OVERRIDE_OFF_TOKEN,
     SECRET_BYPASS_ON_TOKEN, SECRET_BYPASS_OFF_TOKEN,
-    SECRET_PURGE_TOKEN, MANAGEMENT_FEE_PERCENT
+    SECRET_PURGE_TOKEN, MANAGEMENT_FEE_PERCENT,
+    AMBIENT_WEATHER_DASHBOARD_URL
 )
 from monitor.gpio_helpers import (
     read_pressure, read_float_sensor, init_gpio, cleanup_gpio,
@@ -266,6 +267,29 @@ def get_sensor_data():
     data['humidity'] = humidity
 
     return data
+
+
+def get_outdoor_weather():
+    """Get outdoor weather data from latest snapshot"""
+    try:
+        headers, rows = read_csv_tail('snapshots.csv', max_rows=1)
+        if not headers or not rows:
+            return None
+
+        row = rows[0]
+        data = dict(zip(headers, row))
+
+        outdoor_temp = data.get('outdoor_temp_f')
+        outdoor_humidity = data.get('outdoor_humidity')
+
+        if outdoor_temp and outdoor_humidity:
+            return {
+                'temp': float(outdoor_temp) if outdoor_temp else None,
+                'humidity': float(outdoor_humidity) if outdoor_humidity else None
+            }
+        return None
+    except Exception:
+        return None
 
 
 def get_cached_ecobee_temp(max_age_hours=24):
@@ -533,6 +557,9 @@ def index():
     # Get sensor data
     sensor_data = get_sensor_data()
 
+    # Get outdoor weather from latest snapshot
+    outdoor_weather = get_outdoor_weather()
+
     # Get tank data
     tank_data = get_tank_data(TANK_URL)
 
@@ -543,7 +570,7 @@ def index():
         tank_age_minutes = int(age_seconds / 60)
 
     # Read CSV files
-    snapshot_headers, snapshot_rows = read_csv_tail('snapshots.csv', max_rows=10)
+    snapshot_headers, snapshot_rows = read_csv_tail('snapshots.csv', max_rows=DASHBOARD_SNAPSHOT_COUNT)
     event_headers, event_rows = read_events_by_time('events.csv', hours=hours)
 
     # Filter events based on DASHBOARD_HIDE_EVENT_TYPES
@@ -674,6 +701,8 @@ def index():
     return render_template('status.html',
                          version=__version__,
                          sensor_data=sensor_data,
+                         outdoor_weather=outdoor_weather,
+                         weather_dashboard_url=AMBIENT_WEATHER_DASHBOARD_URL,
                          tank_data=tank_data,
                          tank_age_minutes=tank_age_minutes,
                          tank_height=TANK_HEIGHT_INCHES,

@@ -25,6 +25,7 @@ AMBIENT_WEATHER_POLL_INTERVAL = 300  # Seconds between weather checks (5 minutes
 AMBIENT_WEATHER_API_KEY = ""  # User API key - loaded from secrets file
 AMBIENT_WEATHER_APPLICATION_KEY = ""  # Application key - loaded from secrets file
 AMBIENT_WEATHER_MAC_ADDRESS = "48:3F:DA:56:12:1E"  # Device MAC address
+AMBIENT_WEATHER_DASHBOARD_URL = "https://ambientweather.net/dashboard/ccccbdcb524d5a3735628aec0c03247f"  # Public dashboard link
 
 # Water Volume Estimation Constants
 RESIDUAL_PRESSURE_SECONDS = 30  # Last N seconds are residual pressure (not pumping)
@@ -119,6 +120,7 @@ MAX_PRESSURE_LOG_INTERVAL = 1800  # Log at least every 30 minutes when pressure 
 # Common types: TANK_LEVEL, PRESSURE_HIGH, PRESSURE_LOW, INIT, SHUTDOWN, FLOAT_CALLING, FLOAT_FULL
 DASHBOARD_HIDE_EVENT_TYPES = ['TANK_LEVEL', 'PRESSURE_LOW', 'PRESSURE_HIGH', 'SHUTDOWN']  # Hide noisy tank level change events
 DASHBOARD_MAX_EVENTS = 500  # Maximum number of events to show in dashboard and emails (~7 days)
+DASHBOARD_SNAPSHOT_COUNT = 97  # Number of snapshots to show (97 = 24 hours at 15-min intervals)
 
 # Reservation/Rental Income Configuration
 MANAGEMENT_FEE_PERCENT = 36  # Percentage paid to management company (subtracted from displayed income)
