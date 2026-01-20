@@ -317,10 +317,23 @@
                     </div>
                 </div>
                 {% endif %}
-                {% if sensor_data.temp is not none %}
+                {% if sensor_data.temp is not none or outdoor_weather %}
                 <div class="status-item">
                     <div class="status-label">Temp / Humidity</div>
+                    {% if sensor_data.temp is not none %}
                     <div class="status-value">{{ "%.1f"|format(sensor_data.temp) }}°F / {{ "%.1f"|format(sensor_data.humidity) }}%</div>
+                    <div class="status-label" style="margin-top: 4px; font-size: 10px; color: #666;">Pumphouse</div>
+                    {% endif %}
+                    {% if outdoor_weather and outdoor_weather.temp is not none %}
+                    <div class="status-value" style="margin-top: 8px;">
+                        <a href="{{ weather_dashboard_url }}" target="_blank" style="color: inherit; text-decoration: none;">
+                            {{ "%.0f"|format(outdoor_weather.temp) }}°F / {{ "%.0f"|format(outdoor_weather.humidity) }}%
+                        </a>
+                    </div>
+                    <div class="status-label" style="margin-top: 4px; font-size: 10px; color: #666;">
+                        <a href="{{ weather_dashboard_url }}" target="_blank" style="color: #2196F3; text-decoration: none;">Outdoor ↗</a>
+                    </div>
+                    {% endif %}
                 </div>
                 {% endif %}
                 <div class="status-item">
