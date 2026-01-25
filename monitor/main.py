@@ -12,6 +12,7 @@ from monitor.config import (
 from monitor.poll import SimplifiedMonitor
 from monitor.logger import initialize_events_csv, initialize_snapshots_csv
 from monitor.gpio_helpers import init_gpio, cleanup_gpio
+from monitor.restart_tracker import check_and_record_restart
 
 def main():
     """Main entry point"""
@@ -60,6 +61,9 @@ def main():
         if args.debug:
             print(f"Created {args.snapshots}")
     
+    # Check for excessive restarts (crash loop detection)
+    restart_info = check_and_record_restart(args.events, debug=args.debug)
+
     if args.debug:
         print(f"\n=== Monitor v{__version__} ===")
         print(f"Events: {args.events}")
