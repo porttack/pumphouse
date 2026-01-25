@@ -843,7 +843,7 @@ class SimplifiedMonitor:
                             start_time_str = full_flow_status['start_ts'].strftime('%a %I:%M %p').replace(' 0', ' ')
 
                             # Log full-flow event
-                            self.log_event(
+                            self.log_state_event(
                                 'FULL_FLOW',
                                 notes=f"Full-flow period detected. Started: {start_time_str}, "
                                       f"Duration: {duration_hours:.1f}h, "
