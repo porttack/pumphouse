@@ -48,8 +48,13 @@ class NotificationManager:
         self.well_dry_alerted = False
         self.well_recovery_alerted_ts = None  # Timestamp of last recovery we alerted for
         self.high_flow_alerted_ts = None  # Timestamp of last high flow we alerted for
-        self.backflush_alerted_ts = None  # Timestamp of last backflush we alerted for
+        self.backflush_alerted_date = None  # Date (YYYY-MM-DD) of last backflush alert (one per day max)
         self.full_flow_alerted_ts = None  # Timestamp of last full-flow we alerted for
+
+        # New state for suppression logic
+        self.tank_full_alerted_level = None  # Tank level when last tank_full alert sent
+        self.tank_full_alerted_time = None  # Timestamp when last tank_full alert sent
+        self.full_flow_alerted_time = None  # Timestamp when last full_flow alert sent
 
         # Load persistent state
         self._load_state()
@@ -205,14 +210,12 @@ class NotificationManager:
         """
         Check for backflush event (large water usage during specific hours).
         Returns ('backflush', gallons_used, timestamp) or None.
+
+        Only sends one backflush alert per day to avoid duplicate notifications
+        as the sliding window shifts during an ongoing backflush.
         """
         if not NOTIFY_BACKFLUSH_ENABLED:
             return None
-
-        # NOTE: No cooldown timer for backflush checks (unlike recovery/high-flow)
-        # Backflush events are brief (15-30 min) with a narrow detection window,
-        # so we must check every snapshot to avoid missing them.
-        # Duplicate alerts are already prevented by backflush_alerted_ts tracking.
 
         # Find last backflush event
         backflush_ts, gallons_used = find_backflush_event(
@@ -224,12 +227,12 @@ class NotificationManager:
         )
 
         if backflush_ts and gallons_used is not None:
-            # Only alert if we haven't already alerted for this specific backflush event
-            backflush_ts_str = backflush_ts.isoformat() if isinstance(backflush_ts, datetime) else str(backflush_ts)
+            # Only alert once per day (date-based dedup)
+            backflush_date = backflush_ts.strftime('%Y-%m-%d') if isinstance(backflush_ts, datetime) else str(backflush_ts)[:10]
 
-            if self.backflush_alerted_ts != backflush_ts_str:
-                # This is a NEW backflush event we haven't alerted about yet
-                self.backflush_alerted_ts = backflush_ts_str
+            if self.backflush_alerted_date != backflush_date:
+                # This is a NEW backflush day we haven't alerted about yet
+                self.backflush_alerted_date = backflush_date
                 self._save_state()
                 return ('backflush', gallons_used, backflush_ts)
 
@@ -269,6 +272,7 @@ class NotificationManager:
         if self.full_flow_alerted_ts != period_ts_str:
             # This is a NEW full-flow period we haven't alerted about yet
             self.full_flow_alerted_ts = period_ts_str
+            self.full_flow_alerted_time = time.time()  # Track when we sent this alert
             self._save_state()
 
             # Return full period details for notification
@@ -294,12 +298,17 @@ class NotificationManager:
                     self.well_recovery_alerted_ts = state.get('well_recovery_alerted_ts')
                     self.well_dry_alerted = state.get('well_dry_alerted', False)
                     self.high_flow_alerted_ts = state.get('high_flow_alerted_ts')
-                    self.backflush_alerted_ts = state.get('backflush_alerted_ts')
+                    # Support both old backflush_alerted_ts and new backflush_alerted_date
+                    self.backflush_alerted_date = state.get('backflush_alerted_date') or state.get('backflush_alerted_ts', '')[:10] if state.get('backflush_alerted_ts') else None
                     self.full_flow_alerted_ts = state.get('full_flow_alerted_ts')
+                    # New suppression state
+                    self.tank_full_alerted_level = state.get('tank_full_alerted_level')
+                    self.tank_full_alerted_time = state.get('tank_full_alerted_time')
+                    self.full_flow_alerted_time = state.get('full_flow_alerted_time')
                     if self.debug:
                         print(f"Loaded notification state: recovery_ts={self.well_recovery_alerted_ts}, "
                               f"dry={self.well_dry_alerted}, high_flow_ts={self.high_flow_alerted_ts}, "
-                              f"backflush_ts={self.backflush_alerted_ts}, full_flow_ts={self.full_flow_alerted_ts}")
+                              f"backflush_date={self.backflush_alerted_date}, full_flow_ts={self.full_flow_alerted_ts}")
         except Exception as e:
             if self.debug:
                 print(f"Warning: Could not load notification state: {e}")
@@ -311,8 +320,11 @@ class NotificationManager:
                 'well_recovery_alerted_ts': self.well_recovery_alerted_ts,
                 'well_dry_alerted': self.well_dry_alerted,
                 'high_flow_alerted_ts': self.high_flow_alerted_ts,
-                'backflush_alerted_ts': self.backflush_alerted_ts,
+                'backflush_alerted_date': self.backflush_alerted_date,
                 'full_flow_alerted_ts': self.full_flow_alerted_ts,
+                'tank_full_alerted_level': self.tank_full_alerted_level,
+                'tank_full_alerted_time': self.tank_full_alerted_time,
+                'full_flow_alerted_time': self.full_flow_alerted_time,
                 'saved_at': datetime.now().isoformat()
             }
             with open(self.state_file, 'w') as f:
@@ -320,6 +332,69 @@ class NotificationManager:
         except Exception as e:
             if self.debug:
                 print(f"Warning: Could not save notification state: {e}")
+
+    def should_suppress_tank_full(self, current_gallons, reset_threshold_pct=0.90):
+        """
+        Check if tank_full alert should be suppressed.
+        Suppresses if we already alerted and tank hasn't dropped below threshold.
+
+        Args:
+            current_gallons: Current tank level in gallons
+            reset_threshold_pct: Tank must drop below this % of alerted level to reset (default 90%)
+
+        Returns:
+            True if alert should be suppressed, False if alert should be sent
+        """
+        if self.tank_full_alerted_level is None:
+            return False  # Never alerted, don't suppress
+
+        if current_gallons is None:
+            return False  # No data, don't suppress
+
+        # Reset threshold: tank must drop below 90% of the level when we last alerted
+        reset_level = self.tank_full_alerted_level * reset_threshold_pct
+
+        if current_gallons < reset_level:
+            # Tank has dropped enough, reset and allow new alert
+            self.tank_full_alerted_level = None
+            self.tank_full_alerted_time = None
+            self._save_state()
+            return False
+
+        # Tank still high, suppress the alert
+        return True
+
+    def record_tank_full_alert(self, tank_gallons):
+        """Record that a tank_full alert was sent at this level"""
+        self.tank_full_alerted_level = tank_gallons
+        self.tank_full_alerted_time = time.time()
+        self._save_state()
+
+    def should_suppress_well_recovery(self, suppression_hours=2.0):
+        """
+        Check if well_recovery alert should be suppressed.
+        Suppresses if full_flow or tank_full alert was sent recently.
+
+        Args:
+            suppression_hours: Suppress if related alert sent within this many hours (default 2)
+
+        Returns:
+            True if alert should be suppressed, False if alert should be sent
+        """
+        current_time = time.time()
+        suppression_seconds = suppression_hours * 3600
+
+        # Suppress if full_flow alert was sent recently
+        if self.full_flow_alerted_time:
+            if current_time - self.full_flow_alerted_time < suppression_seconds:
+                return True
+
+        # Suppress if tank_full alert was sent recently
+        if self.tank_full_alerted_time:
+            if current_time - self.tank_full_alerted_time < suppression_seconds:
+                return True
+
+        return False
 
     def can_notify(self, event_type):
         """
