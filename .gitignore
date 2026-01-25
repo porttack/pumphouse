@@ -32,8 +32,11 @@ Thumbs.db
 secrets.conf
 *.secret
 .env
+
+# Runtime state files
 notification_state.json
 relay_state.json
+restart_tracker.json
 
 # Debug and backup files
 *_old.py
