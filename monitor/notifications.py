@@ -49,7 +49,7 @@ class NotificationManager:
         self.well_recovery_alerted_ts = None  # Timestamp of last recovery we alerted for
         self.high_flow_alerted_ts = None  # Timestamp of last high flow we alerted for
         self.backflush_alerted_date = None  # Date (YYYY-MM-DD) of last backflush alert (one per day max)
-        self.full_flow_alerted_ts = None  # Timestamp of last full-flow we alerted for
+        self.full_flow_active_alerted = False  # Whether we've alerted for the current active full-flow
 
         # New state for suppression logic
         self.tank_full_alerted_level = None  # Tank level when last tank_full alert sent
@@ -256,38 +256,39 @@ class NotificationManager:
             lookback_hours=NOTIFY_FULL_FLOW_LOOKBACK_HOURS
         )
 
-        if not periods:
+        # Find the latest qualifying period (duration >= delay threshold)
+        qualifying_period = None
+        if periods:
+            latest_period = periods[-1]
+            if latest_period['duration_minutes'] >= NOTIFY_FULL_FLOW_DELAY_MINUTES:
+                qualifying_period = latest_period
+
+        if qualifying_period is None:
+            # No active full-flow condition - reset so we can alert next time
+            if self.full_flow_active_alerted:
+                self.full_flow_active_alerted = False
+                self._save_state()
             return None
 
-        # Get the most recent period (last in list)
-        latest_period = periods[-1]
-
-        # Only notify if period has been running for at least the delay threshold
-        if latest_period['duration_minutes'] < NOTIFY_FULL_FLOW_DELAY_MINUTES:
+        if self.full_flow_active_alerted:
+            # Already alerted about current ongoing full-flow condition
             return None
 
-        # Check if we've already alerted for this period
-        period_ts_str = latest_period['start_ts'].isoformat()
+        # New full-flow condition - alert!
+        self.full_flow_active_alerted = True
+        self.full_flow_alerted_time = time.time()
+        self._save_state()
 
-        if self.full_flow_alerted_ts != period_ts_str:
-            # This is a NEW full-flow period we haven't alerted about yet
-            self.full_flow_alerted_ts = period_ts_str
-            self.full_flow_alerted_time = time.time()  # Track when we sent this alert
-            self._save_state()
-
-            # Return full period details for notification
-            return {
-                'type': 'full_flow',
-                'start_ts': latest_period['start_ts'],
-                'end_ts': latest_period['end_ts'],
-                'duration_minutes': latest_period['duration_minutes'],
-                'snapshot_count': latest_period['snapshot_count'],
-                'total_gallons_pumped': latest_period['total_gallons_pumped'],
-                'tank_gain': latest_period['tank_gain'],
-                'estimated_gph': latest_period['estimated_gph']
-            }
-
-        return None
+        return {
+            'type': 'full_flow',
+            'start_ts': qualifying_period['start_ts'],
+            'end_ts': qualifying_period['end_ts'],
+            'duration_minutes': qualifying_period['duration_minutes'],
+            'snapshot_count': qualifying_period['snapshot_count'],
+            'total_gallons_pumped': qualifying_period['total_gallons_pumped'],
+            'tank_gain': qualifying_period['tank_gain'],
+            'estimated_gph': qualifying_period['estimated_gph']
+        }
 
     def _load_state(self):
         """Load persistent notification state from disk"""
@@ -300,7 +301,9 @@ class NotificationManager:
                     self.high_flow_alerted_ts = state.get('high_flow_alerted_ts')
                     # Support both old backflush_alerted_ts and new backflush_alerted_date
                     self.backflush_alerted_date = state.get('backflush_alerted_date') or state.get('backflush_alerted_ts', '')[:10] if state.get('backflush_alerted_ts') else None
-                    self.full_flow_alerted_ts = state.get('full_flow_alerted_ts')
+                    # Migrate from old full_flow_alerted_ts to boolean flag
+                    self.full_flow_active_alerted = state.get('full_flow_active_alerted',
+                        state.get('full_flow_alerted_ts') is not None)
                     # New suppression state
                     self.tank_full_alerted_level = state.get('tank_full_alerted_level')
                     self.tank_full_alerted_time = state.get('tank_full_alerted_time')
@@ -308,7 +311,7 @@ class NotificationManager:
                     if self.debug:
                         print(f"Loaded notification state: recovery_ts={self.well_recovery_alerted_ts}, "
                               f"dry={self.well_dry_alerted}, high_flow_ts={self.high_flow_alerted_ts}, "
-                              f"backflush_date={self.backflush_alerted_date}, full_flow_ts={self.full_flow_alerted_ts}")
+                              f"backflush_date={self.backflush_alerted_date}, full_flow_active={self.full_flow_active_alerted}")
         except Exception as e:
             if self.debug:
                 print(f"Warning: Could not load notification state: {e}")
@@ -321,7 +324,7 @@ class NotificationManager:
                 'well_dry_alerted': self.well_dry_alerted,
                 'high_flow_alerted_ts': self.high_flow_alerted_ts,
                 'backflush_alerted_date': self.backflush_alerted_date,
-                'full_flow_alerted_ts': self.full_flow_alerted_ts,
+                'full_flow_active_alerted': self.full_flow_active_alerted,
                 'tank_full_alerted_level': self.tank_full_alerted_level,
                 'tank_full_alerted_time': self.tank_full_alerted_time,
                 'full_flow_alerted_time': self.full_flow_alerted_time,
