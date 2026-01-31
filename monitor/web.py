@@ -845,7 +845,7 @@ def main():
     print("  export PUMPHOUSE_USER=yourusername")
     print("  export PUMPHOUSE_PASS=yourpassword")
 
-    app.run(host=args.host, port=args.port, ssl_context=ssl_context, debug=args.debug)
+    app.run(host=args.host, port=args.port, ssl_context=ssl_context, debug=args.debug, threaded=True)
 
 if __name__ == "__main__":
     main()
