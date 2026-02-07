@@ -2,6 +2,22 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.16.0] - 2026-02-06
+
+### Changed
+- **Production Web Server**: Replaced Flask development server with gunicorn
+  - Gunicorn provides proper worker process management for long-running deployments
+  - 2 worker processes handle requests; if one hangs, the other continues serving
+  - 60-second timeout automatically kills and respawns stuck workers
+  - Prevents the server from becoming unresponsive after extended uptime
+  - Added gunicorn>=21.0.0 to requirements.txt
+
+### Fixed
+- **Web Server Stability**: Fixed issue where web dashboard would stop responding after ~6 days
+  - Root cause: Flask's built-in development server not designed for production use
+  - Symptom: 129 pending connections in listen queue, all requests timing out
+  - Solution: Switch to gunicorn with worker management and automatic restart
+
 ## [2.15.0] - 2025-12-24
 
 ### Added

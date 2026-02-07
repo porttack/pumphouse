@@ -265,21 +265,27 @@ View real-time status and historical data via HTTPS web interface:
 
 ### Running the Web Server
 
-```bash
-# Start web server (HTTPS on port 6443)
-python -m monitor.web
+The web server runs via systemd using gunicorn (a production-grade WSGI server):
 
-# Run in background
-nohup python -m monitor.web > web.log 2>&1 &
+```bash
+# Check status
+sudo systemctl status pumphouse-web
+
+# View logs
+sudo journalctl -u pumphouse-web -f
+
+# Restart after code changes
+sudo systemctl restart pumphouse-web
+```
+
+For manual testing (not recommended for production):
+
+```bash
+# Start web server directly (HTTPS on port 6443)
+python -m monitor.web
 
 # Run without SSL (HTTP only)
 python -m monitor.web --no-ssl
-
-# Custom port
-python -m monitor.web --port 8443
-
-# Stop
-pkill -f "python -m monitor.web"
 ```
 
 ### Access
