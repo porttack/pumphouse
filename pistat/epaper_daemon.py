@@ -23,8 +23,8 @@ from PIL import Image
 from waveshare_epd import epd2in13_V4
 
 # Configuration
-UPDATE_INTERVAL = 150  # 5 minutes in seconds
-IMAGE_URL = "https://REDACTED-HOST:6443/api/epaper.bmp?hours=24"
+UPDATE_INTERVAL = 180  # 3 minutes in seconds
+IMAGE_URL = "https://REDACTED-HOST:6443/api/epaper.bmp"
 CACHE_FILE = script_dir / "last_display.bmp"
 LOG_FILE = script_dir / "epaper_daemon.log"
 
@@ -73,7 +73,7 @@ class EPaperDaemon:
         try:
             # Fetch image
             logging.info("Fetching display image")
-            response = requests.get(IMAGE_URL, timeout=20, verify=False)
+            response = requests.get(IMAGE_URL, timeout=45, verify=False)
             response.raise_for_status()
             
             # Convert to proper format
