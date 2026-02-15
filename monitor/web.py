@@ -16,6 +16,7 @@ from monitor.config import (
     TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS,
     EPAPER_CONSERVE_WATER_THRESHOLD, EPAPER_OWNER_STAY_TYPES,
     EPAPER_DEFAULT_HOURS_TENANT, EPAPER_DEFAULT_HOURS_OTHER,
+    EPAPER_LOW_WATER_HOURS_THRESHOLD, EPAPER_LOW_WATER_HOURS,
     DASHBOARD_HIDE_EVENT_TYPES,
     DASHBOARD_MAX_EVENTS, DASHBOARD_DEFAULT_HOURS, DASHBOARD_SNAPSHOT_COUNT,
     SECRET_OVERRIDE_ON_TOKEN, SECRET_OVERRIDE_OFF_TOKEN,
@@ -562,6 +563,7 @@ def epaper_bmp():
         tenant    - override: "yes" = force tenant mode, "no" = force owner/unoccupied mode
         occupied  - override: "yes" = force occupied, "no" = force unoccupied
         threshold - override: percent value for low-water threshold (e.g. 95)
+        scale     - integer multiplier for resolution (default 1 = 250x122, 4 = 1000x488)
     """
     from PIL import Image, ImageDraw, ImageFont, ImageChops
     from monitor.occupancy import load_reservations, is_occupied, get_next_reservation, get_checkin_datetime
@@ -570,16 +572,21 @@ def epaper_bmp():
     tenant_override = request.args.get('tenant')    # "yes" or "no"
     occupied_override = request.args.get('occupied')  # "yes" or "no"
     threshold_override = request.args.get('threshold', type=int)  # e.g. 95
+    scale = max(1, min(8, request.args.get('scale', 1, type=int)))  # 1-8x resolution
 
-    WIDTH, HEIGHT = 250, 122
+    def s(v):
+        """Scale a pixel value by the resolution multiplier."""
+        return int(v * scale)
+
+    WIDTH, HEIGHT = 250 * scale, 122 * scale
     img = Image.new('1', (WIDTH, HEIGHT), 1)  # 1-bit, white background
     draw = ImageDraw.Draw(img)
 
-    # Load fonts
+    # Load fonts (scaled)
     try:
-        font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 22)
-        font_medium = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
-        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 11)
+        font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", s(22))
+        font_medium = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", s(14))
+        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", s(11))
     except (IOError, OSError):
         font_large = ImageFont.load_default()
         font_medium = ImageFont.load_default()
@@ -640,8 +647,17 @@ def epaper_bmp():
         is_tenant = False
 
     # Set hours default based on occupancy
-    hours = hours_explicit if hours_explicit is not None else (
-        EPAPER_DEFAULT_HOURS_TENANT if is_tenant else EPAPER_DEFAULT_HOURS_OTHER)
+    if hours_explicit is not None:
+        hours = hours_explicit
+    elif is_tenant:
+        hours = EPAPER_DEFAULT_HOURS_TENANT
+    else:
+        hours = EPAPER_DEFAULT_HOURS_OTHER
+        # Extend to longer view when tank is low (helps decide if neighbor water is needed)
+        if (EPAPER_LOW_WATER_HOURS_THRESHOLD is not None
+                and tank_pct is not None
+                and tank_pct <= EPAPER_LOW_WATER_HOURS_THRESHOLD):
+            hours = EPAPER_LOW_WATER_HOURS
 
     # Check if tank is low
     low_threshold = threshold_override if threshold_override is not None else EPAPER_CONSERVE_WATER_THRESHOLD
@@ -656,13 +672,13 @@ def epaper_bmp():
         wb = draw.textbbox((0, 0), warn_text, font=font_large)
         ww, wh = wb[2] - wb[0], wb[3] - wb[1]
         # Scale width to nearly fill the screen
-        target_w = WIDTH - 20
-        scale = target_w / ww
-        target_h = int(wh * scale)
+        target_w = WIDTH - s(20)
+        text_scale = target_w / ww
+        target_h = int(wh * text_scale)
         text_img = Image.new('1', (ww, wh), 1)
         ImageDraw.Draw(text_img).text((-wb[0], -wb[1]), warn_text, font=font_large, fill=0)
         text_img = text_img.resize((target_w, target_h), Image.NEAREST)
-        y_top = (HEIGHT // 2 - target_h) // 2 + 4
+        y_top = (HEIGHT // 2 - target_h) // 2 + s(4)
         img.paste(text_img, ((WIDTH - target_w) // 2, y_top))
 
         # "Tank filling slowly" in medium font below
@@ -670,7 +686,7 @@ def epaper_bmp():
         sb = draw.textbbox((0, 0), sub_text, font=font_medium)
         sw = sb[2] - sb[0]
         draw = ImageDraw.Draw(img)  # refresh draw after paste
-        draw.text(((WIDTH - sw) // 2, y_top + target_h + 10), sub_text, font=font_medium, fill=0)
+        draw.text(((WIDTH - sw) // 2, y_top + target_h + s(10)), sub_text, font=font_medium, fill=0)
 
         buf = io.BytesIO()
         img.save(buf, format='BMP')
@@ -680,27 +696,27 @@ def epaper_bmp():
     # -- Normal display: header + graph --
 
     # Top section: gallons and percent
-    y = 2
+    y = s(2)
     if tank_gallons is not None:
         gal_text = f"{int(tank_gallons)} gal"
         pct_text = f"{tank_pct:.0f}%"
-        draw.text((4, y), gal_text, font=font_large, fill=0)
+        draw.text((s(4), y), gal_text, font=font_large, fill=0)
         pct_bbox = draw.textbbox((0, 0), pct_text, font=font_large)
         pct_w = pct_bbox[2] - pct_bbox[0]
-        draw.text((WIDTH - pct_w - 4, y), pct_text, font=font_large, fill=0)
+        draw.text((WIDTH - pct_w - s(4), y), pct_text, font=font_large, fill=0)
         # "available / water" centered between gallons and percent
-        gal_bbox = draw.textbbox((4, y), gal_text, font=font_large)
-        pct_x = WIDTH - pct_w - 4
+        gal_bbox = draw.textbbox((s(4), y), gal_text, font=font_large)
+        pct_x = WIDTH - pct_w - s(4)
         gap_cx = (gal_bbox[2] + pct_x) // 2
         for li, line in enumerate(["available", "water"]):
             lb = draw.textbbox((0, 0), line, font=font_small)
-            draw.text((gap_cx - (lb[2] - lb[0]) // 2, 1 + li * 12), line, font=font_small, fill=0)
+            draw.text((gap_cx - (lb[2] - lb[0]) // 2, s(1) + li * s(12)), line, font=font_small, fill=0)
     else:
-        draw.text((4, y), "No data", font=font_large, fill=0)
+        draw.text((s(4), y), "No data", font=font_large, fill=0)
 
     # Separator line
-    sep_y = 28
-    draw.line([(0, sep_y), (WIDTH - 1, sep_y)], fill=0, width=1)
+    sep_y = s(28)
+    draw.line([(0, sep_y), (WIDTH - 1, sep_y)], fill=0, width=scale)
 
     # Get snapshot data for the time window
     graph_gallons = []
@@ -744,10 +760,10 @@ def epaper_bmp():
     )
 
     # Graph layout
-    graph_left = y_label_w + 6
-    graph_right = WIDTH - 4
-    graph_top = 32
-    graph_bottom = HEIGHT - 14
+    graph_left = y_label_w + s(6)
+    graph_right = WIDTH - s(4)
+    graph_top = s(32)
+    graph_bottom = HEIGHT - s(14)
     graph_w = graph_right - graph_left
     graph_h = graph_bottom - graph_top
 
@@ -755,12 +771,12 @@ def epaper_bmp():
     draw.rectangle([graph_left, graph_top, graph_right, graph_bottom], outline=0, fill=1)
 
     # Y-axis labels
-    draw.text((graph_left - y_label_w - 3, graph_top - 1), y_max_label, font=font_small, fill=0)
-    draw.text((graph_left - y_label_w - 3, graph_bottom - 11), y_min_label, font=font_small, fill=0)
+    draw.text((graph_left - y_label_w - s(3), graph_top - s(1)), y_max_label, font=font_small, fill=0)
+    draw.text((graph_left - y_label_w - s(3), graph_bottom - s(11)), y_min_label, font=font_small, fill=0)
 
     # X-axis labels
-    hours_label = f"{hours}h ago"
-    draw.text((graph_left + 1, graph_bottom + 1), hours_label, font=font_small, fill=0)
+    hours_label = f"{hours // 24}d ago" if hours % 24 == 0 else f"{hours}h ago"
+    draw.text((graph_left + s(1), graph_bottom + s(1)), hours_label, font=font_small, fill=0)
     try:
         if live_reading_ts:
             now_label = live_reading_ts.strftime("%-m/%d %H:%M")
@@ -772,7 +788,7 @@ def epaper_bmp():
     except Exception:
         now_label = "now"
     nl_bbox = draw.textbbox((0, 0), now_label, font=font_small)
-    draw.text((graph_right - (nl_bbox[2] - nl_bbox[0]) - 1, graph_bottom + 1), now_label, font=font_small, fill=0)
+    draw.text((graph_right - (nl_bbox[2] - nl_bbox[0]) - s(1), graph_bottom + s(1)), now_label, font=font_small, fill=0)
 
     # Plot graph
     if len(graph_gallons) >= 2:
@@ -789,7 +805,7 @@ def epaper_bmp():
             draw.polygon(fill_points, fill=0)
 
             for i in range(len(points) - 1):
-                draw.line([points[i], points[i + 1]], fill=1, width=2)
+                draw.line([points[i], points[i + 1]], fill=1, width=2 * scale)
 
     # "Save Water" XOR overlay when tank is low (non-tenant mode)
     if tank_is_low:
@@ -799,7 +815,7 @@ def epaper_bmp():
         text_h = test_bbox[3] - test_bbox[1]
         text_img = Image.new('1', (text_w, text_h), 0)
         ImageDraw.Draw(text_img).text((-test_bbox[0], -test_bbox[1]), warn_text, font=font_large, fill=1)
-        target_w = graph_w - 8
+        target_w = graph_w - s(8)
         target_h = text_h
         text_img = text_img.resize((target_w, target_h), Image.NEAREST)
         paste_x = graph_left + (graph_w - target_w) // 2
@@ -810,14 +826,24 @@ def epaper_bmp():
 
     # Occupancy status bar (inverted) at bottom of graph for owner/unoccupied mode
     if not is_tenant:
+        def _day_suffix(dt):
+            """Return ' (today)' or ' (tomorrow)' if dt matches, else ''."""
+            today = datetime.now().date()
+            if dt.date() == today:
+                return " (today)"
+            elif dt.date() == today + timedelta(days=1):
+                return " (tomorrow)"
+            return ""
+
         if is_occupied_now and occupancy.get('checkout_date'):
-            occ_text = "occupied until " + occupancy['checkout_date'].strftime("%-m/%d")
+            co = occupancy['checkout_date']
+            occ_text = "occupied until " + co.strftime("%-m/%d") + _day_suffix(co)
         elif is_occupied_now:
             occ_text = "occupied"
         elif next_res:
             checkin_dt = get_checkin_datetime(next_res.get('Check-In'))
             if checkin_dt:
-                occ_text = "next checkin " + checkin_dt.strftime("%-m/%d")
+                occ_text = "next checkin " + checkin_dt.strftime("%-m/%d") + _day_suffix(checkin_dt)
             else:
                 occ_text = "unoccupied"
         else:
@@ -825,11 +851,11 @@ def epaper_bmp():
         ob = draw.textbbox((0, 0), occ_text, font=font_small)
         ow, oh = ob[2] - ob[0], ob[3] - ob[1]
         # Create inverted bar spanning graph width at graph bottom
-        bar_h = oh + 4
+        bar_h = oh + s(4)
         bar_y = graph_bottom - bar_h
         bar_img = Image.new('1', (graph_w, bar_h), 0)  # black background
         bar_draw = ImageDraw.Draw(bar_img)
-        bar_draw.text(((graph_w - ow) // 2, 2 - ob[1]), occ_text, font=font_small, fill=1)
+        bar_draw.text(((graph_w - ow) // 2, s(2) - ob[1]), occ_text, font=font_small, fill=1)
         # XOR onto graph
         region = img.crop((graph_left, bar_y, graph_right, bar_y + bar_h))
         region = ImageChops.logical_xor(region, bar_img)

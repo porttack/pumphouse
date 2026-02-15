@@ -130,6 +130,8 @@ EPAPER_CONSERVE_WATER_THRESHOLD = 50  # Show "Save Water" when tank percent <= t
 EPAPER_OWNER_STAY_TYPES = ['Owner Stay', 'Owner Stay, Full Clean']  # Reservation Type values that count as owner occupancy
 EPAPER_DEFAULT_HOURS_TENANT = 24  # Default graph hours when occupied by a tenant
 EPAPER_DEFAULT_HOURS_OTHER = 72  # Default graph hours for owner or unoccupied
+EPAPER_LOW_WATER_HOURS_THRESHOLD = 75  # Tank % at or below which switches to extended graph (None to disable)
+EPAPER_LOW_WATER_HOURS = 168  # Graph hours when tank is below threshold (168 = 7 days)
 
 # Default file paths
 DEFAULT_LOG_FILE = 'pressure_log.txt'
