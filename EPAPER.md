@@ -116,6 +116,12 @@ cd /home/pi/src/pumphouse/pistat
 sudo ./install_service.sh
 ```
 
+## iPhone Widget
+
+The same BMP endpoint can be displayed as an iPhone home screen widget using the free Scriptable app. The widget fetches the image every ~5 minutes.
+
+See [pistat/IPHONE_WIDGET.md](pistat/IPHONE_WIDGET.md) for setup instructions.
+
 ## Testing
 
 Use CGI overrides to test all display modes without waiting for actual conditions:
