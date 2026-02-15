@@ -128,6 +128,8 @@ MANAGEMENT_FEE_PERCENT = 36  # Percentage paid to management company (subtracted
 # E-Paper Display Configuration
 EPAPER_CONSERVE_WATER_THRESHOLD = 50  # Show "Save Water" when tank percent <= this value (None to disable)
 EPAPER_OWNER_STAY_TYPES = ['Owner Stay', 'Owner Stay, Full Clean']  # Reservation Type values that count as owner occupancy
+EPAPER_DEFAULT_HOURS_TENANT = 24  # Default graph hours when occupied by a tenant
+EPAPER_DEFAULT_HOURS_OTHER = 72  # Default graph hours for owner or unoccupied
 
 # Default file paths
 DEFAULT_LOG_FILE = 'pressure_log.txt'

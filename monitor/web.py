@@ -15,6 +15,7 @@ from monitor import __version__
 from monitor.config import (
     TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS,
     EPAPER_CONSERVE_WATER_THRESHOLD, EPAPER_OWNER_STAY_TYPES,
+    EPAPER_DEFAULT_HOURS_TENANT, EPAPER_DEFAULT_HOURS_OTHER,
     DASHBOARD_HIDE_EVENT_TYPES,
     DASHBOARD_MAX_EVENTS, DASHBOARD_DEFAULT_HOURS, DASHBOARD_SNAPSHOT_COUNT,
     SECRET_OVERRIDE_ON_TOKEN, SECRET_OVERRIDE_OFF_TOKEN,
@@ -565,7 +566,7 @@ def epaper_bmp():
     from PIL import Image, ImageDraw, ImageFont, ImageChops
     from monitor.occupancy import load_reservations, is_occupied, get_next_reservation, get_checkin_datetime
 
-    hours = request.args.get('hours', 3, type=int)
+    hours_explicit = request.args.get('hours', type=int)  # None if not provided
     tenant_override = request.args.get('tenant')    # "yes" or "no"
     occupied_override = request.args.get('occupied')  # "yes" or "no"
     threshold_override = request.args.get('threshold', type=int)  # e.g. 95
@@ -637,6 +638,10 @@ def epaper_bmp():
         is_occupied_now = True
     elif tenant_override == 'no':
         is_tenant = False
+
+    # Set hours default based on occupancy
+    hours = hours_explicit if hours_explicit is not None else (
+        EPAPER_DEFAULT_HOURS_TENANT if is_tenant else EPAPER_DEFAULT_HOURS_OTHER)
 
     # Check if tank is low
     low_threshold = threshold_override if threshold_override is not None else EPAPER_CONSERVE_WATER_THRESHOLD
