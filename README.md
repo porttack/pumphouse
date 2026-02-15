@@ -18,6 +18,7 @@ Simplified event-based monitoring system for remote water treatment facilities. 
 - **Email Notifications**: Rich HTML email alerts with full system status, charts, and sensor readings
 - **Remote Control via Email**: One-click relay control buttons in email alerts using secret URLs
 - **Push Notifications**: Real-time phone alerts via ntfy.sh for critical tank events
+- **E-Paper Display**: Remote 2.13" e-ink display showing tank status, water usage graph, and occupancy info via partial refresh daemon
 
 ## Installation
 ```bash
@@ -321,6 +322,21 @@ python -m monitor.web
 - Dark theme optimized for monitoring
 
 **Note:** The web server runs independently from the monitor daemon. Run both processes to collect data and view it.
+
+## E-Paper Display
+
+A remote Raspberry Pi with a 2.13" Waveshare e-ink display shows tank status at a glance. The system has two parts:
+
+1. **BMP endpoint** (`/api/epaper.bmp`): Generates a 250x122 1-bit image with gallons, percent full, usage graph, and occupancy info
+2. **Display daemon** (`pistat/`): Fetches the image every 5 minutes and updates the display using partial refresh (no flashing)
+
+The display adapts to context:
+- **Owner/unoccupied**: Full graph (72h default) with occupancy bar showing checkout date or next checkin
+- **Tenant**: Shorter graph (24h default); if water is low, shows a full-screen "Save Water" warning instead
+- **Low water (owner)**: Graph with "Save Water" overlay — owner still sees the data
+
+See [EPAPER.md](EPAPER.md) for full endpoint documentation, configuration, and testing instructions.
+See [pistat/README.md](pistat/README.md) for display daemon installation and troubleshooting.
 
 ## Notifications
 
@@ -690,11 +706,19 @@ pumphouse/
 │   ├── stats.py              # Shared statistics module
 │   └── templates/
 │       └── status.html       # Web dashboard template
+├── pistat/                    # E-Paper display daemon (remote Pi)
+│   ├── epaper_daemon.py       # Fetches BMP and updates e-ink display
+│   ├── epaper-display.service # Systemd service definition
+│   ├── install_service.sh     # Installation script
+│   ├── uninstall_service.sh   # Removal script
+│   ├── lib.tgz               # Waveshare EPD driver libraries
+│   └── README.md              # Display daemon documentation
 ├── generate_cert.sh           # SSL certificate generator
 ├── cert.pem                   # SSL certificate (generated)
 ├── key.pem                    # SSL private key (generated)
 ├── requirements.txt
 ├── README.md
+├── EPAPER.md                  # E-Paper display system documentation
 └── CHANGELOG.md
 ```
 

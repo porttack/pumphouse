@@ -1,6 +1,19 @@
-# E-Paper Display Endpoint
+# E-Paper Display
 
-Generates a 1-bit BMP image for a 2.13-inch e-Paper display (250x122 pixels, landscape) showing water tank status. Designed to be fetched via `wget` from a remote Raspberry Pi.
+Two-part system for showing water tank status on a 2.13-inch e-Paper display (250x122 pixels, landscape):
+
+1. **Server-side** (`monitor/web.py`): `/api/epaper.bmp` endpoint generates a 1-bit BMP image
+2. **Client-side** (`pistat/`): Daemon on a remote Raspberry Pi fetches and displays the image every 5 minutes
+
+## Architecture
+
+```
+┌─────────────────┐   HTTPS    ┌─────────────────────┐
+│  Pumphouse Pi   │◄──────────│  Display Pi (pistat) │
+│  /api/epaper.bmp│  every 5m  │  2.13" e-Paper       │
+│  (port 6443)    │           │  partial refresh      │
+└─────────────────┘            └─────────────────────┘
+```
 
 ## Endpoint
 
@@ -10,14 +23,14 @@ GET /api/epaper.bmp
 
 Unauthenticated. Served on the existing pumphouse web server (port 6443).
 
-## Query Parameters
+### Query Parameters
 
-| Parameter   | Default | Description |
-|-------------|---------|-------------|
-| `hours`     | 3       | Hours of history to show in the graph |
-| `tenant`    | auto    | Override occupancy type: `yes` = force tenant mode, `no` = force owner/unoccupied |
-| `occupied`  | auto    | Override occupancy: `yes` = force occupied, `no` = force unoccupied |
-| `threshold` | config  | Override low-water threshold (percent), e.g. `95` |
+| Parameter   | Default    | Description |
+|-------------|------------|-------------|
+| `hours`     | 24 or 72   | Hours of history for graph (24 for tenants, 72 for owner/unoccupied) |
+| `tenant`    | auto       | Override occupancy type: `yes` = force tenant mode, `no` = force owner/unoccupied |
+| `occupied`  | auto       | Override occupancy: `yes` = force occupied, `no` = force unoccupied |
+| `threshold` | config     | Override low-water threshold (percent), e.g. `95` |
 
 ## Display Modes
 
@@ -32,8 +45,8 @@ Unauthenticated. Served on the existing pumphouse web server (port 6443).
 │    │▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓        │
 │    │▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓     │
 │ 90%│▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │
-│    │ ░░░occupied  next: 2/25░░░ │
-│    3h ago              2/14 22:15│
+│    │░occupied until 2/20░░░░░░░ │
+│    72h ago             2/14 22:15│
 └──────────────────────────────────┘
 ```
 
@@ -42,7 +55,10 @@ Unauthenticated. Served on the existing pumphouse web server (port 6443).
   - Y-axis: Min/max percent labels
   - X-axis: `Nh ago` (left), last reading timestamp from mypt.in (right)
   - Minimum 5% of tank capacity between Y-axis top and bottom
-- **Occupancy bar**: Inverted (XOR) bar at bottom of graph showing "occupied" or "unoccupied" with next check-in date
+- **Occupancy bar**: Inverted (XOR) bar at bottom of graph showing:
+  - `occupied until M/DD` — with checkout date when occupied
+  - `next checkin M/DD` — with check-in date when unoccupied
+  - `unoccupied` — when no upcoming reservations
 - **Low water overlay**: When tank <= threshold, "Save Water" is XOR'd over the graph center
 
 ### Tenant + Low Water Mode
@@ -69,6 +85,8 @@ In `monitor/config.py`:
 # E-Paper Display Configuration
 EPAPER_CONSERVE_WATER_THRESHOLD = 50   # Tank % at or below which triggers "Save Water" (None to disable)
 EPAPER_OWNER_STAY_TYPES = ['Owner Stay', 'Owner Stay, Full Clean']  # Reservation types that count as owner
+EPAPER_DEFAULT_HOURS_TENANT = 24       # Default graph hours for tenant occupancy
+EPAPER_DEFAULT_HOURS_OTHER = 72        # Default graph hours for owner or unoccupied
 ```
 
 ## Data Sources
@@ -78,21 +96,24 @@ EPAPER_OWNER_STAY_TYPES = ['Owner Stay', 'Owner Stay, Full Clean']  # Reservatio
 - **Occupancy**: `reservations.csv` — reservation Type field determines owner vs. tenant
 - **Reading timestamp**: Derived from live `last_updated` or snapshot timestamp minus `tank_data_age_seconds`
 
-## Usage on Remote Pi
+## Display Daemon (pistat/)
 
-Fetch the image:
+The `pistat/` directory contains a daemon that runs on the remote Raspberry Pi with the e-Paper display attached. It fetches the BMP from the pumphouse server and updates the display using partial refresh (no flashing).
+
+See [pistat/README.md](pistat/README.md) for installation, configuration, and troubleshooting.
+
+### Key features
+- Partial refresh — only changed pixels update, no full-screen flash
+- Falls back to cached image on network failures
+- Full refresh on startup to clear ghosting
+- Runs as a systemd service (`epaper-display.service`)
+- 5-minute update interval (configurable)
+
+### Quick install
 
 ```bash
-wget -q --no-check-certificate -O /tmp/epaper.bmp \
-  "https://PUMPHOUSE_IP:6443/api/epaper.bmp?hours=3"
-```
-
-Display on e-Paper:
-
-```python
-from PIL import Image
-img = Image.open('/tmp/epaper.bmp').convert('1')
-# send to e-Paper display buffer...
+cd /home/pi/src/pumphouse/pistat
+sudo ./install_service.sh
 ```
 
 ## Testing
@@ -101,14 +122,17 @@ Use CGI overrides to test all display modes without waiting for actual condition
 
 ```bash
 # Normal mode (owner/unoccupied, tank OK)
-wget ... "https://host:6443/api/epaper.bmp"
+wget --no-check-certificate -O epaper.bmp "https://host:6443/api/epaper.bmp"
 
 # Tenant + low water (full-screen warning)
-wget ... "https://host:6443/api/epaper.bmp?tenant=yes&threshold=95"
+wget --no-check-certificate -O epaper.bmp "https://host:6443/api/epaper.bmp?tenant=yes&threshold=95"
 
 # Owner + low water (graph with Save Water overlay)
-wget ... "https://host:6443/api/epaper.bmp?tenant=no&threshold=95"
+wget --no-check-certificate -O epaper.bmp "https://host:6443/api/epaper.bmp?tenant=no&threshold=95"
 
 # Unoccupied with next checkin shown
-wget ... "https://host:6443/api/epaper.bmp?occupied=no"
+wget --no-check-certificate -O epaper.bmp "https://host:6443/api/epaper.bmp?occupied=no"
+
+# Custom hours
+wget --no-check-certificate -O epaper.bmp "https://host:6443/api/epaper.bmp?hours=6"
 ```

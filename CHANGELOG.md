@@ -2,27 +2,36 @@
 
 All notable changes to the pressure monitoring system.
 
-## [2.17.0] - 2026-02-14
+## [2.17.0] - 2026-02-15
 
 ### Added
-- **E-Paper Display Endpoint**: New unauthenticated `/api/epaper.bmp` endpoint generates a 250x122 1-bit BMP for 2.13" e-Paper displays
+- **E-Paper Display System**: Complete two-part system for remote e-ink tank status display
+- **BMP Endpoint** (`/api/epaper.bmp`): Unauthenticated endpoint generates 250x122 1-bit BMP for 2.13" e-Paper displays
   - Header shows gallons available (left), percent full (right), "available water" label (center)
   - Filled area graph of tank level history with Y-axis percent labels and X-axis time context
   - Live tank data from mypt.in (30s timeout) with fallback to snapshots.csv
   - Timestamp shows actual last tank reading time, not snapshot time
   - Y-axis enforces minimum 5% tank capacity spread to prevent flat graphs
-  - `hours` parameter controls graph time window (default: 3)
+  - Default graph hours adapt to context: 24h for tenants, 72h for owner/unoccupied (configurable)
+- **Display Daemon** (`pistat/`): Systemd service on remote Pi fetches and displays the BMP
+  - Partial refresh updates — no full-screen flash on every update
+  - Falls back to cached image on network failures
+  - Full refresh on startup to clear ghosting
+  - 5-minute update interval (configurable)
+  - Waveshare EPD library included (`lib.tgz`)
 - **Occupancy-Aware Display Modes**: Display adapts based on current reservation type
   - **Tenant + low water**: Full-screen "Save Water" / "Tank filling slowly" warning (no graph)
   - **Owner/unoccupied + low water**: Normal graph with "Save Water" XOR overlay
-  - **Normal**: Graph with inverted occupancy bar showing occupied/unoccupied status and next check-in date
+  - **Normal**: Graph with inverted occupancy bar showing "occupied until M/DD" or "next checkin M/DD"
   - Owner vs. tenant determined by reservation Type field (configurable via `EPAPER_OWNER_STAY_TYPES`)
 - **E-Paper Configuration**: New settings in config.py
   - `EPAPER_CONSERVE_WATER_THRESHOLD`: Tank percent triggering "Save Water" (default: 50)
   - `EPAPER_OWNER_STAY_TYPES`: Reservation types that count as owner occupancy
+  - `EPAPER_DEFAULT_HOURS_TENANT`: Default graph hours for tenants (default: 24)
+  - `EPAPER_DEFAULT_HOURS_OTHER`: Default graph hours for owner/unoccupied (default: 72)
 - **Testing Overrides**: CGI parameters for testing all display modes
-  - `tenant=yes|no`, `occupied=yes|no`, `threshold=N`
-- **Documentation**: Added EPAPER.md with endpoint reference and usage guide
+  - `tenant=yes|no`, `occupied=yes|no`, `threshold=N`, `hours=N`
+- **Documentation**: Added EPAPER.md with full system documentation
 
 ## [2.16.0] - 2026-02-06
 
