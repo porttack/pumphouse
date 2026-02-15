@@ -4,9 +4,9 @@
 
 ### HIGH PRIORITY - Security: Sensitive Data in Repository
 
-- [ ] **Move Wyze credentials to secrets.conf** (CRITICAL)
-  - `monitor/camera.py` contains plaintext password, API key, and API ID
-  - Rotate the Wyze password and API key after moving to secrets
+- [x] **Remove Wyze camera module** (was CRITICAL)
+  - Deleted `monitor/camera.py` — unused, Wyze APIs never worked
+  - Credentials were non-functional; no scrub needed
 - [ ] **Move DDNS hostname to secrets.conf**
   - Hardcoded in `monitor/config.py`, `pistat/epaper_daemon.py`, `pistat/scriptable-widget.js`, `pistat/IPHONE_WIDGET.md`, `deploy-pumphouse-certs.sh`
   - Exposes server to direct targeting/DOS
@@ -18,7 +18,7 @@
 - [ ] **Remove nohup.out from git tracking**
   - Contains external IP addresses and server logs; add to `.gitignore`
 - [ ] **Move email addresses to secrets.conf**
-  - `monitor/config.py`, `monitor/camera.py` — personal Gmail addresses
+  - `monitor/config.py` — personal Gmail addresses
 - [ ] **Move Ambient Weather dashboard URL to secrets.conf**
   - `monitor/config.py` — unique dashboard ID
 - [ ] **Scrub git history** after moving secrets
