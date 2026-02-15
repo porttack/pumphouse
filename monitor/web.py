@@ -13,7 +13,9 @@ from functools import wraps
 
 from monitor import __version__
 from monitor.config import (
-    TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS, DASHBOARD_HIDE_EVENT_TYPES,
+    TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS,
+    EPAPER_CONSERVE_WATER_THRESHOLD, EPAPER_OWNER_STAY_TYPES,
+    DASHBOARD_HIDE_EVENT_TYPES,
     DASHBOARD_MAX_EVENTS, DASHBOARD_DEFAULT_HOURS, DASHBOARD_SNAPSHOT_COUNT,
     SECRET_OVERRIDE_ON_TOKEN, SECRET_OVERRIDE_OFF_TOKEN,
     SECRET_BYPASS_ON_TOKEN, SECRET_BYPASS_OFF_TOKEN,
@@ -546,6 +548,291 @@ def chart_image():
 
     except Exception as e:
         return Response(f'Error: {str(e)}', status=500)
+
+@app.route('/api/epaper.bmp')
+def epaper_bmp():
+    """
+    Generate a 250x122 1-bit BMP for a 2.13" e-Paper display.
+    Shows gallons available, percent full, and a water usage graph.
+    Unauthenticated so it can be fetched via wget.
+
+    Query params:
+        hours     - hours of history for graph (default 3)
+        tenant    - override: "yes" = force tenant mode, "no" = force owner/unoccupied mode
+        occupied  - override: "yes" = force occupied, "no" = force unoccupied
+        threshold - override: percent value for low-water threshold (e.g. 95)
+    """
+    from PIL import Image, ImageDraw, ImageFont, ImageChops
+    from monitor.occupancy import load_reservations, is_occupied, get_next_reservation, get_checkin_datetime
+
+    hours = request.args.get('hours', 3, type=int)
+    tenant_override = request.args.get('tenant')    # "yes" or "no"
+    occupied_override = request.args.get('occupied')  # "yes" or "no"
+    threshold_override = request.args.get('threshold', type=int)  # e.g. 95
+
+    WIDTH, HEIGHT = 250, 122
+    img = Image.new('1', (WIDTH, HEIGHT), 1)  # 1-bit, white background
+    draw = ImageDraw.Draw(img)
+
+    # Load fonts
+    try:
+        font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 22)
+        font_medium = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
+        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 11)
+    except (IOError, OSError):
+        font_large = ImageFont.load_default()
+        font_medium = ImageFont.load_default()
+        font_small = ImageFont.load_default()
+
+    # Read snapshot history
+    rows = []
+    try:
+        with open('snapshots.csv', 'r') as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+    except Exception:
+        pass
+
+    # Try live tank data first (30s timeout), fall back to latest snapshot
+    tank_gallons = None
+    tank_pct = None
+    live_reading_ts = None
+    try:
+        live = get_tank_data(TANK_URL, timeout=30)
+        if live['status'] == 'success' and live['gallons'] is not None:
+            tank_gallons = live['gallons']
+            tank_pct = (tank_gallons / TANK_CAPACITY_GALLONS) * 100
+            live_reading_ts = live.get('last_updated')
+    except Exception:
+        pass
+
+    if tank_gallons is None and rows:
+        try:
+            latest = rows[-1]
+            tank_gallons = float(latest['tank_gallons'])
+            tank_pct = (tank_gallons / TANK_CAPACITY_GALLONS) * 100
+        except Exception:
+            pass
+
+    # Determine occupancy and whether current guest is owner
+    reservations = load_reservations('reservations.csv')
+    occupancy = is_occupied(reservations)
+    next_res = get_next_reservation(reservations)
+
+    is_occupied_now = occupancy['occupied']
+    is_owner = False
+    if is_occupied_now and occupancy.get('current_reservation'):
+        res_type = occupancy['current_reservation'].get('Type', '')
+        is_owner = any(ot in res_type for ot in EPAPER_OWNER_STAY_TYPES)
+    is_tenant = is_occupied_now and not is_owner
+
+    # Apply CGI overrides
+    if occupied_override == 'yes':
+        is_occupied_now = True
+    elif occupied_override == 'no':
+        is_occupied_now = False
+        is_tenant = False
+    if tenant_override == 'yes':
+        is_tenant = True
+        is_occupied_now = True
+    elif tenant_override == 'no':
+        is_tenant = False
+
+    # Check if tank is low
+    low_threshold = threshold_override if threshold_override is not None else EPAPER_CONSERVE_WATER_THRESHOLD
+    tank_is_low = (low_threshold is not None
+                   and tank_pct is not None
+                   and tank_pct <= low_threshold)
+
+    # -- TENANT + LOW WATER: simplified full-screen warning --
+    if is_tenant and tank_is_low:
+        # "Save Water" large and centered
+        warn_text = "Save Water"
+        wb = draw.textbbox((0, 0), warn_text, font=font_large)
+        ww, wh = wb[2] - wb[0], wb[3] - wb[1]
+        # Scale width to nearly fill the screen
+        target_w = WIDTH - 20
+        scale = target_w / ww
+        target_h = int(wh * scale)
+        text_img = Image.new('1', (ww, wh), 1)
+        ImageDraw.Draw(text_img).text((-wb[0], -wb[1]), warn_text, font=font_large, fill=0)
+        text_img = text_img.resize((target_w, target_h), Image.NEAREST)
+        y_top = (HEIGHT // 2 - target_h) // 2 + 4
+        img.paste(text_img, ((WIDTH - target_w) // 2, y_top))
+
+        # "Tank filling slowly" in medium font below
+        sub_text = "Tank filling slowly"
+        sb = draw.textbbox((0, 0), sub_text, font=font_medium)
+        sw = sb[2] - sb[0]
+        draw = ImageDraw.Draw(img)  # refresh draw after paste
+        draw.text(((WIDTH - sw) // 2, y_top + target_h + 10), sub_text, font=font_medium, fill=0)
+
+        buf = io.BytesIO()
+        img.save(buf, format='BMP')
+        buf.seek(0)
+        return send_file(buf, mimetype='image/bmp', download_name='epaper.bmp')
+
+    # -- Normal display: header + graph --
+
+    # Top section: gallons and percent
+    y = 2
+    if tank_gallons is not None:
+        gal_text = f"{int(tank_gallons)} gal"
+        pct_text = f"{tank_pct:.0f}%"
+        draw.text((4, y), gal_text, font=font_large, fill=0)
+        pct_bbox = draw.textbbox((0, 0), pct_text, font=font_large)
+        pct_w = pct_bbox[2] - pct_bbox[0]
+        draw.text((WIDTH - pct_w - 4, y), pct_text, font=font_large, fill=0)
+        # "available / water" centered between gallons and percent
+        gal_bbox = draw.textbbox((4, y), gal_text, font=font_large)
+        pct_x = WIDTH - pct_w - 4
+        gap_cx = (gal_bbox[2] + pct_x) // 2
+        for li, line in enumerate(["available", "water"]):
+            lb = draw.textbbox((0, 0), line, font=font_small)
+            draw.text((gap_cx - (lb[2] - lb[0]) // 2, 1 + li * 12), line, font=font_small, fill=0)
+    else:
+        draw.text((4, y), "No data", font=font_large, fill=0)
+
+    # Separator line
+    sep_y = 28
+    draw.line([(0, sep_y), (WIDTH - 1, sep_y)], fill=0, width=1)
+
+    # Get snapshot data for the time window
+    graph_gallons = []
+    try:
+        now = datetime.now()
+        cutoff = now - timedelta(hours=hours)
+        for row in rows:
+            try:
+                ts = datetime.fromisoformat(row['timestamp'])
+                if ts >= cutoff:
+                    graph_gallons.append(float(row['tank_gallons']))
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    # Compute Y-axis range
+    g_min_raw = min(graph_gallons) if len(graph_gallons) >= 2 else 0
+    g_max_raw = max(graph_gallons) if len(graph_gallons) >= 2 else 0
+    g_range_raw = g_max_raw - g_min_raw
+
+    # Enforce minimum 5% of tank capacity between top and bottom
+    min_range = TANK_CAPACITY_GALLONS * 0.05
+    if g_range_raw < min_range:
+        mid = (g_min_raw + g_max_raw) / 2
+        g_min_raw = mid - min_range / 2
+        g_max_raw = mid + min_range / 2
+        g_range_raw = min_range
+
+    g_min = g_min_raw - g_range_raw * 0.05
+    g_max = g_max_raw + g_range_raw * 0.05
+    g_range = g_max - g_min
+
+    # Y-axis labels (percent)
+    y_max_label = f"{int(round(g_max_raw / TANK_CAPACITY_GALLONS * 100))}%"
+    y_min_label = f"{int(round(g_min_raw / TANK_CAPACITY_GALLONS * 100))}%"
+
+    y_label_w = max(
+        draw.textbbox((0, 0), y_max_label, font=font_small)[2],
+        draw.textbbox((0, 0), y_min_label, font=font_small)[2],
+    )
+
+    # Graph layout
+    graph_left = y_label_w + 6
+    graph_right = WIDTH - 4
+    graph_top = 32
+    graph_bottom = HEIGHT - 14
+    graph_w = graph_right - graph_left
+    graph_h = graph_bottom - graph_top
+
+    # Draw graph border
+    draw.rectangle([graph_left, graph_top, graph_right, graph_bottom], outline=0, fill=1)
+
+    # Y-axis labels
+    draw.text((graph_left - y_label_w - 3, graph_top - 1), y_max_label, font=font_small, fill=0)
+    draw.text((graph_left - y_label_w - 3, graph_bottom - 11), y_min_label, font=font_small, fill=0)
+
+    # X-axis labels
+    hours_label = f"{hours}h ago"
+    draw.text((graph_left + 1, graph_bottom + 1), hours_label, font=font_small, fill=0)
+    try:
+        if live_reading_ts:
+            now_label = live_reading_ts.strftime("%-m/%d %H:%M")
+        else:
+            last_ts = datetime.fromisoformat(rows[-1]['timestamp'])
+            data_age = float(rows[-1].get('tank_data_age_seconds', 0))
+            reading_ts = last_ts - timedelta(seconds=data_age)
+            now_label = reading_ts.strftime("%-m/%d %H:%M")
+    except Exception:
+        now_label = "now"
+    nl_bbox = draw.textbbox((0, 0), now_label, font=font_small)
+    draw.text((graph_right - (nl_bbox[2] - nl_bbox[0]) - 1, graph_bottom + 1), now_label, font=font_small, fill=0)
+
+    # Plot graph
+    if len(graph_gallons) >= 2:
+        points = []
+        for i, g in enumerate(graph_gallons):
+            x = graph_left + 1 + int(i * (graph_w - 2) / (len(graph_gallons) - 1))
+            y_val = graph_bottom - 1 - int((g - g_min) / g_range * (graph_h - 2))
+            points.append((x, y_val))
+
+        if points:
+            fill_points = [(points[0][0], graph_bottom - 1)]
+            fill_points.extend(points)
+            fill_points.append((points[-1][0], graph_bottom - 1))
+            draw.polygon(fill_points, fill=0)
+
+            for i in range(len(points) - 1):
+                draw.line([points[i], points[i + 1]], fill=1, width=2)
+
+    # "Save Water" XOR overlay when tank is low (non-tenant mode)
+    if tank_is_low:
+        warn_text = "Save Water"
+        test_bbox = draw.textbbox((0, 0), warn_text, font=font_large)
+        text_w = test_bbox[2] - test_bbox[0]
+        text_h = test_bbox[3] - test_bbox[1]
+        text_img = Image.new('1', (text_w, text_h), 0)
+        ImageDraw.Draw(text_img).text((-test_bbox[0], -test_bbox[1]), warn_text, font=font_large, fill=1)
+        target_w = graph_w - 8
+        target_h = text_h
+        text_img = text_img.resize((target_w, target_h), Image.NEAREST)
+        paste_x = graph_left + (graph_w - target_w) // 2
+        paste_y = graph_top + (graph_h - target_h) // 2
+        region = img.crop((paste_x, paste_y, paste_x + target_w, paste_y + target_h))
+        region = ImageChops.logical_xor(region, text_img)
+        img.paste(region, (paste_x, paste_y))
+
+    # Occupancy status bar (inverted) at bottom of graph for owner/unoccupied mode
+    if not is_tenant:
+        if is_occupied_now:
+            occ_text = "occupied"
+        else:
+            occ_text = "unoccupied"
+        # Append next checkin date if available
+        if next_res:
+            checkin_dt = get_checkin_datetime(next_res.get('Check-In'))
+            if checkin_dt:
+                occ_text += "  next: " + checkin_dt.strftime("%-m/%d")
+        ob = draw.textbbox((0, 0), occ_text, font=font_small)
+        ow, oh = ob[2] - ob[0], ob[3] - ob[1]
+        # Create inverted bar spanning graph width at graph bottom
+        bar_h = oh + 4
+        bar_y = graph_bottom - bar_h
+        bar_img = Image.new('1', (graph_w, bar_h), 0)  # black background
+        bar_draw = ImageDraw.Draw(bar_img)
+        bar_draw.text(((graph_w - ow) // 2, 2 - ob[1]), occ_text, font=font_small, fill=1)
+        # XOR onto graph
+        region = img.crop((graph_left, bar_y, graph_right, bar_y + bar_h))
+        region = ImageChops.logical_xor(region, bar_img)
+        img.paste(region, (graph_left, bar_y))
+
+    # Serve as BMP
+    buf = io.BytesIO()
+    img.save(buf, format='BMP')
+    buf.seek(0)
+    return send_file(buf, mimetype='image/bmp', download_name='epaper.bmp')
+
 
 @app.route('/')
 # @requires_auth
