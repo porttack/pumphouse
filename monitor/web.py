@@ -805,15 +805,18 @@ def epaper_bmp():
 
     # Occupancy status bar (inverted) at bottom of graph for owner/unoccupied mode
     if not is_tenant:
-        if is_occupied_now:
+        if is_occupied_now and occupancy.get('checkout_date'):
+            occ_text = "occupied until " + occupancy['checkout_date'].strftime("%-m/%d")
+        elif is_occupied_now:
             occ_text = "occupied"
-        else:
-            occ_text = "unoccupied"
-        # Append next checkin date if available
-        if next_res:
+        elif next_res:
             checkin_dt = get_checkin_datetime(next_res.get('Check-In'))
             if checkin_dt:
-                occ_text += "  next: " + checkin_dt.strftime("%-m/%d")
+                occ_text = "next checkin " + checkin_dt.strftime("%-m/%d")
+            else:
+                occ_text = "unoccupied"
+        else:
+            occ_text = "unoccupied"
         ob = draw.textbbox((0, 0), occ_text, font=font_small)
         ow, oh = ob[2] - ob[0], ob[3] - ob[1]
         # Create inverted bar spanning graph width at graph bottom
