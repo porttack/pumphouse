@@ -6,7 +6,8 @@ PROJECT_DIR="/home/pi/src/pumphouse"
 # The user that runs your web application
 APP_USER="pi"
 # Your domain name
-DOMAIN="REDACTED-HOST"
+# Set this to your DDNS hostname (same as PUMPHOUSE_HOST in secrets.conf)
+DOMAIN="your-hostname.example.com"
 
 # --- Script ---
 # Stop on any error

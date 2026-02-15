@@ -7,10 +7,9 @@
 - [x] **Remove Wyze camera module** (was CRITICAL)
   - Deleted `monitor/camera.py` — unused, Wyze APIs never worked
   - Credentials were non-functional; no scrub needed
-- [ ] **Move DDNS hostname to secrets.conf**
-  - Hardcoded in `monitor/config.py`, `pistat/epaper_daemon.py`, `pistat/scriptable-widget.js`, `pistat/IPHONE_WIDGET.md`, `deploy-pumphouse-certs.sh`
-  - Exposes server to direct targeting/DOS
-  - Replace with a config variable loaded from secrets, use placeholder in committed files
+- [x] **Move DDNS hostname to secrets.conf**
+  - PUMPHOUSE_HOST and PUMPHOUSE_PORT loaded from secrets.conf
+  - All committed files use placeholders; epaper_daemon.py reads secrets directly
 - [ ] **Move ntfy.sh topic name to secrets.conf**
   - `monitor/config.py` — anyone with the topic name can spam push notifications
 - [ ] **Move tank monitoring URL to secrets.conf**

@@ -46,7 +46,7 @@ The widget will now show your tank status and refresh approximately every 5 minu
 
 **Widget shows "Error loading tank status":**
 - Check that your phone can reach the server URL
-- Try opening `https://REDACTED-HOST:6443/api/epaper.bmp` in Safari
+- Try opening `https://YOUR-HOST:6443/api/epaper.bmp` in Safari (replace YOUR-HOST with your DDNS hostname)
 - If Safari shows a certificate warning, accept it — this may help Scriptable connect
 
 **Widget shows old data:**

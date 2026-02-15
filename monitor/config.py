@@ -47,7 +47,9 @@ OVERRIDE_ON_THRESHOLD = 1350  # Gallons at which to turn on override valve (None
 ENABLE_NOTIFICATIONS = True  # Master switch (default OFF for safety)
 NTFY_SERVER = "https://ntfy.sh"  # Can change to self-hosted later
 NTFY_TOPIC = "REDACTED-TOPIC"  # User must set unique topic!
-DASHBOARD_URL = "https://REDACTED-HOST:6443/"  # Dashboard URL to include in notifications
+PUMPHOUSE_HOST = ""  # DDNS hostname - loaded from secrets file
+PUMPHOUSE_PORT = 6443  # Web server port - loaded from secrets file
+DASHBOARD_URL = ""  # Computed after secrets load: https://{PUMPHOUSE_HOST}:{PUMPHOUSE_PORT}/
 DASHBOARD_EMAIL_URL = None  # Custom URL for emails (default: None uses DASHBOARD_URL with ?hours=DAILY_STATUS_EMAIL_CHART_HOURS)
 DASHBOARD_DEFAULT_HOURS = 72  # Default time range for web dashboard (hours)
 
@@ -226,5 +228,13 @@ if SECRETS_FILE.exists():
                         SECRET_PURGE_TOKEN = value
                     elif key == 'SECRET_TOTALS_TOKEN':
                         SECRET_TOTALS_TOKEN = value
+                    elif key == 'PUMPHOUSE_HOST' and not PUMPHOUSE_HOST:
+                        PUMPHOUSE_HOST = value
+                    elif key == 'PUMPHOUSE_PORT':
+                        PUMPHOUSE_PORT = int(value)
     except Exception as e:
         print(f"Warning: Could not load secrets file {SECRETS_FILE}: {e}")
+
+# Compute DASHBOARD_URL from host/port (after secrets load)
+if PUMPHOUSE_HOST and not DASHBOARD_URL:
+    DASHBOARD_URL = f"https://{PUMPHOUSE_HOST}:{PUMPHOUSE_PORT}/"

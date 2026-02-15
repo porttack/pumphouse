@@ -15,8 +15,9 @@
 // The widget will show the tank BMP image with a subtle blue gradient overlay.
 // Tap the widget to open Scriptable and see a preview.
 
-const url = "https://REDACTED-HOST:6443/api/epaper.bmp?tenant=no&scale=4";
-const dashboardUrl = "https://REDACTED-HOST:6443?totals=income"; // Your full dashboard
+// Replace YOUR-HOST with your DDNS hostname (from ~/.config/pumphouse/secrets.conf PUMPHOUSE_HOST)
+const url = "https://YOUR-HOST:6443/api/epaper.bmp?tenant=no&scale=4";
+const dashboardUrl = "https://YOUR-HOST:6443?totals=income"; // Your full dashboard
 
 let widget = new ListWidget();
 

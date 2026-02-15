@@ -24,9 +24,35 @@ from waveshare_epd import epd2in13_V4
 
 # Configuration
 UPDATE_INTERVAL = 180  # 3 minutes in seconds
-IMAGE_URL = "https://REDACTED-HOST:6443/api/epaper.bmp"
 CACHE_FILE = script_dir / "last_display.bmp"
 LOG_FILE = script_dir / "epaper_daemon.log"
+
+# Load server hostname from secrets file
+SECRETS_FILE = Path.home() / '.config' / 'pumphouse' / 'secrets.conf'
+PUMPHOUSE_HOST = ""
+PUMPHOUSE_PORT = "6443"
+if SECRETS_FILE.exists():
+    try:
+        with open(SECRETS_FILE, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                if '=' in line:
+                    key, value = line.split('=', 1)
+                    key, value = key.strip(), value.strip()
+                    if key == 'PUMPHOUSE_HOST':
+                        PUMPHOUSE_HOST = value
+                    elif key == 'PUMPHOUSE_PORT':
+                        PUMPHOUSE_PORT = value
+    except Exception:
+        pass
+
+if not PUMPHOUSE_HOST:
+    print("WARNING: PUMPHOUSE_HOST not set in ~/.config/pumphouse/secrets.conf")
+    print("The daemon will not be able to fetch the display image.")
+
+IMAGE_URL = f"https://{PUMPHOUSE_HOST}:{PUMPHOUSE_PORT}/api/epaper.bmp"
 
 # Set up logging
 logging.basicConfig(
