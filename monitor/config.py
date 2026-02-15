@@ -46,7 +46,7 @@ OVERRIDE_ON_THRESHOLD = 1350  # Gallons at which to turn on override valve (None
 # Notification Configuration
 ENABLE_NOTIFICATIONS = True  # Master switch (default OFF for safety)
 NTFY_SERVER = "https://ntfy.sh"  # Can change to self-hosted later
-NTFY_TOPIC = "REDACTED-TOPIC"  # User must set unique topic!
+NTFY_TOPIC = ""  # Loaded from secrets file - set unique topic per installation!
 PUMPHOUSE_HOST = ""  # DDNS hostname - loaded from secrets file
 PUMPHOUSE_PORT = 6443  # Web server port - loaded from secrets file
 DASHBOARD_URL = ""  # Computed after secrets load: https://{PUMPHOUSE_HOST}:{PUMPHOUSE_PORT}/
@@ -232,6 +232,8 @@ if SECRETS_FILE.exists():
                         PUMPHOUSE_HOST = value
                     elif key == 'PUMPHOUSE_PORT':
                         PUMPHOUSE_PORT = int(value)
+                    elif key == 'NTFY_TOPIC' and not NTFY_TOPIC:
+                        NTFY_TOPIC = value
     except Exception as e:
         print(f"Warning: Could not load secrets file {SECRETS_FILE}: {e}")
 

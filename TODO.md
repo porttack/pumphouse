@@ -10,8 +10,8 @@
 - [x] **Move DDNS hostname to secrets.conf**
   - PUMPHOUSE_HOST and PUMPHOUSE_PORT loaded from secrets.conf
   - All committed files use placeholders; epaper_daemon.py reads secrets directly
-- [ ] **Move ntfy.sh topic name to secrets.conf**
-  - `monitor/config.py` — anyone with the topic name can spam push notifications
+- [x] **Move ntfy.sh topic name to secrets.conf**
+  - NTFY_TOPIC loaded from secrets.conf; config.py default is empty
 - [ ] **Move tank monitoring URL to secrets.conf**
   - `monitor/config.py`, `README.md`, `check.py` — unique URL could be abused
 - [ ] **Remove nohup.out from git tracking**
