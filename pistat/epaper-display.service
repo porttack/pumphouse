@@ -1,0 +1,21 @@
+[Unit]
+Description=E-Paper Display Daemon for Pump House Monitoring
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/src/pumphouse/pistat
+ExecStart=/home/pi/src/pumphouse/pistat/venv/bin/python /home/pi/src/pumphouse/pistat/epaper_daemon.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Give it time to settle on boot
+ExecStartPre=/bin/sleep 30
+
+[Install]
+WantedBy=multi-user.target
