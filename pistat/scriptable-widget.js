@@ -20,45 +20,68 @@ const url = "https://YOUR-HOST:6443/api/epaper.bmp?tenant=no&scale=4";
 const dashboardUrl = "https://YOUR-HOST:6443?totals=income"; // Your full dashboard
 
 let widget = new ListWidget();
-
-// Set the URL that opens when widget is tapped
 widget.url = dashboardUrl;
+
+// File manager for caching
+const fm = FileManager.local();
+const cachePath = fm.joinPath(fm.documentsDirectory(), "water_system_cache.jpg");
+
+let image;
+let isError = false;
 
 try {
   let req = new Request(url);
-  let image = await req.loadImage();
+  image = await req.loadImage();
+  
+  // Save successful image to cache
+  fm.writeImage(cachePath, image);
+  
+} catch (error) {
+  // Try to load cached image
+  if (fm.fileExists(cachePath)) {
+    image = fm.readImage(cachePath);
+    isError = true;
+  } else {
+    // No cache available, create a simple placeholder
+    image = null;
+  }
+}
 
+if (image) {
   widget.backgroundImage = image;
-
-  // Subtle blue tint overlay for better readability on iOS
+  
   let gradient = new LinearGradient();
-  gradient.colors = [
-    new Color("#2d5a7b", 0.3),
-    new Color("#4a7c9e", 0.25),
-    new Color("#6b9dc4", 0.2)
-  ];
+  
+  if (isError) {
+    // Red-tinted gradient to indicate error/stale data
+    gradient.colors = [
+      new Color("#7b2d2d", 0.4),  // Dark red, slightly more opaque
+      new Color("#9e4a4a", 0.35),
+      new Color("#c46b6b", 0.3)
+    ];
+  } else {
+    // Normal blue gradient
+    gradient.colors = [
+      new Color("#2d5a7b", 0.3),
+      new Color("#4a7c9e", 0.25),
+      new Color("#6b9dc4", 0.2)
+    ];
+  }
+  
   gradient.locations = [0.0, 0.5, 1.0];
   gradient.startPoint = new Point(0, 0);
   gradient.endPoint = new Point(1, 1);
-
+  
   widget.backgroundGradient = gradient;
-
-} catch (error) {
-  widget.backgroundColor = new Color("#2d5a7b");
-  let errorText = widget.addText("Error loading tank status");
-  errorText.textColor = Color.white();
-  errorText.font = Font.systemFont(14);
+} else {
+  // Fallback if no cache exists
+  widget.backgroundColor = new Color("#7b2d2d");
+  let text = widget.addText("Unable to load water system data");
+  text.textColor = Color.white();
+  text.font = Font.systemFont(12);
 }
 
-// Request refresh every 5 minutes
-// Note: iOS may not honor this exactly — it throttles widget refreshes
-// based on battery, usage patterns, etc. Typical refresh is 5-15 minutes.
 widget.refreshAfterDate = new Date(Date.now() + 5 * 60 * 1000);
-
 Script.setWidget(widget);
 Script.complete();
-
-// Show preview when running in Scriptable app (not as widget)
-if (!config.runsInWidget) {
-  await widget.presentMedium();
-}
+if (!config.runsInWidget) { await widget.presentMedium(); }
