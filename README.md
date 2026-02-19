@@ -155,7 +155,7 @@ TANK_POLL_INTERVAL=60
 # Tank configuration
 TANK_HEIGHT_INCHES=58
 TANK_CAPACITY_GALLONS=1400
-TANK_URL=https://www.mypt.in/s/REDACTED-TANK-URL
+TANK_URL=https://www.mypt.in/s/your-tank-url-here
 
 # Water estimation
 RESIDUAL_PRESSURE_SECONDS=30

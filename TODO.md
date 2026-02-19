@@ -12,8 +12,8 @@
   - All committed files use placeholders; epaper_daemon.py reads secrets directly
 - [x] **Move ntfy.sh topic name to secrets.conf**
   - NTFY_TOPIC loaded from secrets.conf; config.py default is empty
-- [ ] **Move tank monitoring URL to secrets.conf**
-  - `monitor/config.py`, `README.md`, `check.py` — unique URL could be abused
+- [x] **Move tank monitoring URL to secrets.conf**
+  - TANK_URL loaded from secrets.conf; placeholder in README.md and check.py
 - [ ] **pumphouse/certs/privkey.pem**
   - I need to see how this is used, but it might be a problem.
 - [ ] **Remove nohup.out from git tracking**

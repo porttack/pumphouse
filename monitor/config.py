@@ -17,7 +17,7 @@ MAX_TANK_FETCH_FAILURES = 5  # Consecutive failures before safety shutoff (5 × 
 # Tank Configuration
 TANK_HEIGHT_INCHES = 58
 TANK_CAPACITY_GALLONS = 1400
-TANK_URL = "https://www.mypt.in/s/REDACTED-TANK-URL"
+TANK_URL = ""  # Loaded from secrets file - your mypt.in tank monitoring URL
 
 # Ambient Weather Configuration
 ENABLE_AMBIENT_WEATHER = True  # Enable Ambient Weather integration
@@ -234,6 +234,8 @@ if SECRETS_FILE.exists():
                         PUMPHOUSE_PORT = int(value)
                     elif key == 'NTFY_TOPIC' and not NTFY_TOPIC:
                         NTFY_TOPIC = value
+                    elif key == 'TANK_URL' and not TANK_URL:
+                        TANK_URL = value
     except Exception as e:
         print(f"Warning: Could not load secrets file {SECRETS_FILE}: {e}")
 

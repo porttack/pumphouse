@@ -225,7 +225,8 @@ def get_tank_data(url):
         }
 
 if __name__ == "__main__":
-    url = "https://www.mypt.in/s/REDACTED-TANK-URL"
+    from monitor.config import TANK_URL
+    url = TANK_URL
     
     print("Fetching tank data...")
     data = get_tank_data(url)
