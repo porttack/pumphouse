@@ -807,6 +807,26 @@ def epaper_bmp():
             for i in range(len(points) - 1):
                 draw.line([points[i], points[i + 1]], fill=1, width=2 * scale)
 
+    # Outside temperature label (inverted) at top-left of graph
+    outdoor_temp_f = None
+    if rows:
+        try:
+            outdoor_temp_f = float(rows[-1].get('outdoor_temp_f', ''))
+        except (ValueError, TypeError):
+            pass
+    if outdoor_temp_f is not None:
+        temp_text = f"Outside: {int(round(outdoor_temp_f))}\u00b0"
+        tb = draw.textbbox((0, 0), temp_text, font=font_small)
+        tw, th = tb[2] - tb[0], tb[3] - tb[1]
+        pad = s(2)
+        lbl_img = Image.new('1', (tw + pad * 2, th + pad * 2), 0)  # black bg
+        ImageDraw.Draw(lbl_img).text((pad - tb[0], pad - tb[1]), temp_text, font=font_small, fill=1)
+        paste_x = graph_left + 1
+        paste_y = graph_top + 1
+        region = img.crop((paste_x, paste_y, paste_x + tw + pad * 2, paste_y + th + pad * 2))
+        region = ImageChops.logical_xor(region, lbl_img)
+        img.paste(region, (paste_x, paste_y))
+
     # "Save Water" XOR overlay when tank is low (non-tenant mode)
     if tank_is_low:
         warn_text = "Save Water"

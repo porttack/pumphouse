@@ -14,6 +14,8 @@
   - NTFY_TOPIC loaded from secrets.conf; config.py default is empty
 - [ ] **Move tank monitoring URL to secrets.conf**
   - `monitor/config.py`, `README.md`, `check.py` — unique URL could be abused
+- [ ] **pumphouse/certs/privkey.pem**
+  - I need to see how this is used, but it might be a problem.
 - [ ] **Remove nohup.out from git tracking**
   - Contains external IP addresses and server logs; add to `.gitignore`
 - [ ] **Move email addresses to secrets.conf**
