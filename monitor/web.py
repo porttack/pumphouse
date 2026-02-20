@@ -1088,7 +1088,7 @@ def sunset():
             'https://192.168.1.81/cgi-bin/snapshot.cgi',
             auth=auth,
             verify=False,
-            timeout=10,
+            timeout=30,
             stream=True
         )
         resp.raise_for_status()
