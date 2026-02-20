@@ -1070,6 +1070,34 @@ def index():
                          FLOAT_STATE_FULL=FLOAT_STATE_FULL,
                          FLOAT_STATE_CALLING=FLOAT_STATE_CALLING)
 
+@app.route('/sunset')
+def sunset():
+    """
+    Proxy a JPEG snapshot from the local camera at 192.168.1.81.
+    Unauthenticated so it can be embedded directly in pages/widgets.
+    Uses verify=False to accept the camera's self-signed certificate.
+    """
+    import requests
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    try:
+        resp = requests.get(
+            'https://192.168.1.81/cgi-bin/snapshot.cgi',
+            verify=False,
+            timeout=10,
+            stream=True
+        )
+        resp.raise_for_status()
+        return Response(
+            resp.content,
+            status=200,
+            mimetype=resp.headers.get('Content-Type', 'image/jpeg')
+        )
+    except Exception as e:
+        return Response(f'Camera unavailable: {e}', status=503)
+
+
 @app.route('/control/<token>')
 def control(token):
     """
