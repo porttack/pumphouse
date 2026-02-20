@@ -1621,10 +1621,10 @@ def timelapse_view(date_or_file):
     .rating {{ max-width:960px; display:flex; align-items:center; gap:10px; margin:8px 0; }}
     .rating-label {{ color:#888; font-size:0.9em; white-space:nowrap; }}
     .stars {{ display:flex; gap:1px; line-height:1; }}
-    .star {{ font-size:2em; color:#3a3a3a; cursor:default;
+    .star {{ font-size:2em; color:#666; cursor:default;
              transition:color 0.1s; user-select:none; }}
-    .star.clickable {{ cursor:pointer; color:#666; }}
-    .star.clickable:hover, .star.hover {{ color:#f5c518; }}
+    .star.clickable {{ cursor:pointer; }}
+    .star.clickable:hover {{ color:#f5c518; }}
     .star.lit {{ color:#f5c518; }}
     .rating-info {{ color:#aaa; font-size:0.85em; }}
   </style>
@@ -1696,8 +1696,7 @@ def timelapse_view(date_or_file):
 
       function setLit(upTo) {{
         starsEl.forEach(function(s) {{
-          const v = +s.dataset.val;
-          s.classList.toggle('lit', v >= 3 && v <= upTo);
+          s.classList.toggle('lit', +s.dataset.val <= upTo);
         }});
       }}
       function showInfo(rated, count, avg) {{
