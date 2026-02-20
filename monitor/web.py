@@ -1074,24 +1074,49 @@ def index():
 @app.route('/sunset')
 def sunset():
     """
-    Proxy a JPEG snapshot from the local camera at 192.168.1.81.
+    Proxy a JPEG snapshot from the Amcrest camera at 192.168.1.81.
     Unauthenticated so it can be embedded directly in pages/widgets.
     Uses verify=False to accept the camera's self-signed certificate.
+
+    Query params:
+        sub     - 1 = request sub-stream (lower resolution, faster); default 0 (main stream)
+        enhance - 1 = apply auto-levels/contrast correction via Pillow; default 0
     """
     import requests
     import urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+    subtype = request.args.get('sub', 0, type=int)   # 0=main, 1=sub stream
+    enhance = request.args.get('enhance', 0, type=int)
+
+    params = {'channel': 1, 'subtype': subtype}
+
     try:
         auth = requests.auth.HTTPDigestAuth(CAMERA_USER, CAMERA_PASS) if CAMERA_USER else None
         resp = requests.get(
             'https://192.168.1.81/cgi-bin/snapshot.cgi',
+            params=params,
             auth=auth,
             verify=False,
             timeout=30,
             stream=True
         )
         resp.raise_for_status()
+
+        if enhance:
+            from PIL import Image, ImageOps
+            img = Image.open(io.BytesIO(resp.content)).convert('RGB')
+            # Auto-levels each channel independently to fix under/over-exposure
+            r, g, b = img.split()
+            r = ImageOps.autocontrast(r, cutoff=0.5)
+            g = ImageOps.autocontrast(g, cutoff=0.5)
+            b = ImageOps.autocontrast(b, cutoff=0.5)
+            img = Image.merge('RGB', (r, g, b))
+            buf = io.BytesIO()
+            img.save(buf, format='JPEG', quality=85)
+            buf.seek(0)
+            return send_file(buf, mimetype='image/jpeg')
+
         return Response(
             resp.content,
             status=200,
