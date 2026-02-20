@@ -1132,6 +1132,23 @@ def sunset():
 
 TIMELAPSE_DIR     = '/home/pi/timelapses'
 WEATHER_CACHE_DIR = os.path.join(TIMELAPSE_DIR, 'weather')
+RATINGS_FILE      = os.path.join(TIMELAPSE_DIR, 'ratings.json')
+
+import threading as _threading
+_ratings_lock = _threading.Lock()
+
+def _read_ratings():
+    import json as _j
+    try:
+        with open(RATINGS_FILE) as f:
+            return _j.load(f)
+    except Exception:
+        return {}
+
+def _write_ratings(data):
+    import json as _j
+    with open(RATINGS_FILE, 'w') as f:
+        _j.dump(data, f, indent=2)
 
 # WMO Weather Interpretation Codes → human description
 _WMO = {
@@ -1393,6 +1410,36 @@ def timelapse_index():
     return redirect(f'/timelapse/{dates[-1]}')
 
 
+@app.route('/timelapse/<date_str>/rate', methods=['POST'])
+def timelapse_rate(date_str):
+    """Accept a 3–5 star rating for a timelapse date, update the ratings file,
+    and set a cookie so the user can only rate once per date."""
+    import re, json as _j
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_str):
+        return Response('Invalid date', status=400)
+    try:
+        rating = int(request.get_json(force=True).get('rating', 0))
+    except Exception:
+        return Response('Bad request', status=400)
+    if rating not in (3, 4, 5):
+        return Response('Rating must be 3, 4, or 5', status=400)
+
+    with _ratings_lock:
+        data  = _read_ratings()
+        entry = data.get(date_str, {'count': 0, 'sum': 0})
+        entry['count'] += 1
+        entry['sum']   += rating
+        data[date_str]  = entry
+        _write_ratings(data)
+
+    avg  = entry['sum'] / entry['count']
+    resp = Response(_j.dumps({'count': entry['count'], 'avg': round(avg, 1)}),
+                    mimetype='application/json')
+    resp.set_cookie(f'tl_rated_{date_str}', str(rating),
+                    max_age=365 * 24 * 3600, samesite='Lax')
+    return resp
+
+
 @app.route('/timelapse/<date_or_file>')
 def timelapse_view(date_or_file):
     """
@@ -1437,6 +1484,12 @@ def timelapse_view(date_or_file):
 
     wx  = _day_weather_summary(date_str)   # local snapshots (humidity)
     om  = _open_meteo_weather(date_str)    # Open-Meteo archive
+
+    # Rating state
+    _rdata      = _read_ratings().get(date_str, {})
+    rating_count = _rdata.get('count', 0)
+    rating_avg   = round(_rdata['sum'] / rating_count, 1) if rating_count else None
+    user_rating  = request.cookies.get(f'tl_rated_{date_str}')  # '3','4','5' or None
 
     def stat(label, val, unit=''):
         if val is None:
@@ -1508,8 +1561,9 @@ def timelapse_view(date_or_file):
                 if prev_date else '<span class="nav-btn disabled">&#8592;</span>')
     next_btn = (f'<a class="nav-btn" href="/timelapse/{next_date}">{_short_date(next_date)}&nbsp;&#8594;</a>'
                 if next_date else '<span class="nav-btn disabled">&#8594;</span>')
-    prev_js = f'"{prev_date}"' if prev_date else 'null'
-    next_js = f'"{next_date}"' if next_date else 'null'
+    prev_js     = f'"{prev_date}"' if prev_date else 'null'
+    next_js     = f'"{next_date}"' if next_date else 'null'
+    rating_avg_js = rating_avg if rating_avg is not None else 'null'
 
     # List all dates newest-first
     list_items = ''.join(
@@ -1564,6 +1618,15 @@ def timelapse_view(date_or_file):
     li a {{ color:#4CAF50; text-decoration:none; }}
     li.current a {{ color:#fff; font-weight:bold; }}
     li a:hover {{ text-decoration:underline; }}
+    .rating {{ max-width:960px; display:flex; align-items:center; gap:10px; margin:8px 0; }}
+    .rating-label {{ color:#888; font-size:0.9em; white-space:nowrap; }}
+    .stars {{ display:flex; gap:1px; line-height:1; }}
+    .star {{ font-size:2em; color:#3a3a3a; cursor:default;
+             transition:color 0.1s; user-select:none; }}
+    .star.clickable {{ cursor:pointer; color:#666; }}
+    .star.clickable:hover, .star.hover {{ color:#f5c518; }}
+    .star.lit {{ color:#f5c518; }}
+    .rating-info {{ color:#aaa; font-size:0.85em; }}
   </style>
 </head>
 <body>
@@ -1574,6 +1637,17 @@ def timelapse_view(date_or_file):
   </div>
   {video_html}
   {wx_html}
+  <div class="rating" id="rating-widget">
+    <span class="rating-label">Rate:</span>
+    <div class="stars" id="stars">
+      <span class="star" data-val="1" title="Min rating is 3 stars">&#9733;</span>
+      <span class="star" data-val="2" title="Min rating is 3 stars">&#9733;</span>
+      <span class="star clickable" data-val="3" title="3 stars">&#9733;</span>
+      <span class="star clickable" data-val="4" title="4 stars">&#9733;</span>
+      <span class="star clickable" data-val="5" title="5 stars">&#9733;</span>
+    </div>
+    <span id="rating-info"></span>
+  </div>
   <details>
     <summary>All timelapses ({len(dates)})</summary>
     <ul>{list_items}</ul>
@@ -1609,6 +1683,56 @@ def timelapse_view(date_or_file):
       document.addEventListener('keydown', function(e) {{
         if (e.key === 'ArrowLeft'  && prev) location.href = '/timelapse/' + prev;
         if (e.key === 'ArrowRight' && next) location.href = '/timelapse/' + next;
+      }});
+    }})();
+    // Star rating widget (3–5 stars only; one rating per day via cookie)
+    (function() {{
+      const dateStr  = '{date_str}';
+      let   userRated = {user_rating or 'null'};   // number (3/4/5) or null
+      let   rCount   = {rating_count};
+      let   rAvg     = {rating_avg_js};             // float or null
+      const starsEl  = document.querySelectorAll('#stars .star');
+      const infoEl   = document.getElementById('rating-info');
+
+      function setLit(upTo) {{
+        starsEl.forEach(function(s) {{
+          const v = +s.dataset.val;
+          s.classList.toggle('lit', v >= 3 && v <= upTo);
+        }});
+      }}
+      function showInfo(rated, count, avg) {{
+        let txt = '';
+        if (rated)  txt += 'You rated ' + rated + '\u2605';
+        if (count)  txt += (rated ? ' \u00b7 ' : '') + 'Avg ' + avg + '\u2605 (' + count + ')';
+        infoEl.textContent = txt;
+        infoEl.style.color = rated ? '#f5c518' : '#aaa';
+      }}
+      function freeze(val) {{
+        starsEl.forEach(function(s) {{ s.style.pointerEvents = 'none'; }});
+        setLit(val);
+      }}
+
+      showInfo(userRated, rCount, rAvg);
+      if (userRated) {{ freeze(userRated); return; }}
+
+      starsEl.forEach(function(s) {{
+        if (!s.classList.contains('clickable')) return;
+        s.addEventListener('mouseenter', function() {{ setLit(+s.dataset.val); }});
+        s.addEventListener('mouseleave', function() {{ setLit(0); }});
+        s.addEventListener('click', function() {{
+          const v = +s.dataset.val;
+          fetch('/timelapse/' + dateStr + '/rate', {{
+            method: 'POST',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify({{rating: v}})
+          }})
+          .then(function(r) {{ return r.json(); }})
+          .then(function(d) {{ freeze(v); showInfo(v, d.count, d.avg); }})
+          .catch(function() {{
+            infoEl.textContent = 'Rating failed \u2014 try again';
+            infoEl.style.color = '#e57373';
+          }});
+        }});
       }});
     }})();
   </script>
