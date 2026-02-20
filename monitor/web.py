@@ -1175,7 +1175,8 @@ def _open_meteo_weather(date_str):
         f'?latitude=44.63&longitude=-124.05'
         f'&start_date={date_str}&end_date={date_str}'
         '&daily=weather_code,temperature_2m_max,temperature_2m_min,'
-        'precipitation_sum,wind_speed_10m_max,cloud_cover_mean,sunrise,sunset'
+        'precipitation_sum,wind_speed_10m_max,wind_speed_10m_mean,'
+        'cloud_cover_mean,shortwave_radiation_sum,sunrise,sunset'
         '&temperature_unit=fahrenheit&wind_speed_unit=mph'
         '&precipitation_unit=inch&timezone=America%2FLos_Angeles'
     )
@@ -1193,15 +1194,21 @@ def _open_meteo_weather(date_str):
             except Exception:
                 return None
 
+        def _safe(key, fmt='{:.0f}'):
+            v = d.get(key, [None])[0]
+            return fmt.format(v) if v is not None else None
+
         code = d['weather_code'][0]
         result = {
             'weather_code': code,
             'weather_desc': _WMO.get(code, f'Code {code}'),
-            'temp_max':     f"{d['temperature_2m_max'][0]:.0f}",
-            'temp_min':     f"{d['temperature_2m_min'][0]:.0f}",
-            'precip':       f"{d['precipitation_sum'][0]:.2f}",
-            'wind_max':     f"{d['wind_speed_10m_max'][0]:.0f}",
-            'cloud':        f"{d['cloud_cover_mean'][0]:.0f}",
+            'temp_max':     _safe('temperature_2m_max'),
+            'temp_min':     _safe('temperature_2m_min'),
+            'precip':       _safe('precipitation_sum', '{:.2f}'),
+            'wind_max':     _safe('wind_speed_10m_max'),
+            'wind_avg':     _safe('wind_speed_10m_mean'),
+            'cloud':        _safe('cloud_cover_mean'),
+            'radiation':    _safe('shortwave_radiation_sum', '{:.1f}'),
             'sunset':       _fmt_time(d['sunset'][0]),
             'sunrise':      _fmt_time(d['sunrise'][0]),
         }
@@ -1360,18 +1367,26 @@ def timelapse_view(date_or_file):
 
     wx_html = ''
     if om:
-        precip_str = f'{float(om["precip"]):.2f}"' if float(om['precip']) > 0 else '—'
+        precip_val = float(om['precip']) if om.get('precip') else 0
+        precip_str = f'{precip_val:.2f}"' if precip_val > 0 else '—'
         humidity = wx.get('humidity_avg') if wx else None
+        wind_str = None
+        if om.get('wind_avg') and om.get('wind_max'):
+            wind_str = f"{om['wind_avg']} avg / {om['wind_max']} max"
+        elif om.get('wind_max'):
+            wind_str = om['wind_max']
+        radiation_str = f"{om['radiation']} MJ/m²" if om.get('radiation') else None
         wx_html = f"""
         <div class="weather">
           <div class="wx-desc">{om['weather_desc']}</div>
           <div class="wx-group">
-            {stat('Sunset',   om['sunset'],  '')}
-            {stat('High/Low', f"{om['temp_max']}–{om['temp_min']}", '°F')}
-            {stat('Rain',     precip_str,    '')}
-            {stat('Wind',     om['wind_max'],' mph')}
-            {stat('Cloud',    om['cloud'],   '%')}
-            {stat('Humidity', humidity,      '%')}
+            {stat('Sunset',    om['sunset'],  '')}
+            {stat('High/Low',  f"{om['temp_max']}–{om['temp_min']}", '°F')}
+            {stat('Rain',      precip_str,    '')}
+            {stat('Wind',      wind_str,      ' mph')}
+            {stat('Cloud',     om['cloud'],   '%')}
+            {stat('Radiation', radiation_str, '')}
+            {stat('Humidity',  humidity,      '%')}
           </div>
         </div>"""
     elif wx:
