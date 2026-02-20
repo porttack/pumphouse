@@ -1421,13 +1421,19 @@ def timelapse_view(date_or_file):
     prev_date = dates[idx - 1] if idx > 0 else None
     next_date = dates[idx + 1] if idx >= 0 and idx < len(dates) - 1 else None
 
-    # Human-readable title
+    # Human-readable title and short nav labels
     try:
         from datetime import date as _date
         d = _date.fromisoformat(date_str)
-        title_date = d.strftime('%B %-d, %Y')
+        title_date = d.strftime('%A, %B %-d, %Y')
     except Exception:
         title_date = date_str
+
+    def _short_date(ds):
+        try:
+            return _date.fromisoformat(ds).strftime('%a %b %-d')
+        except Exception:
+            return ds
 
     wx  = _day_weather_summary(date_str)   # local snapshots (humidity)
     om  = _open_meteo_weather(date_str)    # Open-Meteo archive
@@ -1498,10 +1504,12 @@ def timelapse_view(date_or_file):
         '<p class="no-video">No timelapse recorded for this date.</p>'
     )
 
-    prev_btn = (f'<a class="nav-btn" href="/timelapse/{prev_date}">&#8592; {prev_date}</a>'
-                if prev_date else '<span class="nav-btn disabled">&#8592; older</span>')
-    next_btn = (f'<a class="nav-btn" href="/timelapse/{next_date}">{next_date} &#8594;</a>'
-                if next_date else '<span class="nav-btn disabled">newer &#8594;</span>')
+    prev_btn = (f'<a class="nav-btn" href="/timelapse/{prev_date}">&#8592;&nbsp;{_short_date(prev_date)}</a>'
+                if prev_date else '<span class="nav-btn disabled">&#8592;</span>')
+    next_btn = (f'<a class="nav-btn" href="/timelapse/{next_date}">{_short_date(next_date)}&nbsp;&#8594;</a>'
+                if next_date else '<span class="nav-btn disabled">&#8594;</span>')
+    prev_js = f'"{prev_date}"' if prev_date else 'null'
+    next_js = f'"{next_date}"' if next_date else 'null'
 
     # List all dates newest-first
     list_items = ''.join(
@@ -1528,8 +1536,8 @@ def timelapse_view(date_or_file):
             max-width:960px; margin:12px 0; }}
     .nav h2 {{ flex:1; text-align:center; }}
     .nav-btn {{ background:#2a2a2a; color:#4CAF50; border:1px solid #444;
-                padding:6px 14px; border-radius:4px; text-decoration:none;
-                white-space:nowrap; }}
+                padding:8px 20px; border-radius:4px; text-decoration:none;
+                white-space:nowrap; font-size:1.05em; }}
     .nav-btn.disabled {{ color:#555; border-color:#333; cursor:default; }}
     .nav-btn:hover:not(.disabled) {{ background:#333; }}
     .weather {{ max-width:960px; background:#222; border:1px solid #333;
@@ -1594,6 +1602,15 @@ def timelapse_view(date_or_file):
         }}
       }});
     }}
+    // Keyboard navigation: ← → arrow keys step through dates
+    (function() {{
+      const prev = {prev_js};
+      const next = {next_js};
+      document.addEventListener('keydown', function(e) {{
+        if (e.key === 'ArrowLeft'  && prev) location.href = '/timelapse/' + prev;
+        if (e.key === 'ArrowRight' && next) location.href = '/timelapse/' + next;
+      }});
+    }})();
   </script>
 </body>
 </html>"""
