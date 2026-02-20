@@ -1,0 +1,19 @@
+[Unit]
+Description=Pumphouse Sunset Timelapse Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/src/pumphouse
+Environment="PATH=/home/pi/src/pumphouse/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/pi/src/pumphouse/venv/bin/python sunset_timelapse.py
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pumphouse-timelapse
+
+[Install]
+WantedBy=multi-user.target

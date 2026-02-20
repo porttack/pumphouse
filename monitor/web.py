@@ -1130,6 +1130,60 @@ def sunset():
     return Response(f'Camera unavailable: {last_err}', status=503)
 
 
+TIMELAPSE_DIR = '/home/pi/timelapses'
+
+@app.route('/timelapse')
+def timelapse_index():
+    """
+    List available sunset timelapses, newest first.
+    Returns an HTML page with links + an embedded player for the latest.
+    Unauthenticated.
+    """
+    import glob as _glob
+    videos = sorted(_glob.glob(os.path.join(TIMELAPSE_DIR, '*.mp4')), reverse=True)
+
+    if not videos:
+        return Response('No timelapses available yet.', status=404, mimetype='text/plain')
+
+    latest = os.path.basename(videos[0])
+    rows = ''.join(
+        f'<li><a href="/timelapse/{os.path.basename(v)}">{os.path.basename(v)}</a>'
+        f' ({os.path.getsize(v)//1024//1024} MB)</li>'
+        for v in videos
+    )
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+  <title>Sunset Timelapses</title>
+  <style>
+    body {{ font-family: monospace; background:#1a1a1a; color:#e0e0e0; padding:20px; }}
+    video {{ width:100%; max-width:960px; display:block; margin:20px 0; }}
+    a {{ color:#4CAF50; }}
+    ul {{ line-height:2; }}
+  </style>
+</head>
+<body>
+  <h2>Sunset Timelapses</h2>
+  <video src="/timelapse/{latest}" controls autoplay muted loop></video>
+  <ul>{rows}</ul>
+</body>
+</html>"""
+    return Response(html, mimetype='text/html')
+
+
+@app.route('/timelapse/<filename>')
+def timelapse_file(filename):
+    """Serve a specific timelapse MP4 by filename (e.g. 2026-02-19.mp4)."""
+    # Sanitise — only allow YYYY-MM-DD.mp4
+    import re
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}\.mp4', filename):
+        return Response('Invalid filename', status=400)
+    path = os.path.join(TIMELAPSE_DIR, filename)
+    if not os.path.exists(path):
+        return Response(f'Not found: {filename}', status=404)
+    return send_file(path, mimetype='video/mp4')
+
+
 @app.route('/control/<token>')
 def control(token):
     """
