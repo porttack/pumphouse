@@ -37,9 +37,10 @@ SLOWDOWN_FACTOR  = 4     # capture this many times more frames (divide interval 
                          # e.g. factor=4, interval=20 → 5s/frame → 1440 frames/2hr → 60s at 24fps
 WINDOW_BEFORE    = 60    # minutes before sunset to start capture
 WINDOW_AFTER     = 60    # minutes after sunset to stop capture
-RETENTION_DAYS   = 30    # days of MP4s to keep
+RETENTION_DAYS   = 30    # keep every day's timelapse for this many days
+WEEKLY_YEARS     = 3     # after RETENTION_DAYS, keep one per ISO week for this many years
 OUTPUT_FPS       = 24    # output video frame rate
-OUTPUT_CRF       = 35    # H.264 quality (lower = better; 23 = default, 35 = ~40x smaller)
+OUTPUT_CRF       = 32    # H.264 quality (lower = better; 23 = default, 35 = ~40x smaller)
 PREVIEW_INTERVAL = 600   # seconds between partial preview assemblies (10 min)
 
 # ---------------------------------------------------------------------------
@@ -128,13 +129,56 @@ def assemble_timelapse(frames_dir, output_path, fps=OUTPUT_FPS):
     return True
 
 
-def cleanup_old(retention_days):
-    """Delete MP4s older than retention_days."""
-    cutoff = datetime.now().timestamp() - retention_days * 86400
-    for f in TIMELAPSE_DIR.glob('*.mp4'):
-        if f.stat().st_mtime < cutoff:
+def cleanup_old(retention_days=RETENTION_DAYS, weekly_years=WEEKLY_YEARS):
+    """
+    Tiered retention:
+      - ≤ retention_days old        → keep all
+      - retention_days..weekly_years → keep oldest file of each ISO week
+      - older than weekly_years      → delete
+    Handles both YYYY-MM-DD_HHMM.mp4 and legacy YYYY-MM-DD.mp4 names.
+    """
+    import re as _re
+    from datetime import date as _date
+
+    today = _date.today()
+    cutoff_daily  = today - timedelta(days=retention_days)
+    cutoff_weekly = today - timedelta(days=weekly_years * 365)
+
+    # Collect all dated MP4s → {date: Path}
+    dated = {}
+    for pattern in ('????-??-??_????.mp4', '????-??-??.mp4'):
+        for f in TIMELAPSE_DIR.glob(pattern):
+            m = _re.match(r'(\d{4}-\d{2}-\d{2})', f.name)
+            if not m:
+                continue
+            try:
+                d = _date.fromisoformat(m.group(1))
+            except ValueError:
+                continue
+            # Prefer new-style name if both exist for same date
+            if d not in dated or '_' in f.name:
+                dated[d] = f
+
+    # For weekly zone: find the oldest file in each ISO week to keep
+    keep_per_week = {}  # (iso_year, iso_week) → oldest date
+    for d in sorted(dated):
+        if cutoff_weekly <= d < cutoff_daily:
+            key = d.isocalendar()[:2]
+            if key not in keep_per_week:
+                keep_per_week[key] = d
+
+    for d, f in dated.items():
+        if d >= cutoff_daily:
+            continue  # within daily window — keep
+        if d < cutoff_weekly:
             f.unlink()
-            log.info(f"Removed old timelapse: {f.name}")
+            log.info(f"Removed (>{weekly_years}yr): {f.name}")
+            continue
+        # Weekly zone: keep only the oldest of each ISO week
+        key = d.isocalendar()[:2]
+        if keep_per_week.get(key) != d:
+            f.unlink()
+            log.info(f"Removed (weekly dedup): {f.name}")
 
 
 def run_todays_timelapse():
@@ -166,8 +210,9 @@ def run_todays_timelapse():
     )
 
     date_str   = now.strftime('%Y-%m-%d')
+    sunset_hhmm = sunset.strftime('%H%M')
     frames_dir = Path('/tmp') / 'timelapse-frames' / date_str  # tmpfs → no SD wear
-    output     = TIMELAPSE_DIR / f'{date_str}.mp4'
+    output     = TIMELAPSE_DIR / f'{date_str}_{sunset_hhmm}.mp4'
     frames_dir.mkdir(parents=True, exist_ok=True)
 
     effective_interval = max(1, FRAME_INTERVAL // SLOWDOWN_FACTOR)

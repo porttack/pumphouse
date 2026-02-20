@@ -1136,9 +1136,22 @@ TIMELAPSE_DIR = '/home/pi/timelapses'
 def _timelapse_dates():
     """Return sorted list of date strings (YYYY-MM-DD) that have MP4 files."""
     import glob as _glob
-    files = _glob.glob(os.path.join(TIMELAPSE_DIR, '????-??-??.mp4'))
-    dates = sorted([os.path.basename(f)[:-4] for f in files])
-    return dates
+    files = (_glob.glob(os.path.join(TIMELAPSE_DIR, '????-??-??_????.mp4')) +
+             _glob.glob(os.path.join(TIMELAPSE_DIR, '????-??-??.mp4')))
+    # Extract the date portion (first 10 chars) and deduplicate
+    return sorted(set(os.path.basename(f)[:10] for f in files))
+
+
+def _mp4_for_date(date_str):
+    """Return the MP4 filename (basename) for a given YYYY-MM-DD date, or None."""
+    import glob as _glob
+    # Prefer new-style name with sunset time embedded
+    files = _glob.glob(os.path.join(TIMELAPSE_DIR, f'{date_str}_????.mp4'))
+    if files:
+        return os.path.basename(files[0])
+    # Fall back to legacy name
+    legacy = os.path.join(TIMELAPSE_DIR, f'{date_str}.mp4')
+    return os.path.basename(legacy) if os.path.exists(legacy) else None
 
 
 def _day_weather_summary(date_str):
@@ -1226,12 +1239,13 @@ def timelapse_index():
 @app.route('/timelapse/<date_or_file>')
 def timelapse_view(date_or_file):
     """
-    YYYY-MM-DD      → HTML viewer page with prev/next nav and weather summary
-    YYYY-MM-DD.mp4  → serve the raw MP4
+    YYYY-MM-DD              → HTML viewer page with prev/next nav and weather summary
+    YYYY-MM-DD_HHMM.mp4    → serve the raw MP4 (new-style name with sunset time)
+    YYYY-MM-DD.mp4          → serve the raw MP4 (legacy name)
     """
     import re
-    # Raw MP4 request
-    if re.fullmatch(r'\d{4}-\d{2}-\d{2}\.mp4', date_or_file):
+    # Raw MP4 request (new-style or legacy)
+    if re.fullmatch(r'\d{4}-\d{2}-\d{2}(_\d{4})?\.mp4', date_or_file):
         path = os.path.join(TIMELAPSE_DIR, date_or_file)
         if not os.path.exists(path):
             return Response(f'Not found: {date_or_file}', status=404)
@@ -1241,10 +1255,10 @@ def timelapse_view(date_or_file):
     if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_or_file):
         return Response('Invalid date', status=400)
 
-    date_str = date_or_file
-    dates    = _timelapse_dates()
-    mp4_path = os.path.join(TIMELAPSE_DIR, f'{date_str}.mp4')
-    has_video = os.path.exists(mp4_path)
+    date_str  = date_or_file
+    dates     = _timelapse_dates()
+    mp4_name  = _mp4_for_date(date_str)
+    has_video = mp4_name is not None
 
     idx  = dates.index(date_str) if date_str in dates else -1
     prev_date = dates[idx - 1] if idx > 0 else None
@@ -1279,7 +1293,7 @@ def timelapse_view(date_or_file):
         </div>"""
 
     video_html = (
-        f'<video id="vid" src="/timelapse/{date_str}.mp4" controls autoplay muted loop></video>'
+        f'<video id="vid" src="/timelapse/{mp4_name}" controls autoplay muted loop></video>'
         f'<div class="speed-btns">'
         f'<span class="speed-lbl">Speed:</span>'
         f'<button class="speed-btn" data-rate="0.25">&#188;x</button>'

@@ -787,22 +787,46 @@ SLOWDOWN_FACTOR  = 4     # divide interval by this → more frames, slower playb
                          # e.g. factor=4, interval=20 → 5s/frame → 1440 frames/2hr → 60s at 24fps
 WINDOW_BEFORE    = 60    # minutes before sunset to start capture
 WINDOW_AFTER     = 60    # minutes after sunset to stop capture
-RETENTION_DAYS   = 30    # days of MP4s to keep
+RETENTION_DAYS   = 30    # keep every day's timelapse for this many days
+WEEKLY_YEARS     = 3     # after RETENTION_DAYS, keep one per ISO week for this many years
 OUTPUT_FPS       = 24    # output video frame rate
+OUTPUT_CRF       = 32    # H.264 quality: lower = better; 23 = lossless-ish, 35 = ~40x smaller
 PREVIEW_INTERVAL = 600   # seconds between partial preview assemblies (10 min)
 ```
 
 Adjust `SLOWDOWN_FACTOR` and `WINDOW_BEFORE`/`WINDOW_AFTER` to taste, then `sudo systemctl restart pumphouse-timelapse`.
 
+Filenames embed the sunset time for easy browsing: `2026-02-19_1750.mp4`.
+
 ### SD card impact
 
-| Setting | Effective interval | Frames/2hr | SD writes/day |
-|---|---|---|---|
-| factor=4 (default) | 5s | 1,440 | ~200 MB (MP4s only) |
-| factor=2 | 10s | 720 | ~100 MB |
-| factor=1 | 20s | 360 | ~50 MB |
+Frames are written to `/tmp/timelapse-frames/` (tmpfs / RAM) and deleted after assembly — they **never touch the SD card**. Only the assembled MP4s are written to disk.
 
-Frames live in RAM (`/tmp/timelapse-frames/`) and are deleted after assembly — they never touch the SD card.
+**Tuning SD writes** — two main levers:
+
+| `SLOWDOWN_FACTOR` | Effective interval | Frames/2hr | SD writes/day |
+|---|---|---|---|
+| 4 (default) | 5s | 1,440 | ~30 MB |
+| 2 | 10s | 720 | ~15 MB |
+| 1 | 20s | 360 | ~8 MB |
+
+> SD writes are the assembled MP4s only. At `OUTPUT_CRF=32` a full 60-second timelapse is ~5 MB.
+> Preview assemblies (10-min interval, 12 per night) add ~40 MB/day during capture.
+> Total is well under 100 MB/day even at the default settings.
+
+**Tuning video quality vs. file size** (`OUTPUT_CRF`):
+
+| `OUTPUT_CRF` | Quality | Approx. size (60s video) |
+|---|---|---|
+| 23 | near-lossless | ~200 MB |
+| 28 | high | ~20 MB |
+| 32 (default) | good | ~5 MB |
+| 35 | acceptable | ~2 MB |
+
+**Long-term storage** — tiered retention keeps disk use bounded:
+- `RETENTION_DAYS=30`: every day for 30 days
+- `WEEKLY_YEARS=3`: one per ISO week for 3 years
+- At ~5 MB/file: 30 daily + 156 weekly ≈ **1 GB total** on a 57 GB card
 
 ### Installation
 
