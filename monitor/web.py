@@ -1081,45 +1081,49 @@ def sunset():
     Query params:
         enhance - 1 = apply CLAHE contrast enhancement via OpenCV; default 0
     """
-    import requests
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    import urllib.request
+    import ssl
+    import time
 
     enhance = request.args.get('enhance', 0, type=int)
 
-    try:
-        auth = requests.auth.HTTPDigestAuth(CAMERA_USER, CAMERA_PASS) if CAMERA_USER else None
-        resp = requests.get(
-            'https://192.168.1.81/cgi-bin/snapshot.cgi',
-            auth=auth,
-            verify=False,
-            timeout=30,
-            stream=True
-        )
-        resp.raise_for_status()
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
 
-        if enhance:
-            import cv2
-            import numpy as np
-            data = np.frombuffer(resp.content, dtype=np.uint8)
-            img = cv2.imdecode(data, cv2.IMREAD_COLOR)
-            # Convert to LAB, apply CLAHE only to the L (lightness) channel
-            lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-            l, a, b = cv2.split(lab)
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-            l = clahe.apply(l)
-            lab = cv2.merge([l, a, b])
-            img = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
-            _, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            return Response(buf.tobytes(), status=200, mimetype='image/jpeg')
+    last_err = None
+    for attempt in range(3):
+        if attempt > 0:
+            time.sleep(2)
+        try:
+            mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+            mgr.add_password(None, 'https://192.168.1.81/', CAMERA_USER, CAMERA_PASS)
+            handler = urllib.request.HTTPDigestAuthHandler(mgr)
+            opener = urllib.request.build_opener(handler, urllib.request.HTTPSHandler(context=ctx))
+            cam_resp = opener.open('https://192.168.1.81/cgi-bin/snapshot.cgi', timeout=30)
+            content = cam_resp.read()
+            content_type = cam_resp.headers.get('Content-Type', 'image/jpeg')
 
-        return Response(
-            resp.content,
-            status=200,
-            mimetype=resp.headers.get('Content-Type', 'image/jpeg')
-        )
-    except Exception as e:
-        return Response(f'Camera unavailable: {e}', status=503)
+            if enhance:
+                import cv2
+                import numpy as np
+                data = np.frombuffer(content, dtype=np.uint8)
+                img = cv2.imdecode(data, cv2.IMREAD_COLOR)
+                # Convert to LAB, apply CLAHE only to the L (lightness) channel
+                lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+                l, a, b = cv2.split(lab)
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                l = clahe.apply(l)
+                lab = cv2.merge([l, a, b])
+                img = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+                _, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                return Response(buf.tobytes(), status=200, mimetype='image/jpeg')
+
+            return Response(content, status=200, mimetype=content_type)
+        except Exception as e:
+            last_err = e
+
+    return Response(f'Camera unavailable: {last_err}', status=503)
 
 
 @app.route('/control/<token>')
