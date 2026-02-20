@@ -1143,10 +1143,12 @@ def _timelapse_dates():
 
 def _day_weather_summary(date_str):
     """
-    Read snapshots.csv and compute a one-day weather/pump summary.
+    Read snapshots.csv and compute a one-day weather summary.
     Returns a dict or None if no data.
     """
     import csv as _csv
+    from datetime import date as _date, datetime as _datetime
+    from zoneinfo import ZoneInfo
     path = 'snapshots.csv'
     if not os.path.exists(path):
         return None
@@ -1159,24 +1161,53 @@ def _day_weather_summary(date_str):
         def floats(col):
             return [float(r[col]) for r in rows if r.get(col) not in ('', None)]
 
-        out_temps   = floats('outdoor_temp_f')
-        in_temps    = floats('indoor_temp_f')
-        humidity    = floats('outdoor_humidity')
-        wind_gusts  = floats('wind_gust_mph')
-        tank        = floats('tank_gallons')
-        pump_secs   = floats('pressure_high_seconds')
-        gal_pumped  = floats('estimated_gallons_pumped')
+        out_temps  = floats('outdoor_temp_f')
+        humidity   = floats('outdoor_humidity')
+        wind_gusts = floats('wind_gust_mph')
+
+        # Sunset time for this date
+        sunset_str = None
+        try:
+            from astral import LocationInfo
+            from astral.sun import sun
+            tz = ZoneInfo('America/Los_Angeles')
+            loc = LocationInfo('Newport, OR', 'Oregon', 'America/Los_Angeles', 44.6368, -124.0535)
+            s = sun(loc.observer, date=_date.fromisoformat(date_str), tzinfo=tz)
+            sunset_str = s['sunset'].strftime('%-I:%M %p')
+        except Exception:
+            pass
+
+        # Outdoor temp from the snapshot closest to sunset
+        sunset_temp = None
+        try:
+            from astral import LocationInfo
+            from astral.sun import sun
+            tz = ZoneInfo('America/Los_Angeles')
+            loc = LocationInfo('Newport, OR', 'Oregon', 'America/Los_Angeles', 44.6368, -124.0535)
+            sunset_dt = sun(loc.observer, date=_date.fromisoformat(date_str), tzinfo=tz)['sunset']
+            best, best_diff = None, float('inf')
+            for r in rows:
+                try:
+                    ts = _datetime.fromisoformat(r['timestamp'])
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=tz)
+                    diff = abs((ts - sunset_dt).total_seconds())
+                    if diff < best_diff and r.get('outdoor_temp_f') not in ('', None):
+                        best_diff, best = diff, r
+                except Exception:
+                    continue
+            if best:
+                sunset_temp = f"{float(best['outdoor_temp_f']):.0f}"
+        except Exception:
+            pass
 
         return {
+            'sunset':       sunset_str,
             'out_temp_lo':  f"{min(out_temps):.0f}" if out_temps else None,
             'out_temp_hi':  f"{max(out_temps):.0f}" if out_temps else None,
-            'in_temp_avg':  f"{sum(in_temps)/len(in_temps):.0f}" if in_temps else None,
+            'sunset_temp':  sunset_temp,
             'humidity_avg': f"{sum(humidity)/len(humidity):.0f}" if humidity else None,
             'wind_gust':    f"{max(wind_gusts):.0f}" if wind_gusts else None,
-            'tank_lo':      f"{min(tank):.0f}" if tank else None,
-            'tank_hi':      f"{max(tank):.0f}" if tank else None,
-            'pump_min':     f"{sum(pump_secs)/60:.0f}" if pump_secs else None,
-            'gal_pumped':   f"{sum(gal_pumped):.0f}" if gal_pumped else None,
         }
     except Exception:
         return None
@@ -1239,20 +1270,26 @@ def timelapse_view(date_or_file):
         wx_html = f"""
         <div class="weather">
           <div class="wx-group">
-            {stat('Outdoor', f"{wx['out_temp_lo']}–{wx['out_temp_hi']}", '°F') if wx['out_temp_lo'] else ''}
-            {stat('Indoor',  wx['in_temp_avg'],   '°F')}
-            {stat('Humidity',wx['humidity_avg'],  '%')}
-            {stat('Wind gust',wx['wind_gust'],    ' mph')}
-          </div>
-          <div class="wx-group">
-            {stat('Tank',    f"{wx['tank_lo']}–{wx['tank_hi']}", ' gal') if wx['tank_lo'] else ''}
-            {stat('Pumped',  wx['gal_pumped'],    ' gal')}
-            {stat('Pump on', wx['pump_min'],      ' min')}
+            {stat('Sunset',     wx['sunset'],      '')}
+            {stat('Temp range', f"{wx['out_temp_lo']}–{wx['out_temp_hi']}", '°F') if wx['out_temp_lo'] else ''}
+            {stat('At sunset',  wx['sunset_temp'], '°F')}
+            {stat('Humidity',   wx['humidity_avg'],'%')}
+            {stat('Wind gust',  wx['wind_gust'],   ' mph')}
           </div>
         </div>"""
 
     video_html = (
-        f'<video src="/timelapse/{date_str}.mp4" controls autoplay muted loop></video>'
+        f'<video id="vid" src="/timelapse/{date_str}.mp4" controls autoplay muted loop></video>'
+        f'<div class="speed-btns">'
+        f'<span class="speed-lbl">Speed:</span>'
+        f'<button class="speed-btn" data-rate="0.25">&#188;x</button>'
+        f'<button class="speed-btn" data-rate="0.5">&#189;x</button>'
+        f'<button class="speed-btn active" data-rate="1">1x</button>'
+        f'<button class="speed-btn" data-rate="2">2x</button>'
+        f'<button class="speed-btn" data-rate="4">4x</button>'
+        f'<button class="speed-btn" data-rate="8">8x</button>'
+        f'<button id="pause-btn" class="speed-btn pause-btn">&#9646;&#9646; Pause</button>'
+        f'</div>'
         if has_video else
         '<p class="no-video">No timelapse recorded for this date.</p>'
     )
@@ -1298,6 +1335,16 @@ def timelapse_view(date_or_file):
     .stat {{ display:flex; flex-direction:column; min-width:80px; }}
     .lbl  {{ font-size:0.75em; color:#888; text-transform:uppercase; }}
     .val  {{ font-size:1.1em; color:#e0e0e0; }}
+    .speed-btns {{ max-width:960px; display:flex; align-items:center;
+                   gap:6px; margin:8px 0; }}
+    .speed-lbl  {{ color:#888; font-size:0.85em; margin-right:4px; }}
+    .speed-btn  {{ background:#2a2a2a; color:#4CAF50; border:1px solid #444;
+                   padding:4px 10px; border-radius:4px; cursor:pointer;
+                   font-family:monospace; font-size:0.9em; }}
+    .speed-btn:hover  {{ background:#333; }}
+    .speed-btn.active {{ background:#4CAF50; color:#000; border-color:#4CAF50; }}
+    .pause-btn        {{ margin-left:10px; color:#aaa; border-color:#555; }}
+    .pause-btn.paused {{ background:#e57373; color:#000; border-color:#e57373; }}
     details {{ max-width:960px; margin-top:16px; }}
     summary {{ cursor:pointer; color:#4CAF50; }}
     ul {{ list-style:none; padding:0; margin:8px 0; line-height:2; }}
@@ -1318,6 +1365,31 @@ def timelapse_view(date_or_file):
     <summary>All timelapses ({len(dates)})</summary>
     <ul>{list_items}</ul>
   </details>
+  <script>
+    const vid = document.getElementById('vid');
+    document.querySelectorAll('.speed-btn[data-rate]').forEach(btn => {{
+      btn.addEventListener('click', () => {{
+        if (!vid) return;
+        vid.playbackRate = parseFloat(btn.dataset.rate);
+        document.querySelectorAll('.speed-btn[data-rate]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      }});
+    }});
+    const pauseBtn = document.getElementById('pause-btn');
+    if (pauseBtn && vid) {{
+      pauseBtn.addEventListener('click', () => {{
+        if (vid.paused) {{
+          vid.play();
+          pauseBtn.innerHTML = '&#9646;&#9646; Pause';
+          pauseBtn.classList.remove('paused');
+        }} else {{
+          vid.pause();
+          pauseBtn.innerHTML = '&#9654; Play';
+          pauseBtn.classList.add('paused');
+        }}
+      }});
+    }}
+  </script>
 </body>
 </html>"""
     return Response(html, mimetype='text/html')

@@ -19,6 +19,8 @@ Simplified event-based monitoring system for remote water treatment facilities. 
 - **Remote Control via Email**: One-click relay control buttons in email alerts using secret URLs
 - **Push Notifications**: Real-time phone alerts via ntfy.sh for critical tank events
 - **E-Paper Display**: Remote 2.13" e-ink display showing tank status, water usage graph, and occupancy info via partial refresh daemon
+- **Camera Snapshot**: Live JPEG proxy at `/sunset` from an Amcrest IP camera via RTSP/HTTPS with digest auth; optional contrast enhancement
+- **Sunset Timelapse**: Daily MP4 timelapse of the 2-hour sunset window, assembled from RTSP frames in RAM and served at `/timelapse` with prev/next navigation, weather summary, and variable playback speed controls
 
 ## Installation
 ```bash
@@ -42,24 +44,26 @@ Install and enable the services to run automatically on boot:
 # Install services
 ./install-services.sh
 
-# Enable and start both services
-sudo systemctl enable --now pumphouse-monitor pumphouse-web
+# Enable and start all services
+sudo systemctl enable --now pumphouse-monitor pumphouse-web pumphouse-timelapse
 
 # Check status
 sudo systemctl status pumphouse-monitor
 sudo systemctl status pumphouse-web
+sudo systemctl status pumphouse-timelapse
 
 # View live logs
 sudo journalctl -u pumphouse-monitor -f
 sudo journalctl -u pumphouse-web -f
+sudo journalctl -u pumphouse-timelapse -f
 
 # Stop/start/restart
 sudo systemctl stop pumphouse-monitor
 sudo systemctl start pumphouse-monitor
 sudo systemctl restart pumphouse-web
 
-# Restart both services (useful after code changes)
-sudo systemctl restart pumphouse-monitor pumphouse-web
+# Restart all services (useful after code changes)
+sudo systemctl restart pumphouse-monitor pumphouse-web pumphouse-timelapse
 ```
 
 **After making code changes:**
@@ -363,9 +367,11 @@ Receive rich HTML email alerts with full system status, tank charts, and sensor 
    ```bash
    nano ~/.config/pumphouse/secrets.conf
    ```
-   Add your App Password:
+   Add your App Password and (if using the camera) camera credentials:
    ```
    EMAIL_SMTP_PASSWORD=your-16-char-app-password
+   CAMERA_USER=guest
+   CAMERA_PASS=your-camera-password
    ```
 
 4. **Configure email settings in monitor/config.py:**
@@ -713,6 +719,8 @@ pumphouse/
 │   ├── uninstall_service.sh   # Removal script
 │   ├── lib.tgz               # Waveshare EPD driver libraries
 │   └── README.md              # Display daemon documentation
+├── sunset_timelapse.py        # Sunset timelapse capture daemon
+├── pumphouse-timelapse.service # Systemd service for timelapse daemon
 ├── generate_cert.sh           # SSL certificate generator
 ├── cert.pem                   # SSL certificate (generated)
 ├── key.pem                    # SSL private key (generated)
@@ -741,7 +749,85 @@ The simplified architecture makes it easy to add:
 - Additional sensors (flow meter, leak detection)
 - Web Push notifications (notification infrastructure is already modular)
 
-## System Health Monitoring
+## Camera Snapshot
+
+The `/sunset` route proxies a live JPEG from the Amcrest IP camera at `192.168.1.81` using HTTP Digest authentication over HTTPS (self-signed cert).
+
+- **URL**: `https://your-pi:6443/sunset`
+- **No auth required** on the route itself
+- **Optional enhancement**: `?enhance=1` applies a percentile stretch on the LAB L channel for better exposure in low light
+- **Retry logic**: 3 attempts with 2s delay to handle camera throttling
+- **Credentials**: set `CAMERA_USER` and `CAMERA_PASS` in `~/.config/pumphouse/secrets.conf`
+
+```ini
+CAMERA_USER=guest
+CAMERA_PASS=your-camera-password
+```
+
+## Sunset Timelapse
+
+A dedicated daemon (`sunset_timelapse.py`) captures RTSP frames around sunset each day and assembles them into an H.264 MP4, served at `/timelapse`.
+
+### How it works
+
+1. Calculates sunset time for Newport, OR using the `astral` library
+2. Wakes up `WINDOW_BEFORE` minutes before sunset, opens the RTSP stream via ffmpeg
+3. Grabs one frame every `FRAME_INTERVAL / SLOWDOWN_FACTOR` seconds for the full window
+4. Every `PREVIEW_INTERVAL` seconds, assembles a partial MP4 in a background thread so the video is watchable mid-capture
+5. After ffmpeg finishes, assembles the final MP4 and deletes the frames
+6. **Frames are written to `/tmp` (RAM / tmpfs)** — the SD card only sees the assembled MP4s
+
+### Configuration
+
+At the top of `sunset_timelapse.py`:
+
+```python
+FRAME_INTERVAL   = 20    # base seconds between captured frames
+SLOWDOWN_FACTOR  = 4     # divide interval by this → more frames, slower playback
+                         # e.g. factor=4, interval=20 → 5s/frame → 1440 frames/2hr → 60s at 24fps
+WINDOW_BEFORE    = 60    # minutes before sunset to start capture
+WINDOW_AFTER     = 60    # minutes after sunset to stop capture
+RETENTION_DAYS   = 30    # days of MP4s to keep
+OUTPUT_FPS       = 24    # output video frame rate
+PREVIEW_INTERVAL = 600   # seconds between partial preview assemblies (10 min)
+```
+
+Adjust `SLOWDOWN_FACTOR` and `WINDOW_BEFORE`/`WINDOW_AFTER` to taste, then `sudo systemctl restart pumphouse-timelapse`.
+
+### SD card impact
+
+| Setting | Effective interval | Frames/2hr | SD writes/day |
+|---|---|---|---|
+| factor=4 (default) | 5s | 1,440 | ~200 MB (MP4s only) |
+| factor=2 | 10s | 720 | ~100 MB |
+| factor=1 | 20s | 360 | ~50 MB |
+
+Frames live in RAM (`/tmp/timelapse-frames/`) and are deleted after assembly — they never touch the SD card.
+
+### Installation
+
+```bash
+# Install and enable the timelapse service
+sudo cp pumphouse-timelapse.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now pumphouse-timelapse
+
+# Check status and logs
+sudo systemctl status pumphouse-timelapse
+sudo journalctl -u pumphouse-timelapse -f
+tail -f /home/pi/timelapses/timelapse.log
+```
+
+### Web interface (`/timelapse`)
+
+- Redirects to the most recent date
+- `← older` / `newer →` navigation between days
+- Weather strip: sunset time, day temp range, temp at sunset, humidity, max wind gust
+- Playback speed buttons: **¼x · ½x · 1x · 2x · 4x · 8x** and a **Pause** toggle
+- "All timelapses" expandable list
+- During active capture: the preview MP4 updates every 10 minutes
+
+
 
 The system includes health monitoring to help diagnose unexpected reboots and system issues. See [SYSTEM_HEALTH.md](SYSTEM_HEALTH.md) for complete documentation.
 

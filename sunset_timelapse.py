@@ -14,6 +14,7 @@ import time
 import logging
 import subprocess
 import shutil
+import threading
 from datetime import datetime, timedelta, date
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -31,7 +32,9 @@ CAMERA_PORT    = 554
 
 TIMELAPSE_DIR  = Path("/home/pi/timelapses")
 
-FRAME_INTERVAL   = 20    # seconds between frames (20s → 360 frames/2hr → 15s at 24fps)
+FRAME_INTERVAL   = 20    # base seconds between captured frames
+SLOWDOWN_FACTOR  = 4     # capture this many times more frames (divide interval by this)
+                         # e.g. factor=4, interval=20 → 5s/frame → 1440 frames/2hr → 60s at 24fps
 WINDOW_BEFORE    = 60    # minutes before sunset to start capture
 WINDOW_AFTER     = 60    # minutes after sunset to stop capture
 RETENTION_DAYS   = 30    # days of MP4s to keep
@@ -90,8 +93,9 @@ def assemble_timelapse(frames_dir, output_path, fps=OUTPUT_FPS):
     """
     Assemble all JPEG frames in frames_dir into an H.264 MP4.
     Skips the last frame (may still be mid-write by ffmpeg).
-    Writes to a temp file then atomically renames so the web server
-    never serves a partially-written video. Returns True on success.
+    Uses a thread-unique temp file so concurrent calls don't collide;
+    atomically renames on success so the web server never serves a
+    partially-written video. Returns True on success.
     """
     frames = sorted(frames_dir.glob('frame_*.jpg'))
     n = len(frames) - 1   # exclude the frame currently being written
@@ -99,7 +103,7 @@ def assemble_timelapse(frames_dir, output_path, fps=OUTPUT_FPS):
         return False
 
     pattern = str(frames_dir / 'frame_%04d.jpg')
-    tmp = output_path.with_suffix('.tmp.mp4')
+    tmp = output_path.with_suffix(f'.tmp{threading.get_ident()}.mp4')
     cmd = [
         'ffmpeg', '-y',
         '-framerate', str(fps),
@@ -135,8 +139,8 @@ def cleanup_old(retention_days):
 def run_todays_timelapse():
     """
     Capture frames via RTSP for the sunset window, assembling a preview
-    MP4 every PREVIEW_INTERVAL seconds so it's watchable during capture.
-    Final assembly runs after ffmpeg exits.
+    MP4 every PREVIEW_INTERVAL seconds (in a background thread so frame
+    capture is never paused). Final assembly runs after ffmpeg exits.
     """
     tz = ZoneInfo(LOCATION_TZ)
     now = datetime.now(tz)
@@ -161,34 +165,44 @@ def run_todays_timelapse():
     )
 
     date_str   = now.strftime('%Y-%m-%d')
-    frames_dir = TIMELAPSE_DIR / 'frames' / date_str
+    frames_dir = Path('/tmp') / 'timelapse-frames' / date_str  # tmpfs → no SD wear
     output     = TIMELAPSE_DIR / f'{date_str}.mp4'
     frames_dir.mkdir(parents=True, exist_ok=True)
 
-    expected = duration // FRAME_INTERVAL
-    log.info(f"Capturing ~{expected} frames (1/{FRAME_INTERVAL}s) for {duration//60} min")
+    effective_interval = max(1, FRAME_INTERVAL // SLOWDOWN_FACTOR)
+    expected = duration // effective_interval
+    log.info(f"Capturing ~{expected} frames (1/{effective_interval}s, "
+             f"{SLOWDOWN_FACTOR}x slowdown) for {duration//60} min")
 
     cmd = [
         'ffmpeg', '-y',
         '-rtsp_transport', 'tcp',
         '-i', rtsp_url,
-        '-vf', f'fps=1/{FRAME_INTERVAL}',
+        '-vf', f'fps=1/{effective_interval}',
         '-t', str(duration),
         '-q:v', '2',
         str(frames_dir / 'frame_%04d.jpg'),
     ]
 
+    def _run_preview():
+        frames = sorted(frames_dir.glob('frame_*.jpg'))
+        log.info(f"Preview assembly ({len(frames)} frames so far) …")
+        assemble_timelapse(frames_dir, output)
+
+    preview_threads = []
+
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         next_preview = time.time() + PREVIEW_INTERVAL
 
-        # Poll until ffmpeg finishes, assembling previews along the way
+        # Poll until ffmpeg finishes; each preview runs in its own thread
+        # using a unique temp file, so triggers are never skipped
         while proc.poll() is None:
             time.sleep(5)
             if time.time() >= next_preview:
-                frames = sorted(frames_dir.glob('frame_*.jpg'))
-                log.info(f"Preview assembly ({len(frames)} frames so far) …")
-                assemble_timelapse(frames_dir, output)
+                t = threading.Thread(target=_run_preview, daemon=True)
+                t.start()
+                preview_threads.append(t)
                 next_preview = time.time() + PREVIEW_INTERVAL
 
         exit_code = proc.returncode
@@ -199,12 +213,17 @@ def run_todays_timelapse():
             log.error("Too few frames — skipping final assembly")
             return
 
-        # Final assembly includes all frames
+        # Final assembly (main thread); join previews first so cleanup
+        # doesn't delete frames out from under a still-running thread
+        for t in preview_threads:
+            t.join(timeout=120)
         log.info("Final assembly …")
         assemble_timelapse(frames_dir, output)
         cleanup_old(RETENTION_DAYS)
 
     finally:
+        for t in preview_threads:
+            t.join(timeout=120)
         if frames_dir.exists():
             shutil.rmtree(frames_dir)
             log.info("Cleaned up frames")
@@ -215,11 +234,12 @@ def run_todays_timelapse():
 # ---------------------------------------------------------------------------
 def main():
     TIMELAPSE_DIR.mkdir(parents=True, exist_ok=True)
-    (TIMELAPSE_DIR / 'frames').mkdir(exist_ok=True)
 
     log.info(f"Sunset timelapse daemon starting")
     log.info(f"Location : {LOCATION_NAME}  ({LOCATION_LAT}N, {abs(LOCATION_LON)}W)")
-    log.info(f"Interval : {FRAME_INTERVAL}s  |  window ±{WINDOW_BEFORE} min  |  keep {RETENTION_DAYS} days")
+    effective_interval = max(1, FRAME_INTERVAL // SLOWDOWN_FACTOR)
+    log.info(f"Interval : {FRAME_INTERVAL}s / {SLOWDOWN_FACTOR}x = {effective_interval}s effective  |  "
+             f"window ±{WINDOW_BEFORE} min  |  keep {RETENTION_DAYS} days")
     log.info(f"Output   : {TIMELAPSE_DIR}")
 
     tz = ZoneInfo(LOCATION_TZ)
