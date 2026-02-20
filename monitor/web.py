@@ -1172,7 +1172,7 @@ def _open_meteo_weather(date_str):
 
     url = (
         'https://archive-api.open-meteo.com/v1/archive'
-        f'?latitude=44.63&longitude=-124.05'
+        f'?latitude=44.6368&longitude=-124.0535'
         f'&start_date={date_str}&end_date={date_str}'
         '&daily=weather_code,temperature_2m_max,temperature_2m_min,'
         'precipitation_sum,wind_speed_10m_max,wind_speed_10m_mean,'
@@ -1376,12 +1376,19 @@ def timelapse_view(date_or_file):
         elif om.get('wind_max'):
             wind_str = om['wind_max']
         radiation_str = f"{om['radiation']} MJ/m²" if om.get('radiation') else None
+        # Prefer local sensor hi/lo (accurate); fall back to reanalysis model
+        if wx and wx.get('out_temp_hi') and wx.get('out_temp_lo'):
+            hi_lo_str = f"{wx['out_temp_hi']}–{wx['out_temp_lo']}"
+        elif om.get('temp_max') and om.get('temp_min'):
+            hi_lo_str = f"{om['temp_max']}–{om['temp_min']}"
+        else:
+            hi_lo_str = None
         wx_html = f"""
         <div class="weather">
           <div class="wx-desc">{om['weather_desc']}</div>
           <div class="wx-group">
             {stat('Sunset',    om['sunset'],  '')}
-            {stat('High/Low',  f"{om['temp_max']}–{om['temp_min']}", '°F')}
+            {stat('High/Low',  hi_lo_str,     '°F')}
             {stat('Rain',      precip_str,    '')}
             {stat('Wind',      wind_str,      ' mph')}
             {stat('Cloud',     om['cloud'],   '%')}
