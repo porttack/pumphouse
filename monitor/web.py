@@ -1153,13 +1153,21 @@ _WMO = {
 
 def _open_meteo_weather(date_str):
     """
-    Fetch daily weather from the Open-Meteo Archive API for the given date.
-    Results are cached in WEATHER_CACHE_DIR (archive data never changes).
-    Returns a dict or None if unavailable (e.g. date too recent).
+    Fetch daily weather for date_str.
+
+    Stage 1 – NWS KONP (Newport Municipal Airport): actual station observations.
+              Provides weather description, precip, wind, humidity.
+    Stage 2 – Open-Meteo ERA5: supplements with cloud cover and radiation;
+              used as full fallback when NWS data is unavailable (date too old,
+              network error, etc.).
+
+    Results are cached; archive data never changes once a day is complete.
     """
     import json as _json
     import urllib.request as _ureq
-    from datetime import datetime as _dt
+    import urllib.parse as _uparse
+    from datetime import date as _date, datetime as _dt
+    from zoneinfo import ZoneInfo as _ZI
 
     os.makedirs(WEATHER_CACHE_DIR, exist_ok=True)
     cache = os.path.join(WEATHER_CACHE_DIR, f'{date_str}.json')
@@ -1170,52 +1178,116 @@ def _open_meteo_weather(date_str):
         except Exception:
             pass
 
-    url = (
-        'https://archive-api.open-meteo.com/v1/archive'
-        f'?latitude=44.6368&longitude=-124.0535'
-        f'&start_date={date_str}&end_date={date_str}'
-        '&daily=weather_code,temperature_2m_max,temperature_2m_min,'
-        'precipitation_sum,wind_speed_10m_max,wind_speed_10m_mean,'
-        'cloud_cover_mean,shortwave_radiation_sum,sunrise,sunset'
-        '&temperature_unit=fahrenheit&wind_speed_unit=mph'
-        '&precipitation_unit=inch&timezone=America%2FLos_Angeles'
-    )
-    try:
-        with _ureq.urlopen(url, timeout=10) as resp:
-            data = _json.loads(resp.read())
-        d = data.get('daily', {})
-        if not d.get('time'):
-            return None
+    tz = _ZI('America/Los_Angeles')
+    result = {}
 
-        def _fmt_time(s):
-            # "2026-02-15T17:44" → "5:44 PM"
-            try:
-                return _dt.strptime(s, '%Y-%m-%dT%H:%M').strftime('%-I:%M %p')
-            except Exception:
-                return None
+    # ------------------------------------------------------------------
+    # Stage 1: NWS KONP – actual station observations
+    # ------------------------------------------------------------------
+    try:
+        day   = _date.fromisoformat(date_str)
+        start = _dt(day.year, day.month, day.day,  0,  0,  0, tzinfo=tz).isoformat()
+        end   = _dt(day.year, day.month, day.day, 23, 59, 59, tzinfo=tz).isoformat()
+        url   = ('https://api.weather.gov/stations/KONP/observations'
+                 f'?start={_uparse.quote(start)}&end={_uparse.quote(end)}')
+        req   = _ureq.Request(url, headers={
+            'User-Agent': 'pumphouse-monitor/1.0',
+            'Accept':     'application/geo+json',
+        })
+        with _ureq.urlopen(req, timeout=15) as resp:
+            features = _json.loads(resp.read()).get('features', [])
+
+        temps, winds, humidities, descs = [], [], [], []
+        precip_total = 0.0
+        for f in features:
+            p = f.get('properties', {})
+            t = p.get('temperature', {}).get('value')
+            if t is not None:
+                temps.append(t * 9/5 + 32)                   # °C → °F
+            ws = p.get('windSpeed', {}).get('value')          # km/h
+            wg = p.get('windGust',  {}).get('value')          # km/h
+            w  = max((v for v in [ws, wg] if v is not None), default=None)
+            if w is not None:
+                winds.append(w * 0.621371)                    # km/h → mph
+            h = p.get('relativeHumidity', {}).get('value')
+            if h is not None:
+                humidities.append(h)
+            prec = p.get('precipitationLastHour', {}).get('value')
+            if prec is not None:
+                precip_total += prec * 39.3701                # m → inches
+            desc = p.get('textDescription', '').strip()
+            if desc:
+                descs.append(desc)
+
+        if temps:
+            result = {
+                'source':       'nws',
+                'weather_desc': descs[len(descs) // 2] if descs else None,
+                'temp_max':     f'{max(temps):.0f}',
+                'temp_min':     f'{min(temps):.0f}',
+                'precip':       f'{precip_total:.2f}',
+                'wind_max':     f'{max(winds):.0f}'                    if winds      else None,
+                'wind_avg':     f'{sum(winds)/len(winds):.0f}'         if winds      else None,
+                'humidity':     f'{sum(humidities)/len(humidities):.0f}' if humidities else None,
+            }
+    except Exception:
+        pass  # network error or date outside NWS retention → fall through
+
+    # ------------------------------------------------------------------
+    # Stage 2: Open-Meteo ERA5 – cloud cover, radiation, times;
+    #          full fallback if NWS returned nothing.
+    # ------------------------------------------------------------------
+    try:
+        url = (
+            'https://archive-api.open-meteo.com/v1/archive'
+            '?latitude=44.6368&longitude=-124.0535'
+            f'&start_date={date_str}&end_date={date_str}'
+            '&daily=weather_code,temperature_2m_max,temperature_2m_min,'
+            'precipitation_sum,wind_speed_10m_max,wind_speed_10m_mean,'
+            'cloud_cover_mean,shortwave_radiation_sum,sunrise,sunset'
+            '&temperature_unit=fahrenheit&wind_speed_unit=mph'
+            '&precipitation_unit=inch&timezone=America%2FLos_Angeles'
+        )
+        with _ureq.urlopen(url, timeout=10) as resp:
+            d = _json.loads(resp.read()).get('daily', {})
 
         def _safe(key, fmt='{:.0f}'):
             v = d.get(key, [None])[0]
             return fmt.format(v) if v is not None else None
 
-        code = d['weather_code'][0]
-        result = {
-            'weather_code': code,
-            'weather_desc': _WMO.get(code, f'Code {code}'),
-            'temp_max':     _safe('temperature_2m_max'),
-            'temp_min':     _safe('temperature_2m_min'),
-            'precip':       _safe('precipitation_sum', '{:.2f}'),
-            'wind_max':     _safe('wind_speed_10m_max'),
-            'wind_avg':     _safe('wind_speed_10m_mean'),
-            'cloud':        _safe('cloud_cover_mean'),
-            'radiation':    _safe('shortwave_radiation_sum', '{:.1f}'),
-            'sunset':       _fmt_time(d['sunset'][0]),
-            'sunrise':      _fmt_time(d['sunrise'][0]),
-        }
+        def _fmt_time(s):
+            try:
+                return _dt.strptime(s, '%Y-%m-%dT%H:%M').strftime('%-I:%M %p')
+            except Exception:
+                return None
+
+        # Always take cloud/radiation/times from ERA5 (NWS doesn't have these)
+        result.setdefault('cloud',    _safe('cloud_cover_mean'))
+        result.setdefault('radiation', _safe('shortwave_radiation_sum', '{:.1f}'))
+        result.setdefault('sunset',   _fmt_time((d.get('sunset')  or [None])[0]))
+        result.setdefault('sunrise',  _fmt_time((d.get('sunrise') or [None])[0]))
+
+        if not result.get('source'):
+            # Full ERA5 fallback – NWS had no data for this date
+            raw_code = d.get('weather_code', [None])[0]
+            code = int(raw_code) if raw_code is not None else None
+            result.update({
+                'source':       'era5',
+                'weather_code': code,
+                'weather_desc': _WMO.get(code, f'Code {code}') if code is not None else None,
+                'temp_max':     _safe('temperature_2m_max'),
+                'temp_min':     _safe('temperature_2m_min'),
+                'precip':       _safe('precipitation_sum', '{:.2f}'),
+                'wind_max':     _safe('wind_speed_10m_max'),
+                'wind_avg':     _safe('wind_speed_10m_mean'),
+            })
+    except Exception:
+        pass
+
+    if result:
         open(cache, 'w').write(_json.dumps(result))
         return result
-    except Exception:
-        return None
+    return None
 
 
 def _timelapse_dates():
@@ -1369,7 +1441,8 @@ def timelapse_view(date_or_file):
     if om:
         precip_val = float(om['precip']) if om.get('precip') else 0
         precip_str = f'{precip_val:.2f}"' if precip_val > 0 else '—'
-        humidity = wx.get('humidity_avg') if wx else None
+        # Local sensor humidity preferred; NWS station as fallback
+        humidity = (wx.get('humidity_avg') if wx else None) or om.get('humidity')
         wind_str = None
         if om.get('wind_avg') and om.get('wind_max'):
             wind_str = f"{om['wind_avg']} avg / {om['wind_max']} max"
@@ -1383,9 +1456,10 @@ def timelapse_view(date_or_file):
             hi_lo_str = f"{om['temp_max']}–{om['temp_min']}"
         else:
             hi_lo_str = None
+        desc_html = f'<div class="wx-desc">{om["weather_desc"]}</div>' if om.get('weather_desc') else ''
         wx_html = f"""
         <div class="weather">
-          <div class="wx-desc">{om['weather_desc']}</div>
+          {desc_html}
           <div class="wx-group">
             {stat('Sunset',    om['sunset'],  '')}
             {stat('High/Low',  hi_lo_str,     '°F')}
