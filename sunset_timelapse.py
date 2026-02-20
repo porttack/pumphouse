@@ -39,6 +39,7 @@ WINDOW_BEFORE    = 60    # minutes before sunset to start capture
 WINDOW_AFTER     = 60    # minutes after sunset to stop capture
 RETENTION_DAYS   = 30    # days of MP4s to keep
 OUTPUT_FPS       = 24    # output video frame rate
+OUTPUT_CRF       = 35    # H.264 quality (lower = better; 23 = default, 35 = ~40x smaller)
 PREVIEW_INTERVAL = 600   # seconds between partial preview assemblies (10 min)
 
 # ---------------------------------------------------------------------------
@@ -111,7 +112,7 @@ def assemble_timelapse(frames_dir, output_path, fps=OUTPUT_FPS):
         '-frames:v', str(n),   # only the completed frames
         '-c:v', 'libx264',
         '-pix_fmt', 'yuv420p',
-        '-crf', '23',
+        '-crf', str(OUTPUT_CRF),
         '-movflags', '+faststart',
         str(tmp),
     ]
