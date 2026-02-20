@@ -31,11 +31,12 @@ CAMERA_PORT    = 554
 
 TIMELAPSE_DIR  = Path("/home/pi/timelapses")
 
-FRAME_INTERVAL = 20    # seconds between frames (20s → 360 frames/2hr → 15s at 24fps)
-WINDOW_BEFORE  = 60    # minutes before sunset to start capture
-WINDOW_AFTER   = 60    # minutes after sunset to stop capture
-RETENTION_DAYS = 30    # days of MP4s to keep
-OUTPUT_FPS     = 24    # output video frame rate
+FRAME_INTERVAL   = 20    # seconds between frames (20s → 360 frames/2hr → 15s at 24fps)
+WINDOW_BEFORE    = 60    # minutes before sunset to start capture
+WINDOW_AFTER     = 60    # minutes after sunset to stop capture
+RETENTION_DAYS   = 30    # days of MP4s to keep
+OUTPUT_FPS       = 24    # output video frame rate
+PREVIEW_INTERVAL = 600   # seconds between partial preview assemblies (10 min)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -85,54 +86,40 @@ def get_sunset(for_date=None):
     return s['sunset']
 
 
-def capture_frames(rtsp_url, frames_dir, duration_seconds, interval_seconds):
-    """
-    Pull frames from the RTSP stream at interval_seconds for duration_seconds.
-    Returns the number of frames written.
-    """
-    frames_dir.mkdir(parents=True, exist_ok=True)
-    pattern = str(frames_dir / 'frame_%04d.jpg')
-
-    expected = duration_seconds // interval_seconds
-    log.info(f"Capturing ~{expected} frames (1/{interval_seconds}s) for {duration_seconds//60} min")
-
-    cmd = [
-        'ffmpeg', '-y',
-        '-rtsp_transport', 'tcp',
-        '-i', rtsp_url,
-        '-vf', f'fps=1/{interval_seconds}',
-        '-t', str(duration_seconds),
-        '-q:v', '2',        # JPEG quality (1=best, 31=worst)
-        pattern,
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    frames = sorted(frames_dir.glob('frame_*.jpg'))
-    log.info(f"Captured {len(frames)} frames (ffmpeg exit={result.returncode})")
-    if result.returncode != 0:
-        log.warning(f"ffmpeg stderr tail: {result.stderr[-400:]}")
-    return len(frames)
-
-
 def assemble_timelapse(frames_dir, output_path, fps=OUTPUT_FPS):
-    """Assemble JPEG frames into an H.264 MP4. Returns True on success."""
+    """
+    Assemble all JPEG frames in frames_dir into an H.264 MP4.
+    Skips the last frame (may still be mid-write by ffmpeg).
+    Writes to a temp file then atomically renames so the web server
+    never serves a partially-written video. Returns True on success.
+    """
+    frames = sorted(frames_dir.glob('frame_*.jpg'))
+    n = len(frames) - 1   # exclude the frame currently being written
+    if n < 2:
+        return False
+
     pattern = str(frames_dir / 'frame_%04d.jpg')
+    tmp = output_path.with_suffix('.tmp.mp4')
     cmd = [
         'ffmpeg', '-y',
         '-framerate', str(fps),
         '-i', pattern,
+        '-frames:v', str(n),   # only the completed frames
         '-c:v', 'libx264',
         '-pix_fmt', 'yuv420p',
         '-crf', '23',
         '-movflags', '+faststart',
-        str(output_path),
+        str(tmp),
     ]
-    log.info(f"Assembling → {output_path.name}")
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         log.error(f"Assembly failed: {result.stderr[-400:]}")
+        tmp.unlink(missing_ok=True)
         return False
+    tmp.rename(output_path)
     mb = output_path.stat().st_size / 1024 / 1024
-    log.info(f"Done: {output_path.name} ({mb:.1f} MB)")
+    log.info(f"{'Preview' if n < len(frames) else 'Final'}: "
+             f"{output_path.name} ({n} frames, {mb:.1f} MB)")
     return True
 
 
@@ -146,7 +133,11 @@ def cleanup_old(retention_days):
 
 
 def run_todays_timelapse():
-    """Capture and assemble one day's timelapse. Called at the right time."""
+    """
+    Capture frames via RTSP for the sunset window, assembling a preview
+    MP4 every PREVIEW_INTERVAL seconds so it's watchable during capture.
+    Final assembly runs after ffmpeg exits.
+    """
     tz = ZoneInfo(LOCATION_TZ)
     now = datetime.now(tz)
     sunset = get_sunset(now.date())
@@ -172,14 +163,47 @@ def run_todays_timelapse():
     date_str   = now.strftime('%Y-%m-%d')
     frames_dir = TIMELAPSE_DIR / 'frames' / date_str
     output     = TIMELAPSE_DIR / f'{date_str}.mp4'
+    frames_dir.mkdir(parents=True, exist_ok=True)
+
+    expected = duration // FRAME_INTERVAL
+    log.info(f"Capturing ~{expected} frames (1/{FRAME_INTERVAL}s) for {duration//60} min")
+
+    cmd = [
+        'ffmpeg', '-y',
+        '-rtsp_transport', 'tcp',
+        '-i', rtsp_url,
+        '-vf', f'fps=1/{FRAME_INTERVAL}',
+        '-t', str(duration),
+        '-q:v', '2',
+        str(frames_dir / 'frame_%04d.jpg'),
+    ]
 
     try:
-        n = capture_frames(rtsp_url, frames_dir, duration, FRAME_INTERVAL)
-        if n < 5:
-            log.error(f"Only {n} frames — skipping assembly")
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        next_preview = time.time() + PREVIEW_INTERVAL
+
+        # Poll until ffmpeg finishes, assembling previews along the way
+        while proc.poll() is None:
+            time.sleep(5)
+            if time.time() >= next_preview:
+                frames = sorted(frames_dir.glob('frame_*.jpg'))
+                log.info(f"Preview assembly ({len(frames)} frames so far) …")
+                assemble_timelapse(frames_dir, output)
+                next_preview = time.time() + PREVIEW_INTERVAL
+
+        exit_code = proc.returncode
+        frames = sorted(frames_dir.glob('frame_*.jpg'))
+        log.info(f"Capture done: {len(frames)} frames (ffmpeg exit={exit_code})")
+
+        if len(frames) < 5:
+            log.error("Too few frames — skipping final assembly")
             return
+
+        # Final assembly includes all frames
+        log.info("Final assembly …")
         assemble_timelapse(frames_dir, output)
         cleanup_old(RETENTION_DAYS)
+
     finally:
         if frames_dir.exists():
             shutil.rmtree(frames_dir)
