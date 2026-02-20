@@ -1132,56 +1132,195 @@ def sunset():
 
 TIMELAPSE_DIR = '/home/pi/timelapses'
 
+
+def _timelapse_dates():
+    """Return sorted list of date strings (YYYY-MM-DD) that have MP4 files."""
+    import glob as _glob
+    files = _glob.glob(os.path.join(TIMELAPSE_DIR, '????-??-??.mp4'))
+    dates = sorted([os.path.basename(f)[:-4] for f in files])
+    return dates
+
+
+def _day_weather_summary(date_str):
+    """
+    Read snapshots.csv and compute a one-day weather/pump summary.
+    Returns a dict or None if no data.
+    """
+    import csv as _csv
+    path = 'snapshots.csv'
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            rows = [r for r in _csv.DictReader(f) if r.get('timestamp', '').startswith(date_str)]
+        if not rows:
+            return None
+
+        def floats(col):
+            return [float(r[col]) for r in rows if r.get(col) not in ('', None)]
+
+        out_temps   = floats('outdoor_temp_f')
+        in_temps    = floats('indoor_temp_f')
+        humidity    = floats('outdoor_humidity')
+        wind_gusts  = floats('wind_gust_mph')
+        tank        = floats('tank_gallons')
+        pump_secs   = floats('pressure_high_seconds')
+        gal_pumped  = floats('estimated_gallons_pumped')
+
+        return {
+            'out_temp_lo':  f"{min(out_temps):.0f}" if out_temps else None,
+            'out_temp_hi':  f"{max(out_temps):.0f}" if out_temps else None,
+            'in_temp_avg':  f"{sum(in_temps)/len(in_temps):.0f}" if in_temps else None,
+            'humidity_avg': f"{sum(humidity)/len(humidity):.0f}" if humidity else None,
+            'wind_gust':    f"{max(wind_gusts):.0f}" if wind_gusts else None,
+            'tank_lo':      f"{min(tank):.0f}" if tank else None,
+            'tank_hi':      f"{max(tank):.0f}" if tank else None,
+            'pump_min':     f"{sum(pump_secs)/60:.0f}" if pump_secs else None,
+            'gal_pumped':   f"{sum(gal_pumped):.0f}" if gal_pumped else None,
+        }
+    except Exception:
+        return None
+
+
 @app.route('/timelapse')
 def timelapse_index():
-    """
-    List available sunset timelapses, newest first.
-    Returns an HTML page with links + an embedded player for the latest.
-    Unauthenticated.
-    """
-    import glob as _glob
-    videos = sorted(_glob.glob(os.path.join(TIMELAPSE_DIR, '*.mp4')), reverse=True)
-
-    if not videos:
+    """Redirect to the latest available timelapse date page."""
+    dates = _timelapse_dates()
+    if not dates:
         return Response('No timelapses available yet.', status=404, mimetype='text/plain')
+    from flask import redirect
+    return redirect(f'/timelapse/{dates[-1]}')
 
-    latest = os.path.basename(videos[0])
-    rows = ''.join(
-        f'<li><a href="/timelapse/{os.path.basename(v)}">{os.path.basename(v)}</a>'
-        f' ({os.path.getsize(v)//1024//1024} MB)</li>'
-        for v in videos
+
+@app.route('/timelapse/<date_or_file>')
+def timelapse_view(date_or_file):
+    """
+    YYYY-MM-DD      → HTML viewer page with prev/next nav and weather summary
+    YYYY-MM-DD.mp4  → serve the raw MP4
+    """
+    import re
+    # Raw MP4 request
+    if re.fullmatch(r'\d{4}-\d{2}-\d{2}\.mp4', date_or_file):
+        path = os.path.join(TIMELAPSE_DIR, date_or_file)
+        if not os.path.exists(path):
+            return Response(f'Not found: {date_or_file}', status=404)
+        return send_file(path, mimetype='video/mp4')
+
+    # HTML viewer
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_or_file):
+        return Response('Invalid date', status=400)
+
+    date_str = date_or_file
+    dates    = _timelapse_dates()
+    mp4_path = os.path.join(TIMELAPSE_DIR, f'{date_str}.mp4')
+    has_video = os.path.exists(mp4_path)
+
+    idx  = dates.index(date_str) if date_str in dates else -1
+    prev_date = dates[idx - 1] if idx > 0 else None
+    next_date = dates[idx + 1] if idx >= 0 and idx < len(dates) - 1 else None
+
+    # Human-readable title
+    try:
+        from datetime import date as _date
+        d = _date.fromisoformat(date_str)
+        title_date = d.strftime('%B %-d, %Y')
+    except Exception:
+        title_date = date_str
+
+    wx = _day_weather_summary(date_str)
+
+    def stat(label, val, unit=''):
+        if val is None:
+            return ''
+        return f'<div class="stat"><span class="lbl">{label}</span><span class="val">{val}{unit}</span></div>'
+
+    wx_html = ''
+    if wx:
+        wx_html = f"""
+        <div class="weather">
+          <div class="wx-group">
+            {stat('Outdoor', f"{wx['out_temp_lo']}–{wx['out_temp_hi']}", '°F') if wx['out_temp_lo'] else ''}
+            {stat('Indoor',  wx['in_temp_avg'],   '°F')}
+            {stat('Humidity',wx['humidity_avg'],  '%')}
+            {stat('Wind gust',wx['wind_gust'],    ' mph')}
+          </div>
+          <div class="wx-group">
+            {stat('Tank',    f"{wx['tank_lo']}–{wx['tank_hi']}", ' gal') if wx['tank_lo'] else ''}
+            {stat('Pumped',  wx['gal_pumped'],    ' gal')}
+            {stat('Pump on', wx['pump_min'],      ' min')}
+          </div>
+        </div>"""
+
+    video_html = (
+        f'<video src="/timelapse/{date_str}.mp4" controls autoplay muted loop></video>'
+        if has_video else
+        '<p class="no-video">No timelapse recorded for this date.</p>'
     )
+
+    prev_btn = (f'<a class="nav-btn" href="/timelapse/{prev_date}">&#8592; {prev_date}</a>'
+                if prev_date else '<span class="nav-btn disabled">&#8592; older</span>')
+    next_btn = (f'<a class="nav-btn" href="/timelapse/{next_date}">{next_date} &#8594;</a>'
+                if next_date else '<span class="nav-btn disabled">newer &#8594;</span>')
+
+    # List all dates newest-first
+    list_items = ''.join(
+        f'<li{"  class=\"current\"" if d == date_str else ""}>'
+        f'<a href="/timelapse/{d}">{d}</a></li>'
+        for d in reversed(dates)
+    )
+
     html = f"""<!DOCTYPE html>
 <html>
 <head>
-  <title>Sunset Timelapses</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sunset {title_date}</title>
   <style>
-    body {{ font-family: monospace; background:#1a1a1a; color:#e0e0e0; padding:20px; }}
-    video {{ width:100%; max-width:960px; display:block; margin:20px 0; }}
-    a {{ color:#4CAF50; }}
-    ul {{ line-height:2; }}
+    * {{ box-sizing: border-box; }}
+    body {{ font-family: monospace; background:#1a1a1a; color:#e0e0e0;
+           margin:0; padding:16px; }}
+    h2   {{ margin:0 0 12px; color:#fff; }}
+    video {{ width:100%; max-width:960px; display:block;
+             background:#000; border-radius:4px; }}
+    .no-video {{ color:#888; font-style:italic; }}
+    .nav {{ display:flex; justify-content:space-between; align-items:center;
+            max-width:960px; margin:12px 0; }}
+    .nav h2 {{ flex:1; text-align:center; }}
+    .nav-btn {{ background:#2a2a2a; color:#4CAF50; border:1px solid #444;
+                padding:6px 14px; border-radius:4px; text-decoration:none;
+                white-space:nowrap; }}
+    .nav-btn.disabled {{ color:#555; border-color:#333; cursor:default; }}
+    .nav-btn:hover:not(.disabled) {{ background:#333; }}
+    .weather {{ max-width:960px; background:#222; border:1px solid #333;
+                border-radius:4px; padding:12px 16px; margin:12px 0;
+                display:flex; gap:24px; flex-wrap:wrap; }}
+    .wx-group {{ display:flex; flex-wrap:wrap; gap:12px; }}
+    .stat {{ display:flex; flex-direction:column; min-width:80px; }}
+    .lbl  {{ font-size:0.75em; color:#888; text-transform:uppercase; }}
+    .val  {{ font-size:1.1em; color:#e0e0e0; }}
+    details {{ max-width:960px; margin-top:16px; }}
+    summary {{ cursor:pointer; color:#4CAF50; }}
+    ul {{ list-style:none; padding:0; margin:8px 0; line-height:2; }}
+    li a {{ color:#4CAF50; text-decoration:none; }}
+    li.current a {{ color:#fff; font-weight:bold; }}
+    li a:hover {{ text-decoration:underline; }}
   </style>
 </head>
 <body>
-  <h2>Sunset Timelapses</h2>
-  <video src="/timelapse/{latest}" controls autoplay muted loop></video>
-  <ul>{rows}</ul>
+  <div class="nav">
+    {prev_btn}
+    <h2>Sunset &mdash; {title_date}</h2>
+    {next_btn}
+  </div>
+  {video_html}
+  {wx_html}
+  <details>
+    <summary>All timelapses ({len(dates)})</summary>
+    <ul>{list_items}</ul>
+  </details>
 </body>
 </html>"""
     return Response(html, mimetype='text/html')
-
-
-@app.route('/timelapse/<filename>')
-def timelapse_file(filename):
-    """Serve a specific timelapse MP4 by filename (e.g. 2026-02-19.mp4)."""
-    # Sanitise — only allow YYYY-MM-DD.mp4
-    import re
-    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}\.mp4', filename):
-        return Response('Invalid filename', status=400)
-    path = os.path.join(TIMELAPSE_DIR, filename)
-    if not os.path.exists(path):
-        return Response(f'Not found: {filename}', status=404)
-    return send_file(path, mimetype='video/mp4')
 
 
 @app.route('/control/<token>')
