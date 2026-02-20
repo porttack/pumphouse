@@ -1109,12 +1109,16 @@ def sunset():
                 import numpy as np
                 data = np.frombuffer(content, dtype=np.uint8)
                 img = cv2.imdecode(data, cv2.IMREAD_COLOR)
-                # Convert to LAB, apply CLAHE only to the L (lightness) channel
+                # Percentile stretch on L channel only (no tile artifacts, handles
+                # bright sky + dark foreground by clipping 1st/99th percentile
+                # and stretching to full range)
                 lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
                 l, a, b = cv2.split(lab)
-                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-                l = clahe.apply(l)
-                lab = cv2.merge([l, a, b])
+                l_float = l.astype(np.float32)
+                p_lo, p_hi = np.percentile(l_float, (1, 99))
+                if p_hi > p_lo:
+                    l_float = np.clip((l_float - p_lo) / (p_hi - p_lo) * 255, 0, 255)
+                lab = cv2.merge([l_float.astype(np.uint8), a, b])
                 img = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
                 _, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 85])
                 return Response(buf.tobytes(), status=200, mimetype='image/jpeg')
