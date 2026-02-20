@@ -1130,7 +1130,85 @@ def sunset():
     return Response(f'Camera unavailable: {last_err}', status=503)
 
 
-TIMELAPSE_DIR = '/home/pi/timelapses'
+TIMELAPSE_DIR     = '/home/pi/timelapses'
+WEATHER_CACHE_DIR = os.path.join(TIMELAPSE_DIR, 'weather')
+
+# WMO Weather Interpretation Codes → human description
+_WMO = {
+    0: "Clear sky",
+    1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+    45: "Fog", 48: "Icy fog",
+    51: "Light drizzle", 53: "Drizzle", 55: "Heavy drizzle",
+    56: "Freezing drizzle", 57: "Heavy freezing drizzle",
+    61: "Light rain", 63: "Rain", 65: "Heavy rain",
+    66: "Freezing rain", 67: "Heavy freezing rain",
+    71: "Light snow", 73: "Snow", 75: "Heavy snow",
+    77: "Snow grains",
+    80: "Light showers", 81: "Showers", 82: "Heavy showers",
+    85: "Light snow showers", 86: "Snow showers",
+    95: "Thunderstorm",
+    96: "Thunderstorm w/ hail", 99: "Heavy thunderstorm w/ hail",
+}
+
+
+def _open_meteo_weather(date_str):
+    """
+    Fetch daily weather from the Open-Meteo Archive API for the given date.
+    Results are cached in WEATHER_CACHE_DIR (archive data never changes).
+    Returns a dict or None if unavailable (e.g. date too recent).
+    """
+    import json as _json
+    import urllib.request as _ureq
+    from datetime import datetime as _dt
+
+    os.makedirs(WEATHER_CACHE_DIR, exist_ok=True)
+    cache = os.path.join(WEATHER_CACHE_DIR, f'{date_str}.json')
+
+    if os.path.exists(cache):
+        try:
+            return _json.loads(open(cache).read())
+        except Exception:
+            pass
+
+    url = (
+        'https://archive-api.open-meteo.com/v1/archive'
+        f'?latitude=44.63&longitude=-124.05'
+        f'&start_date={date_str}&end_date={date_str}'
+        '&daily=weather_code,temperature_2m_max,temperature_2m_min,'
+        'precipitation_sum,wind_speed_10m_max,cloud_cover_mean,sunrise,sunset'
+        '&temperature_unit=fahrenheit&wind_speed_unit=mph'
+        '&precipitation_unit=inch&timezone=America%2FLos_Angeles'
+    )
+    try:
+        with _ureq.urlopen(url, timeout=10) as resp:
+            data = _json.loads(resp.read())
+        d = data.get('daily', {})
+        if not d.get('time'):
+            return None
+
+        def _fmt_time(s):
+            # "2026-02-15T17:44" → "5:44 PM"
+            try:
+                return _dt.strptime(s, '%Y-%m-%dT%H:%M').strftime('%-I:%M %p')
+            except Exception:
+                return None
+
+        code = d['weather_code'][0]
+        result = {
+            'weather_code': code,
+            'weather_desc': _WMO.get(code, f'Code {code}'),
+            'temp_max':     f"{d['temperature_2m_max'][0]:.0f}",
+            'temp_min':     f"{d['temperature_2m_min'][0]:.0f}",
+            'precip':       f"{d['precipitation_sum'][0]:.2f}",
+            'wind_max':     f"{d['wind_speed_10m_max'][0]:.0f}",
+            'cloud':        f"{d['cloud_cover_mean'][0]:.0f}",
+            'sunset':       _fmt_time(d['sunset'][0]),
+            'sunrise':      _fmt_time(d['sunrise'][0]),
+        }
+        open(cache, 'w').write(_json.dumps(result))
+        return result
+    except Exception:
+        return None
 
 
 def _timelapse_dates():
@@ -1272,7 +1350,8 @@ def timelapse_view(date_or_file):
     except Exception:
         title_date = date_str
 
-    wx = _day_weather_summary(date_str)
+    wx  = _day_weather_summary(date_str)   # local snapshots (humidity)
+    om  = _open_meteo_weather(date_str)    # Open-Meteo archive
 
     def stat(label, val, unit=''):
         if val is None:
@@ -1280,15 +1359,30 @@ def timelapse_view(date_or_file):
         return f'<div class="stat"><span class="lbl">{label}</span><span class="val">{val}{unit}</span></div>'
 
     wx_html = ''
-    if wx:
+    if om:
+        precip_str = f'{float(om["precip"]):.2f}"' if float(om['precip']) > 0 else '—'
+        humidity = wx.get('humidity_avg') if wx else None
+        wx_html = f"""
+        <div class="weather">
+          <div class="wx-desc">{om['weather_desc']}</div>
+          <div class="wx-group">
+            {stat('Sunset',   om['sunset'],  '')}
+            {stat('High/Low', f"{om['temp_max']}–{om['temp_min']}", '°F')}
+            {stat('Rain',     precip_str,    '')}
+            {stat('Wind',     om['wind_max'],' mph')}
+            {stat('Cloud',    om['cloud'],   '%')}
+            {stat('Humidity', humidity,      '%')}
+          </div>
+        </div>"""
+    elif wx:
+        # Fallback to local snapshot data if Open-Meteo unavailable
         wx_html = f"""
         <div class="weather">
           <div class="wx-group">
-            {stat('Sunset',     wx['sunset'],      '')}
-            {stat('Temp range', f"{wx['out_temp_lo']}–{wx['out_temp_hi']}", '°F') if wx['out_temp_lo'] else ''}
-            {stat('At sunset',  wx['sunset_temp'], '°F')}
-            {stat('Humidity',   wx['humidity_avg'],'%')}
-            {stat('Wind gust',  wx['wind_gust'],   ' mph')}
+            {stat('Sunset',    wx['sunset'],      '')}
+            {stat('High/Low',  f"{wx['out_temp_lo']}–{wx['out_temp_hi']}", '°F') if wx['out_temp_lo'] else ''}
+            {stat('Humidity',  wx['humidity_avg'],'%')}
+            {stat('Wind gust', wx['wind_gust'],   ' mph')}
           </div>
         </div>"""
 
@@ -1344,7 +1438,8 @@ def timelapse_view(date_or_file):
     .nav-btn:hover:not(.disabled) {{ background:#333; }}
     .weather {{ max-width:960px; background:#222; border:1px solid #333;
                 border-radius:4px; padding:12px 16px; margin:12px 0;
-                display:flex; gap:24px; flex-wrap:wrap; }}
+                display:flex; flex-direction:column; gap:8px; }}
+    .wx-desc  {{ font-size:1.05em; color:#aed6f1; font-weight:bold; }}
     .wx-group {{ display:flex; flex-wrap:wrap; gap:12px; }}
     .stat {{ display:flex; flex-direction:column; min-width:80px; }}
     .lbl  {{ font-size:0.75em; color:#888; text-transform:uppercase; }}
