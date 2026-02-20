@@ -1083,9 +1083,10 @@ def sunset():
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     try:
+        auth = requests.auth.HTTPDigestAuth(CAMERA_USER, CAMERA_PASS) if CAMERA_USER else None
         resp = requests.get(
             'https://192.168.1.81/cgi-bin/snapshot.cgi',
-            auth=(CAMERA_USER, CAMERA_PASS) if CAMERA_USER else None,
+            auth=auth,
             verify=False,
             timeout=10,
             stream=True
