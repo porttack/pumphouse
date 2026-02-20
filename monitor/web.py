@@ -22,7 +22,8 @@ from monitor.config import (
     SECRET_OVERRIDE_ON_TOKEN, SECRET_OVERRIDE_OFF_TOKEN,
     SECRET_BYPASS_ON_TOKEN, SECRET_BYPASS_OFF_TOKEN,
     SECRET_PURGE_TOKEN, MANAGEMENT_FEE_PERCENT,
-    AMBIENT_WEATHER_DASHBOARD_URL
+    AMBIENT_WEATHER_DASHBOARD_URL,
+    CAMERA_USER, CAMERA_PASS
 )
 from monitor.gpio_helpers import (
     read_pressure, read_float_sensor, init_gpio, cleanup_gpio,
@@ -1084,6 +1085,7 @@ def sunset():
     try:
         resp = requests.get(
             'https://192.168.1.81/cgi-bin/snapshot.cgi',
+            auth=(CAMERA_USER, CAMERA_PASS) if CAMERA_USER else None,
             verify=False,
             timeout=10,
             stream=True

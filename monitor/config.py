@@ -188,6 +188,10 @@ SECRET_BYPASS_OFF_TOKEN = ''
 SECRET_PURGE_TOKEN = ''
 SECRET_TOTALS_TOKEN = ''  # Token to show income totals on dashboard
 
+# Local camera credentials (for /sunset snapshot proxy)
+CAMERA_USER = ''
+CAMERA_PASS = ''
+
 # Load secrets from secrets file
 SECRETS_FILE = Path.home() / '.config' / 'pumphouse' / 'secrets.conf'
 if SECRETS_FILE.exists():
@@ -228,6 +232,10 @@ if SECRETS_FILE.exists():
                         SECRET_PURGE_TOKEN = value
                     elif key == 'SECRET_TOTALS_TOKEN':
                         SECRET_TOTALS_TOKEN = value
+                    elif key == 'CAMERA_USER' and not CAMERA_USER:
+                        CAMERA_USER = value
+                    elif key == 'CAMERA_PASS' and not CAMERA_PASS:
+                        CAMERA_PASS = value
                     elif key == 'PUMPHOUSE_HOST' and not PUMPHOUSE_HOST:
                         PUMPHOUSE_HOST = value
                     elif key == 'PUMPHOUSE_PORT':
