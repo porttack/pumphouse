@@ -1634,7 +1634,7 @@ def timelapse_view(date_or_file):
         f'<button class="speed-btn" data-rate="4">4x</button>'
         f'<button class="speed-btn" data-rate="8">8x</button>'
         f'<button id="pause-btn" class="speed-btn pause-btn">&#9646;&#9646; Pause</button>'
-        f'<button id="dl-btn" class="speed-btn dl-btn" title="Download current frame as JPEG">&#8681; Frame</button>'
+        f'<button id="dl-btn" class="speed-btn dl-btn" title="Download current frame as JPEG">&#8681; Snapshot</button>'
         f'</div>'
         if has_video else
         '<p class="no-video">No timelapse recorded for this date.</p>'
@@ -1648,12 +1648,29 @@ def timelapse_view(date_or_file):
     next_js     = f'"{next_date}"' if next_date else 'null'
     rating_avg_js = rating_avg if rating_avg is not None else 'null'
 
-    # List all dates newest-first with snapshot thumbnails
+    # List all dates newest-first with snapshot thumbnails, sunset time, and rating
+    import re as _re
+    all_ratings = _read_ratings()
+
     def _list_label(ds):
+        # Date
         try:
-            return _date.fromisoformat(ds).strftime('%a, %b %-d, %Y')
+            label = _date.fromisoformat(ds).strftime('%a, %b %-d, %Y')
         except Exception:
-            return ds
+            label = ds
+        # Sunset time from filename e.g. 2026-02-20_1750.mp4 → 5:50 PM
+        mp4 = _mp4_for_date(ds)
+        if mp4:
+            m = _re.search(r'_(\d{2})(\d{2})\.mp4$', mp4)
+            if m:
+                h, mn = int(m.group(1)), int(m.group(2))
+                label += f'  {h % 12 or 12}:{mn:02d} {"AM" if h < 12 else "PM"}'
+        # Rating
+        r = all_ratings.get(ds, {})
+        if r.get('count', 0) > 0:
+            avg = r['sum'] / r['count']
+            label += f'  {avg:.1f}\u2605 ({r["count"]})'
+        return label
 
     list_items = ''.join(
         f'<li{"  class=\"current\"" if d == date_str else ""}>'
