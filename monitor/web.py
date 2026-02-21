@@ -1130,6 +1130,48 @@ def sunset():
     return Response(f'Camera unavailable: {last_err}', status=503)
 
 
+@app.route('/frame')
+def frame():
+    """
+    Grab a single JPEG frame from the camera RTSP stream via ffmpeg.
+    Faster than /sunset (no HTTP digest auth round-trips).
+
+    Query params:
+        raw - 1 = return full uncropped frame; default applies CROP_BOTTOM
+    """
+    import subprocess
+    CROP_BOTTOM = 120   # keep in sync with sunset_timelapse.py
+    CAMERA_IP   = '192.168.1.81'
+    CAMERA_PORT = 554
+
+    raw  = request.args.get('raw', 0, type=int)
+    rtsp = (f'rtsp://{CAMERA_USER}:{CAMERA_PASS}@{CAMERA_IP}:{CAMERA_PORT}'
+            f'/cam/realmonitor?channel=1&subtype=0')
+
+    vf = None if raw or CROP_BOTTOM == 0 else f'crop=iw:ih-{CROP_BOTTOM}:0:0'
+    cmd = [
+        'ffmpeg', '-y',
+        '-rtsp_transport', 'tcp',
+        '-i', rtsp,
+        '-vframes', '1',
+        '-f', 'image2pipe',
+        '-vcodec', 'mjpeg',
+    ]
+    if vf:
+        cmd += ['-vf', vf]
+    cmd.append('pipe:1')
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=15)
+        if result.returncode != 0 or not result.stdout:
+            return Response('Frame grab failed', status=503)
+        return Response(result.stdout, status=200, mimetype='image/jpeg')
+    except subprocess.TimeoutExpired:
+        return Response('Camera timeout', status=503)
+    except Exception as e:
+        return Response(f'Error: {e}', status=503)
+
+
 TIMELAPSE_DIR     = '/home/pi/timelapses'
 WEATHER_CACHE_DIR = os.path.join(TIMELAPSE_DIR, 'weather')
 RATINGS_FILE      = os.path.join(TIMELAPSE_DIR, 'ratings.json')
