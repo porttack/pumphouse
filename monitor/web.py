@@ -1634,6 +1634,7 @@ def timelapse_view(date_or_file):
         f'<button class="speed-btn" data-rate="4">4x</button>'
         f'<button class="speed-btn" data-rate="8">8x</button>'
         f'<button id="pause-btn" class="speed-btn pause-btn">&#9646;&#9646; Pause</button>'
+        f'<button id="dl-btn" class="speed-btn dl-btn" title="Download current frame as JPEG">&#8681; Frame</button>'
         f'</div>'
         if has_video else
         '<p class="no-video">No timelapse recorded for this date.</p>'
@@ -1704,6 +1705,7 @@ def timelapse_view(date_or_file):
     .speed-btn.active {{ background:#4CAF50; color:#000; border-color:#4CAF50; }}
     .pause-btn        {{ margin-left:10px; color:#aaa; border-color:#555; }}
     .pause-btn.paused {{ background:#e57373; color:#000; border-color:#e57373; }}
+    .dl-btn           {{ margin-left:4px; color:#aaa; border-color:#555; }}
     details {{ max-width:960px; margin-top:16px; }}
     summary {{ cursor:pointer; color:#4CAF50; }}
     ul {{ list-style:none; padding:0; margin:8px 0; }}
@@ -1771,6 +1773,20 @@ def timelapse_view(date_or_file):
           pauseBtn.innerHTML = '&#9654; Play';
           pauseBtn.classList.add('paused');
         }}
+      }});
+    }}
+    // Download current video frame as JPEG
+    const dlBtn = document.getElementById('dl-btn');
+    if (dlBtn && vid) {{
+      dlBtn.addEventListener('click', () => {{
+        const canvas = document.createElement('canvas');
+        canvas.width  = vid.videoWidth;
+        canvas.height = vid.videoHeight;
+        canvas.getContext('2d').drawImage(vid, 0, 0);
+        const a = document.createElement('a');
+        a.download = 'sunset-{date_str}.jpg';
+        a.href = canvas.toDataURL('image/jpeg', 0.92);
+        a.click();
       }});
     }}
     // Keyboard navigation: ← → arrow keys step through dates
