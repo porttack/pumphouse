@@ -1231,7 +1231,7 @@ def _open_meteo_weather(date_str):
                 humidities.append(h)
             prec = p.get('precipitationLastHour', {}).get('value')
             if prec is not None:
-                precip_total += prec * 39.3701                # m → inches
+                precip_total += prec / 25.4                   # mm → inches
             desc = p.get('textDescription', '').strip()
             if desc:
                 descs.append(desc)
