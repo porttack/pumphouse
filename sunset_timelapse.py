@@ -46,6 +46,8 @@ CROP_BOTTOM      = 120   # pixels to remove from the bottom of each frame at cap
                          # (source/video pixels, not display pixels; 0 = no crop)
                          # Camera is 1080p (1920×1080); 120px ≈ 11% of frame height.
                          # Removes the fire circle area for privacy.
+SNAPSHOT_OFFSET_MINUTES = 35   # minutes after sunset to grab the snapshot JPEG
+SNAPSHOT_DIR     = TIMELAPSE_DIR / 'snapshots'
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -270,6 +272,17 @@ def run_todays_timelapse():
             t.join(timeout=120)
         log.info("Final assembly …")
         assemble_timelapse(frames_dir, output)
+
+        # Save a snapshot JPEG from the frame closest to sunset + SNAPSHOT_OFFSET_MINUTES.
+        # Done here (after assembly, before frame cleanup) so frames are still available.
+        SNAPSHOT_DIR.mkdir(exist_ok=True)
+        snapshot_path = SNAPSHOT_DIR / f'{date_str}.jpg'
+        if not snapshot_path.exists() and frames:
+            offset_secs = WINDOW_BEFORE * 60 + SNAPSHOT_OFFSET_MINUTES * 60
+            frame_idx   = max(0, min(int(offset_secs / effective_interval), len(frames) - 2))
+            shutil.copy2(str(frames[frame_idx]), str(snapshot_path))
+            log.info(f"Saved snapshot: frame {frame_idx} → {snapshot_path.name}")
+
         cleanup_old(RETENTION_DAYS)
 
     finally:

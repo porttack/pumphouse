@@ -1175,6 +1175,7 @@ def frame():
 TIMELAPSE_DIR     = '/home/pi/timelapses'
 WEATHER_CACHE_DIR = os.path.join(TIMELAPSE_DIR, 'weather')
 RATINGS_FILE      = os.path.join(TIMELAPSE_DIR, 'ratings.json')
+SNAPSHOT_DIR      = os.path.join(TIMELAPSE_DIR, 'snapshots')
 
 import threading as _threading
 _ratings_lock = _threading.Lock()
@@ -1452,6 +1453,32 @@ def timelapse_index():
     return redirect(f'/timelapse/{dates[-1]}')
 
 
+@app.route('/timelapse/latest.mp4')
+def timelapse_latest_mp4():
+    """Redirect to the most recent timelapse MP4 (for embedding / direct links)."""
+    from flask import redirect
+    dates = _timelapse_dates()
+    if not dates:
+        return Response('No timelapses available yet.', status=404)
+    mp4_name = _mp4_for_date(dates[-1])
+    if not mp4_name:
+        return Response('No MP4 found.', status=404)
+    return redirect(f'/timelapse/{mp4_name}')
+
+
+@app.route('/timelapse/<date_str>/snapshot')
+def timelapse_snapshot(date_str):
+    """Return the sunset snapshot JPEG for a given date, for use as a thumbnail."""
+    import re
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_str):
+        return Response('Invalid date', status=400)
+    path = os.path.join(SNAPSHOT_DIR, f'{date_str}.jpg')
+    if not os.path.exists(path):
+        return Response('No snapshot for this date.', status=404)
+    return send_file(path, mimetype='image/jpeg',
+                     max_age=365 * 24 * 3600)   # immutable once written
+
+
 @app.route('/timelapse/<date_str>/rate', methods=['POST'])
 def timelapse_rate(date_str):
     """Accept a 3–5 star rating for a timelapse date, update the ratings file,
@@ -1607,10 +1634,20 @@ def timelapse_view(date_or_file):
     next_js     = f'"{next_date}"' if next_date else 'null'
     rating_avg_js = rating_avg if rating_avg is not None else 'null'
 
-    # List all dates newest-first
+    # List all dates newest-first with snapshot thumbnails
+    def _list_label(ds):
+        try:
+            return _date.fromisoformat(ds).strftime('%a, %b %-d, %Y')
+        except Exception:
+            return ds
+
     list_items = ''.join(
         f'<li{"  class=\"current\"" if d == date_str else ""}>'
-        f'<a href="/timelapse/{d}">{d}</a></li>'
+        f'<a href="/timelapse/{d}">'
+        f'<img class="thumb" src="/timelapse/{d}/snapshot" loading="lazy"'
+        f' onerror="this.style.display=\'none\'">'
+        f'<span class="list-date">{_list_label(d)}</span>'
+        f'</a></li>'
         for d in reversed(dates)
     )
 
@@ -1656,10 +1693,15 @@ def timelapse_view(date_or_file):
     .pause-btn.paused {{ background:#e57373; color:#000; border-color:#e57373; }}
     details {{ max-width:960px; margin-top:16px; }}
     summary {{ cursor:pointer; color:#4CAF50; }}
-    ul {{ list-style:none; padding:0; margin:8px 0; line-height:2; }}
-    li a {{ color:#4CAF50; text-decoration:none; }}
+    ul {{ list-style:none; padding:0; margin:8px 0; }}
+    li a {{ display:flex; align-items:center; gap:10px; padding:4px 0;
+             color:#4CAF50; text-decoration:none; }}
     li.current a {{ color:#fff; font-weight:bold; }}
-    li a:hover {{ text-decoration:underline; }}
+    li a:hover {{ color:#fff; }}
+    .thumb {{ width:96px; height:54px; object-fit:cover; border-radius:3px;
+               opacity:0.8; flex-shrink:0; background:#111; }}
+    li.current .thumb {{ opacity:1; outline:2px solid #4CAF50; }}
+    .list-date {{ font-size:0.9em; }}
     .rating {{ max-width:960px; display:flex; align-items:center; gap:10px; margin:8px 0; }}
     .rating-label {{ color:#888; font-size:0.9em; white-space:nowrap; }}
     .stars {{ display:flex; gap:1px; line-height:1; }}
