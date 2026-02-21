@@ -1176,6 +1176,7 @@ TIMELAPSE_DIR     = '/home/pi/timelapses'
 WEATHER_CACHE_DIR = os.path.join(TIMELAPSE_DIR, 'weather')
 RATINGS_FILE      = os.path.join(TIMELAPSE_DIR, 'ratings.json')
 SNAPSHOT_DIR      = os.path.join(TIMELAPSE_DIR, 'snapshots')
+THUMB_WIDTH       = 240   # px — thumbnail width in the "All timelapses" list (height auto-computed 16:9)
 
 import threading as _threading
 _ratings_lock = _threading.Lock()
@@ -1743,7 +1744,7 @@ def timelapse_view(date_or_file):
              color:#4CAF50; text-decoration:none; }}
     li.current a {{ color:#fff; font-weight:bold; }}
     li a:hover {{ color:#fff; }}
-    .thumb {{ width:96px; height:54px; object-fit:cover; border-radius:3px;
+    .thumb {{ width:{THUMB_WIDTH}px; height:{THUMB_WIDTH * 9 // 16}px; object-fit:cover; border-radius:3px;
                opacity:0.8; flex-shrink:0; background:#111; }}
     li.current .thumb {{ opacity:1; outline:2px solid #4CAF50; }}
     .list-date {{ font-size:0.9em; }}
