@@ -42,6 +42,10 @@ WEEKLY_YEARS     = 3     # after RETENTION_DAYS, keep one per ISO week for this 
 OUTPUT_FPS       = 24    # output video frame rate
 OUTPUT_CRF       = 32    # H.264 quality (lower = better; 23 = default, 35 = ~40x smaller)
 PREVIEW_INTERVAL = 600   # seconds between partial preview assemblies (10 min)
+CROP_BOTTOM      = 120   # pixels to remove from the bottom of each frame at capture time
+                         # (source/video pixels, not display pixels; 0 = no crop)
+                         # Camera is 1080p (1920×1080); 120px ≈ 11% of frame height.
+                         # Removes the fire circle area for privacy.
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -224,7 +228,8 @@ def run_todays_timelapse():
         'ffmpeg', '-y',
         '-rtsp_transport', 'tcp',
         '-i', rtsp_url,
-        '-vf', f'fps=1/{effective_interval}',
+        '-vf', (f'fps=1/{effective_interval},crop=iw:ih-{CROP_BOTTOM}:0:0'
+                if CROP_BOTTOM > 0 else f'fps=1/{effective_interval}'),
         '-t', str(duration),
         '-q:v', '2',
         str(frames_dir / 'frame_%04d.jpg'),
