@@ -1658,13 +1658,26 @@ def timelapse_view(date_or_file):
             label = _date.fromisoformat(ds).strftime('%a, %b %-d, %Y')
         except Exception:
             label = ds
-        # Sunset time from filename e.g. 2026-02-20_1750.mp4 → 5:50 PM
+        # Sunset time: prefer HHMM embedded in filename, fall back to astral
         mp4 = _mp4_for_date(ds)
+        sunset_str = None
         if mp4:
             m = _re.search(r'_(\d{2})(\d{2})\.mp4$', mp4)
             if m:
                 h, mn = int(m.group(1)), int(m.group(2))
-                label += f'  {h % 12 or 12}:{mn:02d} {"AM" if h < 12 else "PM"}'
+                sunset_str = f'{h % 12 or 12}:{mn:02d} {"AM" if h < 12 else "PM"}'
+        if not sunset_str:
+            try:
+                from astral import LocationInfo as _LI
+                from astral.sun import sun as _sun
+                from zoneinfo import ZoneInfo as _ZI
+                _tz  = _ZI('America/Los_Angeles')
+                _loc = _LI('Newport, OR', 'Oregon', 'America/Los_Angeles', 44.6368, -124.0535)
+                sunset_str = _sun(_loc.observer, date=_date.fromisoformat(ds), tzinfo=_tz)['sunset'].strftime('%-I:%M %p')
+            except Exception:
+                pass
+        if sunset_str:
+            label += f'  {sunset_str}'
         # Rating
         r = all_ratings.get(ds, {})
         if r.get('count', 0) > 0:
