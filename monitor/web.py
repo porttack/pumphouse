@@ -1466,6 +1466,19 @@ def timelapse_latest_mp4():
     return redirect(f'/timelapse/{mp4_name}')
 
 
+@app.route('/timelapse/latest.jpg')
+def timelapse_latest_jpg():
+    """Redirect to the most recent sunset snapshot JPEG.
+    Intended for Scriptable widgets and other clients that need a direct image URL.
+    Tap target: /timelapse (the HTML viewer)."""
+    from flask import redirect
+    dates = _timelapse_dates()
+    for d in reversed(dates):
+        if os.path.exists(os.path.join(SNAPSHOT_DIR, f'{d}.jpg')):
+            return redirect(f'/timelapse/{d}/snapshot')
+    return Response('No snapshot available yet.', status=404)
+
+
 @app.route('/timelapse/<date_str>/snapshot')
 def timelapse_snapshot(date_str):
     """Return the sunset snapshot JPEG for a given date, for use as a thumbnail."""
