@@ -1927,7 +1927,7 @@ def timelapse_view(date_or_file):
     {prev_btn}
     <div class="nav-center">
       <h2>Sunset &mdash; {title_date}</h2>
-      <div class="swipe-hint">swipe &#8592; &#8594; to change days</div>
+      <div class="swipe-hint">swipe &#8592; &#8594; &#8593; &#8595; to change days</div>
     </div>
     {next_btn}
   </div>
@@ -2086,10 +2086,13 @@ def timelapse_view(date_or_file):
         }}
       }});
     }})();
-    // Touch swipe: left = newer day, right = older day
+    // Touch swipe navigation
+    //   left  → newer day   right → older day
+    //   up    → newer day   down  → older day  (disabled when chevron list is open)
     (function() {{
-      const prev = {prev_js};
-      const next = {next_js};
+      const prev    = {prev_js};
+      const next    = {next_js};
+      const details = document.querySelector('details');
       var tx = null, ty = null;
       document.addEventListener('touchstart', function(e) {{
         tx = e.touches[0].clientX;
@@ -2100,9 +2103,19 @@ def timelapse_view(date_or_file):
         var dx = e.changedTouches[0].clientX - tx;
         var dy = e.changedTouches[0].clientY - ty;
         tx = null; ty = null;
-        if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
-        if (dx > 0 && prev) location.href = '/timelapse/' + prev;  // swipe right → older
-        if (dx < 0 && next) location.href = '/timelapse/' + next;  // swipe left  → newer
+        var adx = Math.abs(dx), ady = Math.abs(dy);
+        // Horizontal swipe (left/right): threshold 60px, must be more horizontal than vertical
+        if (adx >= 60 && adx > ady * 1.5) {{
+          if (dx > 0 && prev) location.href = '/timelapse/' + prev;  // right → older
+          if (dx < 0 && next) location.href = '/timelapse/' + next;  // left  → newer
+          return;
+        }}
+        // Vertical swipe (up/down): threshold 80px, must be more vertical than horizontal
+        // Disabled when the All Timelapses list is open (let it scroll normally)
+        if (ady >= 80 && ady > adx * 1.5 && !(details && details.open)) {{
+          if (dy < 0 && next) location.href = '/timelapse/' + next;  // up   → newer
+          if (dy > 0 && prev) location.href = '/timelapse/' + prev;  // down → older
+        }}
       }}, {{passive: true}});
     }})();
     // Star rating widget (3–5 stars only; one rating per day via cookie)

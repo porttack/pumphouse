@@ -28,11 +28,26 @@
 
 ### High Priority
 
+- [ ] **Rotate Cloudflare KV API token** — token was briefly visible in chat (not in git)
+  - Dashboard → My Profile → API Tokens → KV token → Roll
+  - Update `~/.config/pumphouse/secrets.conf` → `sudo systemctl restart pumphouse-web`
+
+- [ ] **Cloudflare Cache Rule for HTML pages** (Step 8 of CLOUDFLARE_CDN_PLAN.md)
+  - Dashboard → onblackberryhill.com → Caching → Cache Rules → Create rule
+  - Match: URI path matches `/timelapse/20*`
+  - Setting: Cache everything; Edge TTL: Respect origin (uses Flask Cache-Control header)
+  - Without this, Cloudflare won't cache HTML (only MP4/JPEG are cached automatically)
+
 - [ ] **Firewall hardening after Cloudflare tunnel is verified** (deferred — 10 hrs from Pi)
   - `sudo ufw allow from 192.168.1.0/24 to any port 6443` (LAN only)
   - `sudo ufw deny 6443` then `sudo ufw enable`
   - Optionally remove router port-forward for 6443 (tplinkdns still works on LAN)
   - **Verify tunnel works end-to-end before doing this**
+
+- [ ] **Install Node.js + wrangler on Pi** for CLI worker deploys (optional)
+  - `curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt install -y nodejs`
+  - `sudo npm install -g wrangler`
+  - Then use `cloudflare/deploy.sh` to deploy (reads credentials from secrets.conf)
 
 - [ ] **Email confirmation for remote control actions**
   - Send follow-up email when user clicks Override ON/OFF, Bypass ON/OFF, or Purge buttons

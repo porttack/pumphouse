@@ -37,6 +37,8 @@ The Pi's `tplinkdns.com:6443` address works for local/private access only.
 
 - **Swipe left** → newer day
 - **Swipe right** → older day
+- **Swipe up** → newer day (disabled when "All timelapses" list is open)
+- **Swipe down** → older day (disabled when "All timelapses" list is open)
 - Nav buttons show only arrows on small screens (date labels hidden)
 - Thumbnails auto-resize to ~44% of viewport width on small screens
 
