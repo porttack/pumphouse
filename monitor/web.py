@@ -1731,9 +1731,10 @@ def timelapse_view(date_or_file):
              background:#000; border-radius:4px; }}
     .no-video {{ color:#888; font-style:italic; }}
     .site-header {{ max-width:960px; padding:4px 0 10px; margin-bottom:4px;
-                    border-bottom:1px solid #333; }}
+                    border-bottom:1px solid #333; display:flex;
+                    flex-wrap:wrap; align-items:baseline; gap:0 10px; }}
     .site-name {{ font-size:1.2em; color:#fff; font-weight:bold; }}
-    .site-sub  {{ font-size:0.85em; color:#888; margin-left:10px; }}
+    .site-sub  {{ font-size:0.85em; color:#888; }}
     .site-sub a {{ color:#4CAF50; text-decoration:none; }}
     .site-sub a:hover {{ color:#fff; }}
     .nav {{ display:flex; justify-content:space-between; align-items:center;
@@ -1802,17 +1803,17 @@ def timelapse_view(date_or_file):
       .nav-center h2 {{ font-size:1.0em; }}
       .swipe-hint {{ display:block; }}
       .thumb {{ width:44vw; height:calc(44vw * 9 / 16); }}
-      .site-sub {{ display:none; }}
+      .site-sub {{ font-size:0.78em; }}
     }}
   </style>
 </head>
 <body>
   <header class="site-header">
     <span class="site-name">On Blackberry Hill</span>
-    <span class="site-sub">
-      <a href="https://www.meredithlodging.com/listings/1830" target="_blank" rel="noopener">Meredith Lodging</a>
-      &middot; Newport, Oregon &middot;
-      <a href="https://www.airbnb.com/rooms/894278114876445404" target="_blank" rel="noopener">Airbnb</a>
+    <span class="site-sub">Newport, OR &middot; Available via
+      <a href="https://www.meredithlodging.com/listings/1830" target="_blank" rel="noopener">Meredith</a>
+      &middot; <a href="https://www.airbnb.com/rooms/894278114876445404" target="_blank" rel="noopener">Airbnb</a>
+      &middot; <a href="https://www.vrbo.com/9829179ha" target="_blank" rel="noopener">Vrbo</a>
     </span>
   </header>
   <div class="nav">

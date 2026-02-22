@@ -2,6 +2,42 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.18.0] - 2026-02-21
+
+### Added — Sunset Timelapse Viewer
+- **Timelapse capture daemon** (`sunset_timelapse.py`): RTSP frame capture around
+  sunset window (±60 min), assembled into H.264 MP4 via ffmpeg
+  - `CROP_BOTTOM = 120 px` applied at capture time (privacy — removes fire circle)
+  - `OUTPUT_CRF = 33` (tuned for ~11 MB / 60-second video)
+  - Snapshot JPEG saved ~35 min after sunset (`SNAPSHOT_OFFSET_MINUTES`)
+  - Tiered retention: 30-day daily + 3-year weekly
+- **Timelapse web viewer** (`/timelapse/YYYY-MM-DD`):
+  - Video player with speed controls (¼x–8x), pause/play, frame snapshot download
+  - `playsinline` for iPhone inline playback (no forced fullscreen)
+  - Keyboard nav: `←/→` days, `↓/↑` open/navigate chevron list, `Enter` go, `Esc` close, `Space` pause
+  - Touch swipe: left = newer day, right = older day
+  - Previous/next day navigation buttons with abbreviated date labels
+  - Labels hidden on mobile (≤600 px) so arrows don't crowd the title
+  - Swipe hint shown below title on mobile only
+- **Weather per day** (two-stage):
+  - NWS KONP (Newport Municipal Airport) actual station observations: temp hi/lo,
+    precip (mm→inches fixed), wind avg/max, humidity, conditions text
+  - Open-Meteo ERA5 supplement: cloud cover, solar radiation (ERA5 fallback for old dates)
+  - Cached to `timelapses/weather/YYYY-MM-DD.json`
+- **Star ratings** (3–5 only): cookie-based (one per day), stored in `ratings.json`;
+  shown as Amazon-style numeric + yellow/grey star icons + count
+- **"All timelapses" chevron list**: thumbnail, date, sunset time, star rating, conditions
+  - `THUMB_WIDTH = 240 px` (desktop); 44 vw on mobile
+  - `(snapshot)` link per entry opens JPEG in new tab
+  - Keyboard-navigable with `.kbd-focus` highlight
+- **Routes**: `/timelapse/latest.jpg`, `/timelapse/latest.mp4`,
+  `/timelapse/DATE/snapshot`, `/frame` (live RTSP grab, `?raw=1` uncropped)
+- **Site branding header**: "On Blackberry Hill · Newport, OR · Available via
+  Meredith · Airbnb · Vrbo" — visible on desktop and mobile (smaller on mobile)
+- **TIMELAPSE.md**: routes, keyboard shortcuts, mobile gestures, config reference
+- **docs/conversations/timelapse-development.md**: full development log
+- **CLOUDFLARE_CDN_PLAN.md**: future CDN/tunnel/Worker+KV plan
+
 ## [2.17.0] - 2026-02-15
 
 ### Added
