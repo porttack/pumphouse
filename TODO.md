@@ -28,6 +28,12 @@
 
 ### High Priority
 
+- [ ] **Firewall hardening after Cloudflare tunnel is verified** (deferred — 10 hrs from Pi)
+  - `sudo ufw allow from 192.168.1.0/24 to any port 6443` (LAN only)
+  - `sudo ufw deny 6443` then `sudo ufw enable`
+  - Optionally remove router port-forward for 6443 (tplinkdns still works on LAN)
+  - **Verify tunnel works end-to-end before doing this**
+
 - [ ] **Email confirmation for remote control actions**
   - Send follow-up email when user clicks Override ON/OFF, Bypass ON/OFF, or Purge buttons
   - Email should confirm the action was successful with current system status

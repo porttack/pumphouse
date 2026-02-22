@@ -2,6 +2,39 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.19.0] - 2026-02-22
+
+### Added — Cloudflare CDN (onblackberryhill.com)
+- **Cloudflare Tunnel** (`cloudflared` daemon): outbound-only persistent connection,
+  no open ports; Pi IP never exposed. Public hostname: `onblackberryhill.com`
+- **Cloudflare Worker** (`cloudflare/ratings-worker.js`): intercepts rating reads/writes
+  at the edge; all other requests pass through to Pi via tunnel
+- **Cloudflare KV ratings**: ratings stored in CF KV (`RATINGS` namespace);
+  Pi writes to KV via API on tplinkdns path for consistency
+- **New route `GET /api/ratings/<date>`**: returns `{count, avg}` from KV or local file;
+  served by Worker for CDN requests, by Pi for tplinkdns requests
+- **`cloudflare/test_kv.py`**: KV connectivity test (PUT/GET/DELETE a test key)
+- **`cloudflare/wrangler.toml`**: Wrangler deploy config for CLI deploys
+- **Redirect rule**: `onblackberryhill.com/` → `/timelapse` (301, handled at CF edge)
+
+### Changed
+- **Rating widget fully client-side**: cookie read via JS `getCookie()`, aggregate
+  fetched async from `/api/ratings/DATE`; HTML pages contain no per-user content
+  and are now safely cacheable by Cloudflare
+- **Rating display format**: viewer page now shows `5.0 ★★★★★ (1)` with gold HTML
+  stars (matching list style) instead of plain-text `Avg 5★ (1)`
+- **Cache headers added**:
+  - Past HTML pages: `Cache-Control: public, max-age=31536000, immutable`
+  - Today's HTML: `Cache-Control: public, max-age=600, must-revalidate`
+  - Past MP4 files: `max_age=31536000`; today's MP4: `max_age=600`
+  - `/api/ratings/DATE`: `Cache-Control: public, max-age=60`
+- **`RATINGS_BACKEND` config**: `cloudflare_kv` (default) or `local` fallback
+- **Existing rating migrated**: `2026-02-19` rating moved from `ratings.json` to KV
+
+### Infrastructure
+- `~/.config/pumphouse/secrets.conf`: added `CLOUDFLARE_ACCOUNT_ID`,
+  `CLOUDFLARE_KV_NAMESPACE_ID`, `CLOUDFLARE_KV_API_TOKEN`, `RATINGS_BACKEND`
+
 ## [2.18.0] - 2026-02-21
 
 ### Added — Sunset Timelapse Viewer

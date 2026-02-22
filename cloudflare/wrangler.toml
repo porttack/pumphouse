@@ -1,0 +1,16 @@
+name = "pumphouse-ratings"
+main = "ratings-worker.js"
+compatibility_date = "2024-01-01"
+
+# Routes — all traffic for the domain goes through this worker.
+# Non-rating requests fall through to fetch(request) → Pi via tunnel.
+routes = [
+  { pattern = "onblackberryhill.com/*", zone_name = "onblackberryhill.com" },
+  { pattern = "www.onblackberryhill.com/*", zone_name = "onblackberryhill.com" },
+]
+
+# KV namespace binding — fill in the id after creating the namespace in the dashboard.
+# Dashboard → Workers & Pages → KV → your namespace → copy the Namespace ID.
+[[kv_namespaces]]
+binding = "RATINGS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"

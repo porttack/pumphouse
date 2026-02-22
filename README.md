@@ -20,7 +20,8 @@ Simplified event-based monitoring system for remote water treatment facilities. 
 - **Push Notifications**: Real-time phone alerts via ntfy.sh for critical tank events
 - **E-Paper Display**: Remote 2.13" e-ink display showing tank status, water usage graph, and occupancy info via partial refresh daemon
 - **Camera Snapshot**: Live JPEG proxy at `/sunset` from an Amcrest IP camera via RTSP/HTTPS with digest auth; optional contrast enhancement
-- **Sunset Timelapse**: Daily MP4 timelapse of the 2-hour sunset window, assembled from RTSP frames in RAM and served at `/timelapse` with prev/next navigation, weather summary, and variable playback speed controls
+- **Sunset Timelapse**: Daily MP4 timelapse of the 2-hour sunset window, assembled from RTSP frames in RAM and served at `/timelapse`; publicly accessible at **https://onblackberryhill.com/timelapse** via Cloudflare CDN (tunnel + Worker + KV ratings)
+- **Cloudflare CDN**: `onblackberryhill.com` served via Cloudflare Tunnel (no open ports); ratings stored in Cloudflare KV; past pages cached at the edge for fast global delivery
 
 ## Installation
 ```bash

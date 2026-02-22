@@ -2,15 +2,22 @@
 
 Daily sunset timelapses captured from the pumphouse camera at Newport, OR.
 
+## Public URL
+
+**https://onblackberryhill.com/timelapse** — served via Cloudflare CDN.
+The Pi's `tplinkdns.com:6443` address works for local/private access only.
+
 ## Routes
 
 | URL | Description |
 |-----|-------------|
-| `/timelapse` | Redirects to the most recent date |
+| `/timelapse` | Redirects to most recent ≥4.5★ sunset (else latest) |
+| `/timelapse?today` | Redirects to today's timelapse (or yesterday if not yet generated) |
 | `/timelapse/YYYY-MM-DD` | Viewer page for a specific date |
 | `/timelapse/latest.mp4` | Redirects to the most recent MP4 file |
 | `/timelapse/latest.jpg` | Redirects to the most recent snapshot JPEG |
 | `/timelapse/YYYY-MM-DD/snapshot` | Snapshot JPEG (~35 min after sunset) |
+| `/api/ratings/YYYY-MM-DD` | JSON aggregate rating `{count, avg}` (served by CF Worker) |
 | `/frame` | Live single frame from the RTSP camera (cropped) |
 | `/frame?raw=1` | Live single frame, uncropped |
 
@@ -64,8 +71,26 @@ once a day's data is complete.
 
 - Visitors can rate each day 3–5 stars (1–2 star ratings not allowed).
 - One rating per day per browser (stored in a cookie for 1 year).
-- Aggregate data (count + sum) stored in `timelapses/ratings.json`.
-- Rating is shown in the "All timelapses" list as: `4.2 ★★★★☆ (3)`
+- Aggregate data stored in **Cloudflare KV** (`RATINGS` namespace); `ratings.json`
+  kept in sync for Pi-direct (tplinkdns) access.
+- Rating widget is fully client-side — cookie read via JS, count/avg fetched from
+  `/api/ratings/DATE` — so HTML pages are cacheable by Cloudflare.
+- Rating shown as `4.2 ★★★★☆ (3)` in the list and on the viewer page.
+
+## Caching (Cloudflare CDN)
+
+| Content | Cache-Control set by Flask |
+|---------|---------------------------|
+| Past HTML pages (`date < today`) | `public, max-age=31536000, immutable` |
+| Today's HTML page | `public, max-age=600, must-revalidate` |
+| Past MP4 files | `max-age=31536000` |
+| Today's MP4 (preview) | `max-age=600` |
+| Snapshot JPEGs | `max-age=31536000` |
+| `/api/ratings/DATE` | `public, max-age=60` |
+
+**Note:** Cloudflare caches binary assets (MP4, JPEG) automatically based on headers.
+HTML pages require a Cloudflare Cache Rule: "Cache Everything" for `/timelapse/20*`
+(Step 8 of `CLOUDFLARE_CDN_PLAN.md` — not yet configured).
 
 ## File Layout
 
@@ -76,8 +101,12 @@ timelapses/
     YYYY-MM-DD.jpg        # snapshot JPEG ~35 min after sunset
   weather/
     YYYY-MM-DD.json       # cached weather for that day
-  ratings.json            # aggregate star ratings
+  ratings.json            # local ratings mirror (canonical store is Cloudflare KV)
   timelapse.log           # daemon log
+cloudflare/
+  ratings-worker.js       # Cloudflare Worker source
+  wrangler.toml           # Wrangler deploy config
+  test_kv.py              # KV connectivity test
 ```
 
 ## Refreshing a Cached Image in Chrome

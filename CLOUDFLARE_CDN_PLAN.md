@@ -8,13 +8,13 @@ directly reachable from the public internet.
 ## Status
 
 - ✅ Domain purchased: **onblackberryhill.com** (Cloudflare Registrar)
-- ⬜ Cloudflare Tunnel installed on Pi
-- ⬜ KV namespace created for ratings
-- ⬜ Rating Worker deployed
-- ⬜ Pi code updated (KV backend, cache headers, root redirect)
-- ⬜ Existing ratings.json migrated to KV
-- ⬜ Cache rules configured
-- ⬜ Firewall hardened (block direct 6443 from internet)
+- ✅ Cloudflare Tunnel installed on Pi (`cloudflared` service, tunnel name: `pumphouse`)
+- ✅ KV namespace created for ratings (namespace: `RATINGS`)
+- ✅ Rating Worker deployed (`pumphouse-ratings`, routes: `onblackberryhill.com/*`)
+- ✅ Pi code updated (KV backend, cache headers, client-side rating widget, `/api/ratings/DATE`)
+- ✅ Existing ratings.json migrated to KV
+- ⬜ Cache rules configured (Step 8 — one "Cache Everything" rule for `/timelapse/20*` still needed)
+- ⬜ Firewall hardened (deferred — do in person; see TODO.md)
 
 ---
 

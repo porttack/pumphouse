@@ -1181,6 +1181,69 @@ THUMB_WIDTH       = 240   # px — thumbnail width in the "All timelapses" list 
 import threading as _threading
 _ratings_lock = _threading.Lock()
 
+def _load_cf_config():
+    """Load Cloudflare credentials from secrets.conf."""
+    import os as _os
+    secrets = _os.path.join(_os.path.expanduser('~'), '.config', 'pumphouse', 'secrets.conf')
+    cfg = {}
+    try:
+        with open(secrets) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+                k, v = line.split('=', 1)
+                cfg[k.strip()] = v.strip()
+    except Exception:
+        pass
+    return cfg
+
+_CF_CONFIG = _load_cf_config()
+_RATINGS_BACKEND = _CF_CONFIG.get('RATINGS_BACKEND', 'local')
+
+
+def _kv_write_rating(date_str, entry):
+    """Write a single rating entry to Cloudflare KV. Returns True on success."""
+    import json as _j, urllib.request as _ureq
+    account_id   = _CF_CONFIG.get('CLOUDFLARE_ACCOUNT_ID', '')
+    namespace_id = _CF_CONFIG.get('CLOUDFLARE_KV_NAMESPACE_ID', '')
+    api_token    = _CF_CONFIG.get('CLOUDFLARE_KV_API_TOKEN', '')
+    if not all([account_id, namespace_id, api_token]):
+        return False
+    url = (f"https://api.cloudflare.com/client/v4/accounts/{account_id}"
+           f"/storage/kv/namespaces/{namespace_id}/values/{date_str}")
+    req = _ureq.Request(url, data=_j.dumps(entry).encode(), method='PUT',
+                        headers={'Authorization': f'Bearer {api_token}',
+                                 'Content-Type': 'application/json'})
+    try:
+        with _ureq.urlopen(req, timeout=5) as r:
+            return r.status in (200, 201)
+    except Exception:
+        return False
+
+
+def _kv_read_rating(date_str):
+    """Read a single rating entry from Cloudflare KV. Returns dict or None on error."""
+    import json as _j, urllib.request as _ureq, urllib.error as _uerr
+    account_id   = _CF_CONFIG.get('CLOUDFLARE_ACCOUNT_ID', '')
+    namespace_id = _CF_CONFIG.get('CLOUDFLARE_KV_NAMESPACE_ID', '')
+    api_token    = _CF_CONFIG.get('CLOUDFLARE_KV_API_TOKEN', '')
+    if not all([account_id, namespace_id, api_token]):
+        return None
+    url = (f"https://api.cloudflare.com/client/v4/accounts/{account_id}"
+           f"/storage/kv/namespaces/{namespace_id}/values/{date_str}")
+    req = _ureq.Request(url, headers={'Authorization': f'Bearer {api_token}'})
+    try:
+        with _ureq.urlopen(req, timeout=5) as r:
+            return _j.loads(r.read().decode())
+    except _uerr.HTTPError as e:
+        if e.code == 404:
+            return {'count': 0, 'sum': 0}
+        return None
+    except Exception:
+        return None
+
+
 def _read_ratings():
     import json as _j
     try:
@@ -1510,6 +1573,23 @@ def timelapse_snapshot(date_str):
                      max_age=365 * 24 * 3600)   # immutable once written
 
 
+@app.route('/api/ratings/<date_str>')
+def api_ratings(date_str):
+    """Return aggregate rating for a date as JSON {count, avg}. Used by the client-side widget."""
+    import re, json as _j
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_str):
+        return Response('Invalid date', status=400)
+    if _RATINGS_BACKEND == 'cloudflare_kv':
+        data = _kv_read_rating(date_str) or {'count': 0, 'sum': 0}
+    else:
+        data = _read_ratings().get(date_str, {'count': 0, 'sum': 0})
+    count = data.get('count', 0)
+    avg   = round(data['sum'] / count, 1) if count else None
+    return Response(_j.dumps({'count': count, 'avg': avg}),
+                    mimetype='application/json',
+                    headers={'Cache-Control': 'public, max-age=60'})
+
+
 @app.route('/timelapse/<date_str>/rate', methods=['POST'])
 def timelapse_rate(date_str):
     """Accept a 3–5 star rating for a timelapse date, update the ratings file,
@@ -1532,6 +1612,9 @@ def timelapse_rate(date_str):
         data[date_str]  = entry
         _write_ratings(data)
 
+    if _RATINGS_BACKEND == 'cloudflare_kv':
+        _kv_write_rating(date_str, entry)
+
     avg  = entry['sum'] / entry['count']
     resp = Response(_j.dumps({'count': entry['count'], 'avg': round(avg, 1)}),
                     mimetype='application/json')
@@ -1553,7 +1636,10 @@ def timelapse_view(date_or_file):
         path = os.path.join(TIMELAPSE_DIR, date_or_file)
         if not os.path.exists(path):
             return Response(f'Not found: {date_or_file}', status=404)
-        return send_file(path, mimetype='video/mp4')
+        from datetime import date as _date
+        mp4_date = date_or_file[:10]
+        mp4_max_age = 365 * 24 * 3600 if mp4_date < _date.today().isoformat() else 600
+        return send_file(path, mimetype='video/mp4', max_age=mp4_max_age)
 
     # HTML viewer
     if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_or_file):
@@ -1584,12 +1670,6 @@ def timelapse_view(date_or_file):
 
     wx  = _day_weather_summary(date_str)   # local snapshots (humidity)
     om  = _open_meteo_weather(date_str)    # Open-Meteo archive
-
-    # Rating state
-    _rdata      = _read_ratings().get(date_str, {})
-    rating_count = _rdata.get('count', 0)
-    rating_avg   = round(_rdata['sum'] / rating_count, 1) if rating_count else None
-    user_rating  = request.cookies.get(f'tl_rated_{date_str}')  # '3','4','5' or None
 
     def stat(label, val, unit=''):
         if val is None:
@@ -1668,7 +1748,6 @@ def timelapse_view(date_or_file):
                 if next_date else '<span class="nav-btn disabled">&#8594;</span>')
     prev_js     = f'"{prev_date}"' if prev_date else 'null'
     next_js     = f'"{next_date}"' if next_date else 'null'
-    rating_avg_js = rating_avg if rating_avg is not None else 'null'
 
     # List all dates newest-first with snapshot thumbnails, sunset time, and rating
     import re as _re
@@ -2027,13 +2106,16 @@ def timelapse_view(date_or_file):
       }}, {{passive: true}});
     }})();
     // Star rating widget (3–5 stars only; one rating per day via cookie)
+    // Fully client-side so the HTML page is cacheable by Cloudflare.
     (function() {{
-      const dateStr  = '{date_str}';
-      let   userRated = {user_rating or 'null'};   // number (3/4/5) or null
-      let   rCount   = {rating_count};
-      let   rAvg     = {rating_avg_js};             // float or null
-      const starsEl  = document.querySelectorAll('#stars .star');
-      const infoEl   = document.getElementById('rating-info');
+      const dateStr = '{date_str}';
+      function getCookie(name) {{
+        const m = document.cookie.match('(?:^|;)\\s*' + name + '=([^;]*)');
+        return m ? decodeURIComponent(m[1]) : null;
+      }}
+      let userRated = parseInt(getCookie('tl_rated_' + dateStr)) || null;
+      const starsEl = document.querySelectorAll('#stars .star');
+      const infoEl  = document.getElementById('rating-info');
 
       function setLit(upTo) {{
         starsEl.forEach(function(s) {{
@@ -2041,44 +2123,62 @@ def timelapse_view(date_or_file):
         }});
       }}
       function showInfo(rated, count, avg) {{
-        let txt = '';
-        if (rated)  txt += 'You rated ' + rated + '\u2605';
-        if (count)  txt += (rated ? ' \u00b7 ' : '') + 'Avg ' + avg + '\u2605 (' + count + ')';
-        infoEl.textContent = txt;
-        infoEl.style.color = rated ? '#f5c518' : '#aaa';
+        if (!count || avg === null) {{
+          infoEl.innerHTML = rated ? 'You rated ' + rated + '\u2605' : '';
+          infoEl.style.color = '#f5c518';
+          return;
+        }}
+        const nLit = Math.min(5, Math.max(0, Math.round(avg)));
+        const stars = [1,2,3,4,5].map(function(i) {{
+          return '<span class="ls' + (i <= nLit ? ' lit' : '') + '">&#9733;</span>';
+        }}).join('');
+        infoEl.innerHTML = avg.toFixed(1) + '&thinsp;<span class="list-stars">' + stars + '</span>&thinsp;(' + count + ')';
+        infoEl.style.color = '#ccc';
       }}
       function freeze(val) {{
         starsEl.forEach(function(s) {{ s.style.pointerEvents = 'none'; }});
         setLit(val);
       }}
 
-      showInfo(userRated, rCount, rAvg);
-      if (userRated) {{ freeze(userRated); return; }}
+      showInfo(userRated, null, null);
+      if (userRated) freeze(userRated);
 
-      starsEl.forEach(function(s) {{
-        if (!s.classList.contains('clickable')) return;
-        s.addEventListener('mouseenter', function() {{ setLit(+s.dataset.val); }});
-        s.addEventListener('mouseleave', function() {{ setLit(0); }});
-        s.addEventListener('click', function() {{
-          const v = +s.dataset.val;
-          fetch('/timelapse/' + dateStr + '/rate', {{
-            method: 'POST',
-            headers: {{'Content-Type': 'application/json'}},
-            body: JSON.stringify({{rating: v}})
-          }})
-          .then(function(r) {{ return r.json(); }})
-          .then(function(d) {{ freeze(v); showInfo(v, d.count, d.avg); }})
-          .catch(function() {{
-            infoEl.textContent = 'Rating failed \u2014 try again';
-            infoEl.style.color = '#e57373';
+      // Fetch live aggregate from API (served by Cloudflare Worker or Pi /api/ratings/DATE)
+      fetch('/api/ratings/' + dateStr)
+        .then(function(r) {{ return r.json(); }})
+        .then(function(d) {{ showInfo(userRated, d.count || 0, d.avg); }})
+        .catch(function() {{}});
+
+      if (!userRated) {{
+        starsEl.forEach(function(s) {{
+          if (!s.classList.contains('clickable')) return;
+          s.addEventListener('mouseenter', function() {{ setLit(+s.dataset.val); }});
+          s.addEventListener('mouseleave', function() {{ setLit(0); }});
+          s.addEventListener('click', function() {{
+            const v = +s.dataset.val;
+            fetch('/timelapse/' + dateStr + '/rate', {{
+              method: 'POST',
+              headers: {{'Content-Type': 'application/json'}},
+              body: JSON.stringify({{rating: v}})
+            }})
+            .then(function(r) {{ return r.json(); }})
+            .then(function(d) {{ freeze(v); userRated = v; showInfo(v, d.count, d.avg); }})
+            .catch(function() {{
+              infoEl.textContent = 'Rating failed \u2014 try again';
+              infoEl.style.color = '#e57373';
+            }});
           }});
         }});
-      }});
+      }}
     }})();
   </script>
 </body>
 </html>"""
-    return Response(html, mimetype='text/html')
+    from datetime import date as _date
+    is_past = date_str < _date.today().isoformat()
+    cache_hdr = ('public, max-age=31536000, immutable' if is_past
+                 else 'public, max-age=600, must-revalidate')
+    return Response(html, mimetype='text/html', headers={'Cache-Control': cache_hdr})
 
 
 @app.route('/control/<token>')
