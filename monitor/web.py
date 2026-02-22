@@ -1446,11 +1446,23 @@ def _day_weather_summary(date_str):
 
 @app.route('/timelapse')
 def timelapse_index():
-    """Redirect to the most recent timelapse with avg rating >= 4.5, else latest."""
+    """Redirect to a timelapse date.
+
+    ?today  → today if available, yesterday if today not yet generated, else latest
+    default → most recent date with avg rating >= 4.5, else latest
+    """
+    from flask import redirect, request as _req
+    from datetime import date as _date, timedelta as _td
     dates = _timelapse_dates()
     if not dates:
         return Response('No timelapses available yet.', status=404, mimetype='text/plain')
-    from flask import redirect
+    dates_set = set(dates)
+    if 'today' in _req.args:
+        today = _date.today().isoformat()
+        yesterday = (_date.today() - _td(days=1)).isoformat()
+        for d in (today, yesterday):
+            if d in dates_set:
+                return redirect(f'/timelapse/{d}')
     ratings = _read_ratings()
     for d in reversed(dates):
         r = ratings.get(d, {})
