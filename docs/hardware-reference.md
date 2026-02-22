@@ -268,7 +268,7 @@ SCL    <-->  BCM 3 (Pin 5)
 ```
 Relay Board     Raspberry Pi     Function            Power Wire
 -----------     ------------     --------            ----------
-VCC       <-->  5V or 12V        Power for relays
+VCC       <-->  12V              Power for relay coils and valve actuators
 GND       <-->  Ground
 IN1       <-->  BCM 26 (Pin 37)  Bypass Valve        Wire 2
 IN2       <-->  BCM 19 (Pin 35)  Supply Valve        Wire 3
@@ -302,13 +302,16 @@ The Pi lives in a weatherproof enclosure with cable glands for:
 
 ```mermaid
 graph LR
-    AC[120V AC] --> PSU[12V 5A Power Supply]
-    PSU --> Relays[Relay Coils]
-    PSU --> Buck[12V to 5V USB-C<br/>Converter]
-    Buck --> Pi[Raspberry Pi 4<br/>~3-4W typical]
+    AC[120V AC] --> PSU[12V DC Power Supply]
+    PSU --> Buck[DC-DC Buck Converter<br/>12V → 5V USB-C]
+    PSU --> RelayCoils[Relay Board Coils<br/>12V logic]
+    PSU --> Float[Float Switch<br/>12V supply]
+    Buck --> Pi[Raspberry Pi 4<br/>~3-4W]
+    RelayCoils -->|Relay contacts close| Valves[Electric Valves<br/>Supply override · Bypass · Purge]
+    Float -->|Float switch contact| SupplyValve[Supply Valve<br/>normal open/close]
 ```
 
-Separate power supplies prevent relay switching noise from affecting Pi power.
+One 12V supply powers everything: the Pi (via DC-DC buck converter to 5V USB-C), the relay board coils, the float switch circuit, and — through the relay contacts — the electric valve actuators. The float switch is wired in series with the supply valve's 12V feed so it directly controls valve power. The Pi's override relay (BCM 19) is wired in parallel with the float switch contact, allowing the Pi to hold the valve open regardless of float state.
 
 ### GPIO Library Usage
 
@@ -394,16 +397,16 @@ Monitor for enclosure temperature <40°F and humidity spikes (ice formation/melt
 ```mermaid
 graph TB
     subgraph "External"
-        Well[Well Pump<br/>Neighbor controlled]
+        Well[Well Pump<br/>Highest-elevation tank controls power]
         Tank[~1400 Gal Tank]
         AC[120V AC Power]
     end
 
     subgraph "Pi Enclosure - Weatherproof Box"
         Pi[Raspberry Pi 4<br/>BCM GPIO]
-        PSU[12V 5A PSU]
-        Buck[12V→5V USB-C]
-        Relays[4x Relay Board<br/>26,19,13,6]
+        PSU[12V DC PSU]
+        Buck[DC-DC Buck<br/>12V→5V USB-C]
+        Relays[4x Relay Board<br/>26,19,13,6<br/>12V coils + contacts]
         TempSens[AHT20<br/>I2C 0x38<br/>Inside box]
     end
 
@@ -421,8 +424,13 @@ graph TB
 
     AC --> PSU
     PSU --> Buck
-    PSU --> Relays
-    Buck -->|USB-C| Pi
+    PSU -->|12V coils| Relays
+    PSU -->|12V| Float
+    Relays -->|12V contacts| Bypass
+    Relays -->|12V contacts| Supply
+    Relays -->|12V contacts| Spindown
+    Float -.->|Hardwired| Supply
+    Buck -->|USB-C 5V| Pi
     Pi -->|I2C SDA/SCL| TempSens
     Pi -->|WiringPi Ch1| Relays
     Pi -->|WiringPi Ch2| Relays
