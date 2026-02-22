@@ -1,6 +1,7 @@
 # Log files
 *.log
 *.csv
+!monitor/weather_quips.csv
 output.txt
 
 # Python

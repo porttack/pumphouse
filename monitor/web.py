@@ -1274,6 +1274,19 @@ _WMO = {
     96: "Thunderstorm w/ hail", 99: "Heavy thunderstorm w/ hail",
 }
 
+# Load weather quips from CSV: {description_lower: [quip, ...]}
+_QUIPS: dict = {}
+try:
+    import csv as _csv
+    _quips_path = os.path.join(os.path.dirname(__file__), 'weather_quips.csv')
+    with open(_quips_path, newline='') as _qf:
+        for _row in _csv.DictReader(_qf):
+            _QUIPS[_row['Description'].lower()] = [
+                _row[k] for k in ('Roast 1', 'Roast 2', 'Roast 3') if _row.get(k)
+            ]
+except Exception:
+    pass
+
 
 def _open_meteo_weather(date_str):
     """
@@ -1695,7 +1708,13 @@ def timelapse_view(date_or_file):
             hi_lo_str = f"{om['temp_max']}–{om['temp_min']}"
         else:
             hi_lo_str = None
-        desc_html = f'<div class="wx-desc">{om["weather_desc"]}</div>' if om.get('weather_desc') else ''
+        desc_html = ''
+        if om.get('weather_desc'):
+            import random as _random
+            _opts = _QUIPS.get(om['weather_desc'].lower(), [])
+            _quip = _random.choice(_opts) if _opts else ''
+            _quip_html = f' <span class="wx-quip">{_quip}</span>' if _quip else ''
+            desc_html = f'<div class="wx-desc">{om["weather_desc"]}{_quip_html}</div>'
         wx_html = f"""
         <div class="weather">
           {desc_html}
@@ -1856,6 +1875,7 @@ def timelapse_view(date_or_file):
                 border-radius:4px; padding:12px 16px; margin:12px 0;
                 display:flex; flex-direction:column; gap:8px; }}
     .wx-desc  {{ font-size:1.05em; color:#aed6f1; font-weight:bold; }}
+    .wx-quip  {{ font-size:0.9em; color:#888; font-weight:normal; font-style:italic; }}
     .wx-group {{ display:flex; flex-wrap:wrap; gap:12px; }}
     .stat {{ display:flex; flex-direction:column; min-width:80px; }}
     .lbl  {{ font-size:0.75em; color:#888; text-transform:uppercase; }}
