@@ -180,6 +180,151 @@ the current average from KV, updates it, and writes back. The Pi is never involv
 
 ---
 
+## SIDEBAR: TLS Certificates and Let's Encrypt — How Trust Works on the Web
+
+### The Problem: Why Would You Trust a Stranger's Website?
+
+When your browser connects to `https://onblackberryhill.com`, it has never met that server before.
+How does it know it isn't being tricked into connecting to an impersonator? How does it know the
+connection is private? The answer is TLS — and it's worth understanding in detail, because it's
+one of the most elegant systems in computer science.
+
+### Public-Key Cryptography in 60 Seconds
+
+TLS is built on **asymmetric (public-key) cryptography**. Here's the core idea:
+
+- You generate a **key pair**: a public key and a private key. They are mathematically linked.
+- Anything encrypted with the **public key** can only be decrypted with the **private key**.
+- The public key can be shared with everyone. The private key never leaves your server.
+
+This solves a fundamental problem: two strangers on the internet can establish a private channel
+without ever having met. The browser uses the server's public key to encrypt a secret; only the
+server's private key can decrypt it. From that shared secret, both sides derive a symmetric encryption
+key for the rest of the session (symmetric is faster for bulk data).
+
+### The TLS Handshake (Simplified)
+
+When your browser connects to an HTTPS site, this happens in milliseconds:
+
+1. **Browser → Server:** "Hello. Here are the encryption methods I support."
+2. **Server → Browser:** "Hello. Here is my certificate (containing my public key)."
+3. **Browser:** *"Is this certificate signed by someone I trust? Is it for this domain? Is it
+   expired?"* If all three: yes. Otherwise: red warning screen.
+4. **Browser → Server:** Encrypts a random secret using the server's public key. Sends it.
+5. **Server:** Decrypts with its private key. Now both sides have the same secret.
+6. **Both:** Derive a symmetric session key from that secret. All further communication is
+   encrypted with that symmetric key.
+
+The clever part: step 4 can only be completed by whoever holds the private key. An impersonator
+who intercepted the certificate (public key only) cannot decrypt the browser's secret and cannot
+participate in the session.
+
+### The Chain of Trust: Why Certificates Work
+
+A certificate contains: the domain name, the public key, an expiration date, and a **digital
+signature** from a Certificate Authority (CA). A CA is an organization that vouches:
+*"We verified that whoever controls this certificate controls this domain."*
+
+But why would your browser trust the CA? Because your browser (actually your operating system)
+ships with a built-in list of **root Certificate Authorities** — about 150 organizations worldwide
+that browser vendors have decided to trust. Apple, Microsoft, Mozilla, and Google each maintain
+their own list.
+
+The chain looks like this:
+
+```
+Root CA (pre-installed in your OS/browser, implicitly trusted)
+  └─ Intermediate CA (signed by Root CA)
+       └─ Your site's certificate (signed by Intermediate CA)
+```
+
+Your browser walks this chain. If every signature is valid and the root is in its trusted list,
+the connection is trusted. If anyone in the chain is compromised or expired, the whole chain fails.
+
+This is why certificate authorities are extremely high-value targets. In 2011, a Dutch CA called
+DigiNotar was hacked and attackers issued fraudulent certificates for Google.com, allowing
+man-in-the-middle attacks on Iranian Gmail users. DigiNotar was removed from all browser trust lists
+and went bankrupt within weeks.
+
+### The Problem Before Let's Encrypt: Certificates Were Expensive and Hard
+
+Before 2016, getting a TLS certificate involved:
+- Paying $50–$300 per year to a commercial CA
+- Generating a Certificate Signing Request (CSR) — a complex command-line operation
+- Submitting proof of domain ownership through a manual process
+- Waiting days for validation and issuance
+- Manually renewing every 1–2 years (and forgetting, causing outages)
+
+The result: as of 2014, only about **30% of web traffic was encrypted**. HTTP was the default.
+Small sites, personal projects, school websites — most couldn't justify the cost or complexity.
+
+### Let's Encrypt: Free, Automated, Open
+
+In 2016, the Internet Security Research Group (ISRG) launched **Let's Encrypt** — a free, automated,
+open Certificate Authority backed by Mozilla, the Electronic Frontier Foundation, Cisco, and others.
+
+Let's Encrypt made two radical changes:
+
+1. **Free.** Every certificate, forever. Funded by donations and sponsorships.
+2. **Automated.** The ACME protocol (Automated Certificate Management Environment) lets a small
+   program on your server request, validate, and renew certificates automatically — no human involved.
+
+The Pi in this project uses a Let's Encrypt certificate, renewed automatically every 90 days by a
+cron job running `certbot renew`. The entire process takes seconds and requires no manual steps.
+
+### How Domain Validation Works (ACME Protocol)
+
+Let's Encrypt needs to verify you actually control the domain before issuing a certificate.
+There are two common methods:
+
+**HTTP-01 Challenge:**
+1. You request a certificate for `example.com`
+2. Let's Encrypt says: "Place this random token at `http://example.com/.well-known/acme-challenge/TOKEN`"
+3. Let's Encrypt fetches that URL. If it finds the token, you control the domain.
+4. Certificate issued.
+
+**DNS-01 Challenge:**
+1. You request a certificate for `*.example.com` (a wildcard)
+2. Let's Encrypt says: "Add this TXT record to your DNS: `_acme-challenge.example.com = TOKEN`"
+3. Let's Encrypt queries DNS. If it finds the token, you control the domain (and its DNS).
+4. Wildcard certificate issued. (Only DNS-01 can issue wildcards.)
+
+The key insight: both challenges prove domain control *without* any human at Let's Encrypt
+reviewing anything. The entire system is automated at scale, issuing hundreds of millions of
+certificates.
+
+### The Impact
+
+By 2024, **~95% of web traffic is encrypted** — up from 30% in 2014. Let's Encrypt is the
+single largest reason. It removed the cost and complexity barrier that kept most of the web unencrypted.
+
+This is a concrete example of how a nonprofit, open-source project changed the security posture
+of the entire internet.
+
+### How This Project Uses It
+
+The Pi runs `certbot` (Let's Encrypt's official client) to maintain a certificate for its
+`tplinkdns.com` hostname. The Cloudflare Tunnel uses a separate certificate that Cloudflare
+manages automatically for `onblackberryhill.com`. The developer never manually handles certificate
+renewal for either.
+
+### Discussion Questions
+
+1. A certificate proves you control a domain — not that you're a legitimate business. A phishing
+   site for `paypa1.com` can get a valid Let's Encrypt certificate. What does HTTPS actually
+   guarantee, and what doesn't it guarantee?
+2. Let's Encrypt certificates expire every 90 days (vs. 1–2 years for commercial certs).
+   The short lifetime is a deliberate security choice. Why might frequent expiration improve security?
+3. About 150 root CAs are trusted by browsers. If any one of them issues a fraudulent certificate,
+   every browser in the world will trust it. Is this system too centralized? What would you change?
+4. Let's Encrypt is free because it's funded by donations from Mozilla, Google, Cisco, and others.
+   These same companies compete in the browser and cloud markets. Is that a conflict of interest?
+   What happens if the funding disappears?
+5. Before Let's Encrypt, a student building a personal project couldn't afford a TLS certificate.
+   How does the existence of free certificates change who can participate in building the web?
+
+---
+
 ## SIDEBAR: Zero Trust — What It Means and Why It Matters
 
 ### The Old Model: Castle and Moat
@@ -531,6 +676,22 @@ high-school audience; technical precision is balanced against accessibility.
 | **Uniform Sampling** | Selecting every Nth item from a sequence at regular intervals. Simple, O(n), treats all time equally. |
 | **Adaptive Sampling** | Selecting items based on how much they differ from the previous selection. More complex, better results for content with variable rate of change. |
 
+### TLS / Let's Encrypt Sidebar
+
+| Term | Definition |
+|------|------------|
+| **Public Key** | Half of an asymmetric key pair. Shared freely. Anything encrypted with it can only be decrypted by the corresponding private key. |
+| **Private Key** | The secret half of an asymmetric key pair. Never shared. Stored only on the server. Possession of the private key proves identity. |
+| **TLS Handshake** | The automated negotiation that happens at the start of every HTTPS connection. Establishes which encryption methods to use, exchanges the server's certificate, and derives a shared session key. Takes milliseconds. |
+| **Root CA** | A Certificate Authority whose certificate is pre-installed in operating systems and browsers. The foundation of the web's trust hierarchy. Approximately 150 exist worldwide. |
+| **Chain of Trust** | The hierarchy from a site certificate → intermediate CA → root CA. A browser validates every link in the chain. A broken or compromised link invalidates the whole certificate. |
+| **Let's Encrypt** | A free, automated, open Certificate Authority launched in 2016 by the Internet Security Research Group (ISRG). Issues certificates via the ACME protocol. Credited with raising encrypted web traffic from ~30% to ~95%. |
+| **ACME Protocol** | Automated Certificate Management Environment. The standard protocol Let's Encrypt uses to automatically issue and renew certificates without human involvement. |
+| **HTTP-01 Challenge** | A Let's Encrypt domain validation method: place a specific token at a well-known URL on your server. Let's Encrypt fetches it to prove you control the domain. |
+| **DNS-01 Challenge** | A Let's Encrypt domain validation method: add a specific TXT record to your DNS. Required for wildcard certificates (`*.example.com`). |
+| **certbot** | Let's Encrypt's official client software. Runs on your server, handles the ACME protocol, requests/renews certificates, and can automatically configure web servers. |
+| **Man-in-the-Middle Attack** | An attack where a third party intercepts and can read or modify traffic between two parties who believe they are communicating directly. TLS prevents this by requiring certificate validation. |
+
 ### Session 5 — Security
 
 | Term | Definition |
@@ -640,10 +801,10 @@ Rather than one giant deck, consider generating these separately:
 
 | Deck | Content to Paste | Audience | Length |
 |------|-----------------|----------|--------|
-| **Session 1 intro deck** | Session 1 section only + Zero Trust sidebar | Students (first day) | ~15 slides |
-| **Full unit overview** | Entire document | Teacher planning / admin | ~40 slides |
-| **Vocabulary reference** | Appendix A only | Students (study guide) | ~20 slides |
-| **Security deep-dive** | Session 5 + Zero Trust sidebar | Students (session 5) | ~12 slides |
+| **Session 1 intro deck** | Session 1 section only + TLS sidebar | Students (first day) | ~15 slides |
+| **Full unit overview** | Entire document | Teacher planning / admin | ~45 slides |
+| **Vocabulary reference** | Appendix A only | Students (study guide) | ~25 slides |
+| **Security deep-dive** | Session 5 + TLS sidebar + Zero Trust sidebar | Students (session 5) | ~18 slides |
 
 ---
 
