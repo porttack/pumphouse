@@ -2088,31 +2088,35 @@ def timelapse_view(date_or_file):
     }})();
     // Touch swipe navigation
     //   left  → newer day   right → older day
-    //   up    → newer day   down  → older day  (disabled when chevron list is open)
+    //   up    → newer day   down  → older day  (velocity-gated; disabled when chevron open)
+    // Vertical swipes require speed ≥ 0.4 px/ms to distinguish navigation from content scroll.
     (function() {{
       const prev    = {prev_js};
       const next    = {next_js};
       const details = document.querySelector('details');
-      var tx = null, ty = null;
+      var tx = null, ty = null, tt = null;
       document.addEventListener('touchstart', function(e) {{
         tx = e.touches[0].clientX;
         ty = e.touches[0].clientY;
+        tt = Date.now();
       }}, {{passive: true}});
       document.addEventListener('touchend', function(e) {{
         if (tx === null) return;
-        var dx = e.changedTouches[0].clientX - tx;
-        var dy = e.changedTouches[0].clientY - ty;
-        tx = null; ty = null;
+        var dx  = e.changedTouches[0].clientX - tx;
+        var dy  = e.changedTouches[0].clientY - ty;
+        var dt  = Math.max(1, Date.now() - tt);
+        tx = null; ty = null; tt = null;
         var adx = Math.abs(dx), ady = Math.abs(dy);
-        // Horizontal swipe (left/right): threshold 60px, must be more horizontal than vertical
+        // Horizontal swipe (left/right): 60px threshold, more horizontal than vertical
         if (adx >= 60 && adx > ady * 1.5) {{
           if (dx > 0 && prev) location.href = '/timelapse/' + prev;  // right → older
           if (dx < 0 && next) location.href = '/timelapse/' + next;  // left  → newer
           return;
         }}
-        // Vertical swipe (up/down): threshold 80px, must be more vertical than horizontal
-        // Disabled when the All Timelapses list is open (let it scroll normally)
-        if (ady >= 80 && ady > adx * 1.5 && !(details && details.open)) {{
+        // Vertical swipe (up/down): 80px threshold, more vertical than horizontal,
+        // AND fast enough (≥ 0.4 px/ms) to distinguish a swipe from content scrolling.
+        // Disabled when the All Timelapses list is open.
+        if (ady >= 80 && ady > adx * 1.5 && ady / dt >= 0.4 && !(details && details.open)) {{
           if (dy < 0 && next) location.href = '/timelapse/' + next;  // up   → newer
           if (dy > 0 && prev) location.href = '/timelapse/' + prev;  // down → older
         }}
