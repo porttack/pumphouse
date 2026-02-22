@@ -1634,8 +1634,10 @@ def timelapse_view(date_or_file):
         f'<button class="speed-btn" data-rate="2">2x</button>'
         f'<button class="speed-btn" data-rate="4">4x</button>'
         f'<button class="speed-btn" data-rate="8">8x</button>'
+        f'</div>'
+        f'<div class="ctrl-btns">'
         f'<button id="pause-btn" class="speed-btn pause-btn">&#9646;&#9646; Pause</button>'
-        f'<button id="dl-btn" class="speed-btn dl-btn" title="Download current frame as JPEG">&#8681; Snapshot</button>'
+        f'<button id="dl-btn" class="speed-btn dl-btn">&#8681; Snapshot</button>'
         f'</div>'
         if has_video else
         '<p class="no-video">No timelapse recorded for this date.</p>'
@@ -1724,13 +1726,20 @@ def timelapse_view(date_or_file):
     * {{ box-sizing: border-box; }}
     body {{ font-family: monospace; background:#1a1a1a; color:#e0e0e0;
            margin:0; padding:16px; }}
-    h2   {{ margin:0 0 12px; color:#fff; }}
+    h2   {{ margin:0; color:#fff; }}
     video {{ width:100%; max-width:960px; display:block;
              background:#000; border-radius:4px; }}
     .no-video {{ color:#888; font-style:italic; }}
+    .site-header {{ max-width:960px; padding:4px 0 10px; margin-bottom:4px;
+                    border-bottom:1px solid #333; }}
+    .site-name {{ font-size:1.2em; color:#fff; font-weight:bold; }}
+    .site-sub  {{ font-size:0.85em; color:#888; margin-left:10px; }}
+    .site-sub a {{ color:#4CAF50; text-decoration:none; }}
+    .site-sub a:hover {{ color:#fff; }}
     .nav {{ display:flex; justify-content:space-between; align-items:center;
             max-width:960px; margin:12px 0; }}
-    .nav h2 {{ flex:1; text-align:center; }}
+    .nav-center {{ flex:1; text-align:center; }}
+    .swipe-hint {{ display:none; color:#666; font-size:0.8em; margin-top:3px; }}
     .nav-btn {{ background:#2a2a2a; color:#4CAF50; border:1px solid #444;
                 padding:8px 20px; border-radius:4px; text-decoration:none;
                 white-space:nowrap; font-size:1.05em; }}
@@ -1745,16 +1754,17 @@ def timelapse_view(date_or_file):
     .lbl  {{ font-size:0.75em; color:#888; text-transform:uppercase; }}
     .val  {{ font-size:1.1em; color:#e0e0e0; }}
     .speed-btns {{ max-width:960px; display:flex; align-items:center;
-                   gap:6px; margin:8px 0; }}
+                   gap:6px; margin:8px 0 4px; }}
+    .ctrl-btns  {{ max-width:960px; display:flex; gap:6px; margin:0 0 8px; }}
     .speed-lbl  {{ color:#888; font-size:0.85em; margin-right:4px; }}
     .speed-btn  {{ background:#2a2a2a; color:#4CAF50; border:1px solid #444;
                    padding:4px 10px; border-radius:4px; cursor:pointer;
                    font-family:monospace; font-size:0.9em; }}
     .speed-btn:hover  {{ background:#333; }}
     .speed-btn.active {{ background:#4CAF50; color:#000; border-color:#4CAF50; }}
-    .pause-btn        {{ margin-left:10px; color:#aaa; border-color:#555; }}
+    .pause-btn        {{ color:#aaa; border-color:#555; }}
     .pause-btn.paused {{ background:#e57373; color:#000; border-color:#e57373; }}
-    .dl-btn           {{ margin-left:4px; color:#aaa; border-color:#555; }}
+    .dl-btn           {{ color:#aaa; border-color:#555; }}
     details {{ max-width:960px; margin-top:16px; }}
     summary {{ cursor:pointer; color:#4CAF50; }}
     ul {{ list-style:none; padding:0; margin:8px 0; }}
@@ -1788,16 +1798,29 @@ def timelapse_view(date_or_file):
     .star.lit {{ color:#f5c518; }}
     .rating-info {{ color:#aaa; font-size:0.85em; }}
     @media (max-width:600px) {{
-      .nav-label {{ display:none; }}
-      .nav h2 {{ font-size:1.0em; }}
+      .nav-label  {{ display:none; }}
+      .nav-center h2 {{ font-size:1.0em; }}
+      .swipe-hint {{ display:block; }}
       .thumb {{ width:44vw; height:calc(44vw * 9 / 16); }}
+      .site-sub {{ display:none; }}
     }}
   </style>
 </head>
 <body>
+  <header class="site-header">
+    <span class="site-name">On Blackberry Hill</span>
+    <span class="site-sub">
+      <a href="https://www.meredithlodging.com/listings/1830" target="_blank" rel="noopener">Meredith Lodging</a>
+      &middot; Newport, Oregon &middot;
+      <a href="https://www.airbnb.com/rooms/894278114876445404" target="_blank" rel="noopener">Airbnb</a>
+    </span>
+  </header>
   <div class="nav">
     {prev_btn}
-    <h2>Sunset &mdash; {title_date}</h2>
+    <div class="nav-center">
+      <h2>Sunset &mdash; {title_date}</h2>
+      <div class="swipe-hint">swipe &#8592; &#8594; to change days</div>
+    </div>
     {next_btn}
   </div>
   {video_html}
@@ -1841,10 +1864,14 @@ def timelapse_view(date_or_file):
         }}
       }});
     }}
-    // Download current video frame as JPEG
+    // Snapshot button: open JPEG page on touch devices; download frame on desktop
     const dlBtn = document.getElementById('dl-btn');
     if (dlBtn && vid) {{
       dlBtn.addEventListener('click', () => {{
+        if (navigator.maxTouchPoints > 0) {{
+          window.open('/timelapse/{date_str}/snapshot', '_blank');
+          return;
+        }}
         const canvas = document.createElement('canvas');
         canvas.width  = vid.videoWidth;
         canvas.height = vid.videoHeight;
