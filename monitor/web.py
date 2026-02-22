@@ -1750,8 +1750,16 @@ def timelapse_view(date_or_file):
     next_js     = f'"{next_date}"' if next_date else 'null'
 
     # List all dates newest-first with snapshot thumbnails, sunset time, and rating
-    import re as _re
+    import re as _re, json as _json
     all_ratings = _read_ratings()
+
+    # Dates with average rating >= 3 stars — used for vertical swipe/scroll navigation
+    star_dates = [
+        d for d in dates
+        if all_ratings.get(d, {}).get('count', 0) > 0
+        and all_ratings[d]['sum'] / all_ratings[d]['count'] >= 3.0
+    ]
+    star_dates_js = _json.dumps(star_dates)
 
     def _list_html(ds):
         import json as _json
@@ -1927,7 +1935,7 @@ def timelapse_view(date_or_file):
     {prev_btn}
     <div class="nav-center">
       <h2>Sunset &mdash; {title_date}</h2>
-      <div class="swipe-hint">swipe &#8592; &#8594; &#8593; &#8595; to change days</div>
+      <div class="swipe-hint">swipe to change days</div>
     </div>
     {next_btn}
   </div>
@@ -2087,53 +2095,74 @@ def timelapse_view(date_or_file):
       }});
     }})();
     // Touch swipe navigation
-    //   left  → newer day   right → older day
-    //   up    → newer day   down  → older day  (velocity-gated; disabled when chevron open)
-    // Vertical swipes require speed ≥ 0.4 px/ms to distinguish navigation from content scroll.
+    //   left/right : any day (ignore star rating)    left → older, right → newer
+    //   up/down    : 3+ star days only               up → older, down → newer
+    //   Vertical swipes: velocity-gated (≥ 0.4 px/ms), must start or end in video area,
+    //   and are disabled when the All Timelapses chevron is open.
     (function() {{
-      const prev    = {prev_js};
-      const next    = {next_js};
-      const details = document.querySelector('details');
-      var tx = null, ty = null, tt = null;
+      const prev      = {prev_js};
+      const next      = {next_js};
+      const starDates = {star_dates_js};  // dates with avg rating >= 3 stars
+      const details   = document.querySelector('details');
+      const vidEl     = document.getElementById('vid');
+
+      // Find prev/next among star-rated dates from current page's date
+      const curDate   = '{date_str}';
+      const si        = starDates.indexOf(curDate);
+      const starPrev  = si > 0 ? starDates[si - 1] : null;
+      const starNext  = si >= 0 && si < starDates.length - 1 ? starDates[si + 1] : null;
+
+      function inVideoArea(x, y) {{
+        if (!vidEl) return false;
+        const r = vidEl.getBoundingClientRect();
+        return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+      }}
+
+      var tx = null, ty = null, tt = null, startInVid = false;
       document.addEventListener('touchstart', function(e) {{
         tx = e.touches[0].clientX;
         ty = e.touches[0].clientY;
         tt = Date.now();
+        startInVid = inVideoArea(tx, ty);
       }}, {{passive: true}});
       document.addEventListener('touchend', function(e) {{
         if (tx === null) return;
-        var dx  = e.changedTouches[0].clientX - tx;
-        var dy  = e.changedTouches[0].clientY - ty;
+        var ex  = e.changedTouches[0].clientX;
+        var ey  = e.changedTouches[0].clientY;
+        var dx  = ex - tx;
+        var dy  = ey - ty;
         var dt  = Math.max(1, Date.now() - tt);
         tx = null; ty = null; tt = null;
         var adx = Math.abs(dx), ady = Math.abs(dy);
-        // Horizontal swipe (left/right): 60px threshold, more horizontal than vertical
+        // Horizontal swipe (left/right): 60px, more horizontal than vertical
+        // Any day, no star filter, no video area requirement
         if (adx >= 60 && adx > ady * 1.5) {{
-          if (dx > 0 && prev) location.href = '/timelapse/' + prev;  // right → older
           if (dx < 0 && next) location.href = '/timelapse/' + next;  // left  → newer
+          if (dx > 0 && prev) location.href = '/timelapse/' + prev;  // right → older
           return;
         }}
-        // Vertical swipe (up/down): 80px threshold, more vertical than horizontal,
-        // AND fast enough (≥ 0.4 px/ms) to distinguish a swipe from content scrolling.
-        // Disabled when the All Timelapses list is open.
-        if (ady >= 80 && ady > adx * 1.5 && ady / dt >= 0.4 && !(details && details.open)) {{
-          if (dy < 0 && next) location.href = '/timelapse/' + next;  // up   → newer
-          if (dy > 0 && prev) location.href = '/timelapse/' + prev;  // down → older
+        // Vertical swipe (up/down): 80px, more vertical than horizontal,
+        // fast enough (≥ 0.4 px/ms), must start or end in video area,
+        // and chevron list must be closed.
+        var endInVid = inVideoArea(ex, ey);
+        if (ady >= 80 && ady > adx * 1.5 && ady / dt >= 0.4
+            && (startInVid || endInVid) && !(details && details.open)) {{
+          if (dy > 0 && starNext) location.href = '/timelapse/' + starNext;  // down → newer
+          if (dy < 0 && starPrev) location.href = '/timelapse/' + starPrev;  // up   → older
         }}
       }}, {{passive: true}});
 
       // Mouse wheel / trackpad scroll navigation (desktop)
-      // Only fires when already at the top of the page (scrollY ≈ 0) so normal
-      // page scrolling still works. Disabled when chevron list is open.
+      // Navigates between 3+ star days. Only at page top; disabled when chevron open.
       var wheelCooldown = 0;
       document.addEventListener('wheel', function(e) {{
-        if (details && details.open) return;           // let list scroll
-        if (window.scrollY > 10) return;               // only at page top
+        if (details && details.open) return;
+        if (window.scrollY > 10) return;
         var now = Date.now();
-        if (now - wheelCooldown < 600) return;         // debounce
-        if (Math.abs(e.deltaY) < 40) return;           // ignore tiny nudges
-        if (e.deltaY < 0 && next) {{ wheelCooldown = now; location.href = '/timelapse/' + next; }}
-        if (e.deltaY > 0 && prev) {{ wheelCooldown = now; location.href = '/timelapse/' + prev; }}
+        if (now - wheelCooldown < 600) return;
+        if (Math.abs(e.deltaY) < 40) return;
+        if (e.deltaY > 0 && starNext) {{ wheelCooldown = now; location.href = '/timelapse/' + starNext; }}
+        if (e.deltaY < 0 && starPrev) {{ wheelCooldown = now; location.href = '/timelapse/' + starPrev; }}
       }}, {{passive: true}});
     }})();
     // Star rating widget (3–5 stars only; one rating per day via cookie)
