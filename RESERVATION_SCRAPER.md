@@ -55,7 +55,7 @@ python3 scrape_reservations.py
 
 This creates/updates `reservations.csv` with all current reservations.
 
-### Check for New Reservations
+### Check for Reservation Changes
 
 ```bash
 python3 check_new_reservations.py
@@ -63,7 +63,10 @@ python3 check_new_reservations.py
 
 This compares current reservations with the snapshot and:
 - Logs new reservations to `events.csv` with type `NEW_RESERVATION`
-- Sends ntfy push notifications (if enabled)
+- Logs canceled/removed reservations with type `CANCELED_RESERVATION`
+- Logs modified reservations with type `CHANGED_RESERVATION` (tracks changes to
+  Check-In, Checkout, Nights, Guest, Type, Income, Status)
+- Sends ntfy push notifications for each type (if enabled)
 - Updates the snapshot for next comparison
 
 ### Run Complete Update
@@ -86,18 +89,33 @@ This runs both the scraper and checker in sequence.
 
 ## Notifications
 
-When a new reservation is detected:
+Three types of changes are detected on each run:
 
-1. **Event Logging**: Added to `events.csv` with format:
+### New Reservation
+1. **Event Logging**: Added to `events.csv`:
    ```
-   timestamp,event_type,notes
    2025-12-21 14:00:00,NEW_RESERVATION,John Doe | 2026-01-15 to 2026-01-18 (3n) | Airbnb | $450.00
    ```
+2. **Push Notification**: ntfy title "New Reservation - [Guest]", tags: `calendar house`
+   - Details: check-in, check-out, nights, type, income, booked date
 
-2. **Push Notification** (if enabled): Sent via ntfy with:
-   - Title: "New Reservation - [Guest Name]"
-   - Details: Check-in, check-out, nights, type, income, booked date
-   - Tags: calendar, house
+### Canceled Reservation
+1. **Event Logging**: Added to `events.csv`:
+   ```
+   2025-12-21 14:00:00,CANCELED_RESERVATION,John Doe | 2026-01-15 to 2026-01-18 (3n) | Airbnb | $450.00
+   ```
+2. **Push Notification**: ntfy title "Reservation Canceled - [Guest]", tags: `calendar x`
+   - Details: check-in, check-out, nights, type, income
+
+### Changed Reservation
+1. **Event Logging**: Added to `events.csv` with a compact change summary:
+   ```
+   2025-12-21 14:00:00,CHANGED_RESERVATION,John Doe | 2026-01-16 to 2026-01-19 (3n) | Airbnb | $450.00 | Check-In: 2026-01-15→2026-01-16; Checkout: 2026-01-18→2026-01-19
+   ```
+2. **Push Notification**: ntfy title "Reservation Changed - [Guest]", tags: `calendar pencil`
+   - Lists each changed field as `old → new`, then full current details
+
+Tracked fields for change detection: `Check-In`, `Checkout`, `Nights`, `Guest`, `Type`, `Income`, `Status`
 
 ## Data Fields
 
@@ -124,7 +142,7 @@ The scraper captures these fields from TrackHS:
 tail -f ~/src/pumphouse/reservation_updates.log
 
 # View recent events
-tail ~/src/pumphouse/events.csv | grep NEW_RESERVATION
+tail ~/src/pumphouse/events.csv | grep -E 'NEW_RESERVATION|CANCELED_RESERVATION|CHANGED_RESERVATION'
 ```
 
 ### Test Manual Run
@@ -154,9 +172,9 @@ grep CRON /var/log/syslog | grep update_reservations | tail -20
 
 ## Integration with Monitor
 
-New reservation events are logged to `events.csv` and will appear:
+Reservation events are logged to `events.csv` and will appear:
 - In the web dashboard under "Recent Events"
-- In the events.csv file with type `NEW_RESERVATION`
+- In the events.csv file with types `NEW_RESERVATION`, `CANCELED_RESERVATION`, or `CHANGED_RESERVATION`
 
 The reservation data is separate from the tank monitoring but uses the same event logging system for consistency.
 
@@ -171,7 +189,6 @@ The reservation data is separate from the tank monitoring but uses the same even
 
 Possible improvements:
 - Email notifications with full reservation details
-- Track cancellations and modifications
 - Revenue tracking and reporting
 - Integration with calendar services
 - Occupancy rate calculations

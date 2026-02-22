@@ -82,6 +82,77 @@ def detect_new_reservations(current_file, snapshot_file, debug=False):
 
     return new_reservations
 
+
+def detect_canceled_reservations(current_file, snapshot_file, debug=False):
+    """
+    Compare current reservations with snapshot to find canceled/removed bookings.
+
+    Args:
+        current_file: Path to current reservations.csv
+        snapshot_file: Path to previous snapshot
+        debug: Print debug info
+
+    Returns:
+        list: List of canceled reservation dicts (from snapshot)
+    """
+    current = load_reservations_csv(current_file)
+    previous = load_reservations_csv(snapshot_file)
+
+    # Find reservation IDs that were in previous but are no longer in current
+    canceled_ids = set(previous.keys()) - set(current.keys())
+
+    canceled_reservations = [previous[rid] for rid in canceled_ids]
+
+    # Sort by Check-In date (soonest first - most urgent)
+    canceled_reservations.sort(key=lambda x: x.get('Check-In', ''))
+
+    if debug and canceled_reservations:
+        print(f"Found {len(canceled_reservations)} canceled reservation(s)")
+
+    return canceled_reservations
+
+
+# Fields to compare when checking for changes
+TRACKED_FIELDS = ['Check-In', 'Checkout', 'Nights', 'Guest', 'Type', 'Income', 'Status']
+
+
+def detect_changed_reservations(current_file, snapshot_file, debug=False):
+    """
+    Compare current reservations with snapshot to find modified bookings.
+
+    Args:
+        current_file: Path to current reservations.csv
+        snapshot_file: Path to previous snapshot
+        debug: Print debug info
+
+    Returns:
+        list: List of (current_res, old_res, changed_fields) tuples
+    """
+    current = load_reservations_csv(current_file)
+    previous = load_reservations_csv(snapshot_file)
+
+    # Only look at IDs present in both (not new, not canceled)
+    common_ids = set(current.keys()) & set(previous.keys())
+
+    changes = []
+    for rid in common_ids:
+        cur = current[rid]
+        prev = previous[rid]
+        changed_fields = []
+        for field in TRACKED_FIELDS:
+            if cur.get(field, '') != prev.get(field, ''):
+                changed_fields.append((field, prev.get(field, ''), cur.get(field, '')))
+        if changed_fields:
+            changes.append((cur, prev, changed_fields))
+
+    # Sort by Check-In date (soonest first)
+    changes.sort(key=lambda x: x[0].get('Check-In', ''))
+
+    if debug and changes:
+        print(f"Found {len(changes)} changed reservation(s)")
+
+    return changes
+
 def log_new_reservation(reservation):
     """
     Log new reservation to events.csv.
@@ -189,6 +260,205 @@ def send_notification(reservation, debug=False):
 
     except Exception as e:
         print(f"ERROR sending notification: {e}")
+
+def send_notification_canceled(reservation, debug=False):
+    """
+    Send notification for a canceled/removed reservation.
+
+    Args:
+        reservation: Dict with reservation data (from snapshot)
+        debug: Print debug info
+    """
+    try:
+        from monitor.config import ENABLE_NOTIFICATIONS
+        from monitor.ntfy import send_notification as ntfy_send
+
+        if not ENABLE_NOTIFICATIONS:
+            if debug:
+                print("Notifications disabled in config")
+            return
+
+        guest = reservation.get('Guest', 'Unknown')
+        checkin = reservation.get('Check-In', 'Unknown')
+        checkout = reservation.get('Checkout', 'Unknown')
+        nights = reservation.get('Nights', '?')
+        res_type = reservation.get('Type', 'Unknown')
+        income = reservation.get('Income', '0')
+
+        title = f"Reservation Canceled - {guest}"
+        message = (
+            f"Check-in: {checkin}\n"
+            f"Check-out: {checkout}\n"
+            f"Nights: {nights}\n"
+            f"Type: {res_type}\n"
+            f"Income: ${income}"
+        )
+
+        try:
+            ntfy_send(title, message, tags=['calendar', 'x'])
+            if debug:
+                print(f"✓ Sent canceled ntfy notification")
+        except Exception as e:
+            if debug:
+                print(f"ntfy notification failed: {e}")
+
+    except Exception as e:
+        print(f"ERROR sending canceled notification: {e}")
+
+
+def send_notification_changed(current_res, old_res, changed_fields, debug=False):
+    """
+    Send notification for a changed reservation.
+
+    Args:
+        current_res: Dict with current (new) reservation data
+        old_res: Dict with old reservation data
+        changed_fields: List of (field, old_value, new_value) tuples
+        debug: Print debug info
+    """
+    try:
+        from monitor.config import ENABLE_NOTIFICATIONS
+        from monitor.ntfy import send_notification as ntfy_send
+
+        if not ENABLE_NOTIFICATIONS:
+            if debug:
+                print("Notifications disabled in config")
+            return
+
+        guest = current_res.get('Guest', 'Unknown')
+        checkin = current_res.get('Check-In', 'Unknown')
+        checkout = current_res.get('Checkout', 'Unknown')
+        nights = current_res.get('Nights', '?')
+        res_type = current_res.get('Type', 'Unknown')
+        income = current_res.get('Income', '0')
+
+        # Build a summary of what changed
+        change_lines = []
+        for field, old_val, new_val in changed_fields:
+            change_lines.append(f"  {field}: {old_val} → {new_val}")
+        changes_str = '\n'.join(change_lines)
+
+        title = f"Reservation Changed - {guest}"
+        message = (
+            f"Changes:\n{changes_str}\n\n"
+            f"Check-in: {checkin}\n"
+            f"Check-out: {checkout}\n"
+            f"Nights: {nights}\n"
+            f"Type: {res_type}\n"
+            f"Income: ${income}"
+        )
+
+        try:
+            ntfy_send(title, message, tags=['calendar', 'pencil'])
+            if debug:
+                print(f"✓ Sent changed ntfy notification")
+        except Exception as e:
+            if debug:
+                print(f"ntfy notification failed: {e}")
+
+    except Exception as e:
+        print(f"ERROR sending changed notification: {e}")
+
+
+def log_canceled_reservation(reservation):
+    """Log canceled reservation to events.csv."""
+    try:
+        events_file = Path(__file__).parent / 'events.csv'
+
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        guest = reservation.get('Guest', 'Unknown')
+        checkin = reservation.get('Check-In', 'Unknown')
+        checkout = reservation.get('Checkout', 'Unknown')
+        nights = reservation.get('Nights', '?')
+        res_type = reservation.get('Type', 'Unknown')
+        income = reservation.get('Income', '0')
+
+        event_data = {
+            'timestamp': timestamp,
+            'event_type': 'CANCELED_RESERVATION',
+            'pressure_state': '',
+            'float_state': '',
+            'tank_gallons': '',
+            'tank_depth': '',
+            'tank_percentage': '',
+            'estimated_gallons': '',
+            'relay_bypass': '',
+            'relay_supply_override': '',
+            'notes': f"{guest} | {checkin} to {checkout} ({nights}n) | {res_type} | ${income}"
+        }
+
+        file_exists = events_file.exists()
+        with open(events_file, 'a', newline='') as f:
+            if file_exists:
+                with open(events_file, 'r') as rf:
+                    reader = csv.DictReader(rf)
+                    fieldnames = reader.fieldnames
+            else:
+                fieldnames = ['timestamp', 'event_type', 'pressure_state', 'float_state',
+                             'tank_gallons', 'tank_depth', 'tank_percentage', 'estimated_gallons',
+                             'relay_bypass', 'relay_supply_override', 'notes']
+
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(event_data)
+
+        return True
+    except Exception as e:
+        print(f"ERROR logging to events.csv: {e}")
+        return False
+
+
+def log_changed_reservation(current_res, old_res, changed_fields):
+    """Log changed reservation to events.csv."""
+    try:
+        events_file = Path(__file__).parent / 'events.csv'
+
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        guest = current_res.get('Guest', 'Unknown')
+        checkin = current_res.get('Check-In', 'Unknown')
+        checkout = current_res.get('Checkout', 'Unknown')
+        nights = current_res.get('Nights', '?')
+        res_type = current_res.get('Type', 'Unknown')
+        income = current_res.get('Income', '0')
+
+        change_summary = '; '.join(f"{f}: {o}→{n}" for f, o, n in changed_fields)
+
+        event_data = {
+            'timestamp': timestamp,
+            'event_type': 'CHANGED_RESERVATION',
+            'pressure_state': '',
+            'float_state': '',
+            'tank_gallons': '',
+            'tank_depth': '',
+            'tank_percentage': '',
+            'estimated_gallons': '',
+            'relay_bypass': '',
+            'relay_supply_override': '',
+            'notes': f"{guest} | {checkin} to {checkout} ({nights}n) | {res_type} | ${income} | {change_summary}"
+        }
+
+        file_exists = events_file.exists()
+        with open(events_file, 'a', newline='') as f:
+            if file_exists:
+                with open(events_file, 'r') as rf:
+                    reader = csv.DictReader(rf)
+                    fieldnames = reader.fieldnames
+            else:
+                fieldnames = ['timestamp', 'event_type', 'pressure_state', 'float_state',
+                             'tank_gallons', 'tank_depth', 'tank_percentage', 'estimated_gallons',
+                             'relay_bypass', 'relay_supply_override', 'notes']
+
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(event_data)
+
+        return True
+    except Exception as e:
+        print(f"ERROR logging to events.csv: {e}")
+        return False
+
 
 def check_checkin_checkout_events(events_file, debug=False):
     """
@@ -372,6 +642,64 @@ def main():
     else:
         if args.debug:
             print("No new reservations found")
+
+    # Detect canceled reservations
+    canceled_reservations = detect_canceled_reservations(current_file, snapshot_file, debug=args.debug)
+
+    if canceled_reservations:
+        print(f"Found {len(canceled_reservations)} canceled reservation(s)!")
+        print()
+
+        for res in canceled_reservations:
+            guest = res.get('Guest', 'Unknown')
+            checkin = res.get('Check-In', 'Unknown')
+            checkout = res.get('Checkout', 'Unknown')
+            res_type = res.get('Type', 'Unknown')
+            income = res.get('Income', '0')
+
+            print(f"  CANCELED: {guest}")
+            print(f"  {checkin} → {checkout}")
+            print(f"  {res_type} | ${income}")
+            print()
+
+            log_canceled_reservation(res)
+            send_notification_canceled(res, debug=args.debug)
+
+        print(f"✓ Logged {len(canceled_reservations)} canceled reservation(s) to events.csv")
+
+    else:
+        if args.debug:
+            print("No canceled reservations found")
+
+    # Detect changed reservations
+    changed_reservations = detect_changed_reservations(current_file, snapshot_file, debug=args.debug)
+
+    if changed_reservations:
+        print(f"Found {len(changed_reservations)} changed reservation(s)!")
+        print()
+
+        for cur_res, old_res, changed_fields in changed_reservations:
+            guest = cur_res.get('Guest', 'Unknown')
+            checkin = cur_res.get('Check-In', 'Unknown')
+            checkout = cur_res.get('Checkout', 'Unknown')
+            res_type = cur_res.get('Type', 'Unknown')
+            income = cur_res.get('Income', '0')
+
+            print(f"  CHANGED: {guest}")
+            print(f"  {checkin} → {checkout}")
+            print(f"  {res_type} | ${income}")
+            for field, old_val, new_val in changed_fields:
+                print(f"    {field}: {old_val!r} → {new_val!r}")
+            print()
+
+            log_changed_reservation(cur_res, old_res, changed_fields)
+            send_notification_changed(cur_res, old_res, changed_fields, debug=args.debug)
+
+        print(f"✓ Logged {len(changed_reservations)} changed reservation(s) to events.csv")
+
+    else:
+        if args.debug:
+            print("No changed reservations found")
 
     # Save current as snapshot for next run
     save_snapshot(current_file, snapshot_file)

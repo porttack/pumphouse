@@ -2,6 +2,29 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.20.0] - 2026-02-22
+
+### Added — Canceled & Changed Reservation Alerts
+- **Canceled reservation detection** (`detect_canceled_reservations`): compares snapshot
+  vs. current CSV; any reservation ID that disappears triggers a `CANCELED_RESERVATION`
+  event in `events.csv` and an ntfy push notification (title: "Reservation Canceled –
+  [Guest]", tags: `calendar x`) with full details (guest, check-in, check-out, type,
+  income)
+- **Changed reservation detection** (`detect_changed_reservations`): compares fields
+  `Check-In`, `Checkout`, `Nights`, `Guest`, `Type`, `Income`, `Status` for every
+  reservation present in both snapshot and current; any diff triggers a
+  `CHANGED_RESERVATION` event and an ntfy push (title: "Reservation Changed – [Guest]",
+  tags: `calendar pencil`) listing each changed field as `old → new` plus the current
+  full details
+
+### Changed
+- `check_new_reservations.py` `main()` now runs all three detection passes (new,
+  canceled, changed) before saving the snapshot, so every scrape is a complete diff
+
+### Documentation
+- `RESERVATION_SCRAPER.md` updated to document canceled/changed detection, new event
+  types, and updated notification tags
+
 ## [2.19.0] - 2026-02-22
 
 ### Added — Cloudflare CDN (onblackberryhill.com)
