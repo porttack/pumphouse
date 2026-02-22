@@ -1,71 +1,63 @@
-# Cloudflare CDN & Tunnel Plan for Pumphouse
+# Cloudflare Setup Guide: onblackberryhill.com
 
-Move the pumphouse web dashboard behind Cloudflare so the Raspberry Pi is
-protected, cached, and never directly reachable from the internet.
+Move the sunset timelapse viewer behind Cloudflare CDN so the Pi is never
+directly reachable from the public internet.
 
 ---
 
-## Goals
+## Status
 
-- Hide the Pi's IP address — nobody can reach it directly
-- Absorb DDoS and bot traffic at Cloudflare's edge
-- Cache timelapse MP4s and HTML pages so the Pi rarely gets hit
-- Move the star rating system to Cloudflare (Worker + KV) so rating data
-  lives at the edge, HTML pages become fully cacheable, and the Pi is out
-  of the rating loop entirely
-- No open inbound ports on the Pi or router
+- ✅ Domain purchased: **onblackberryhill.com** (Cloudflare Registrar)
+- ⬜ Cloudflare Tunnel installed on Pi
+- ⬜ KV namespace created for ratings
+- ⬜ Rating Worker deployed
+- ⬜ Pi code updated (KV backend, cache headers, root redirect)
+- ⬜ Existing ratings.json migrated to KV
+- ⬜ Cache rules configured
+- ⬜ Firewall hardened (block direct 6443 from internet)
 
 ---
 
 ## Architecture
 
 ```
-Browser
+Public browser
   │
   ▼
 Cloudflare Edge  (onblackberryhill.com)
-  │  ├── Cache: timelapse HTML pages, MP4 files, weather pages
-  │  ├── Worker: handles /api/ratings/* and POST /timelapse/*/rate
-  │  │     └── Cloudflare KV: stores rating count + sum per date
-  │  └── Cache miss / dynamic content: tunnel to Pi
+  ├─ Redirect Rule: / → /timelapse
+  ├─ Cache: MP4s (1 yr), past HTML pages (1 yr), snapshots (1 yr)
+  ├─ Worker: POST /timelapse/*/rate  →  write KV  (Pi not involved)
+  ├─ Worker: GET  /api/ratings/*     →  read KV   (Pi not involved)
+  └─ Cache miss / other routes       →  Tunnel → Pi Flask :6443
+       │
+       ▼
+  cloudflared daemon (outbound from Pi, no open ports)
+       │
+       ▼
+  Flask on https://localhost:6443
+
+Private browser (you only, never published)
   │
   ▼
-cloudflared daemon (runs on Pi, outbound tunnel — no open ports)
+https://onblackberryhill2.tplinkdns.com:6443   ← direct Pi access
   │
   ▼
-Flask on localhost:6443
+Flask on https://localhost:6443
+  │  (uses same Cloudflare KV for ratings, via KV API)
+  └─ ratings read/write → Cloudflare KV API
 ```
 
----
-
-## Step 1 — Buy the Domain
-
-Buy **onblackberryhill.com** from Cloudflare Registrar
-(cloudflare.com → Domain Registration).
-
-Buying directly from Cloudflare means:
-- No third-party nameserver transfer needed — it's already on Cloudflare
-- At-cost pricing (~$10/yr for .com), no markup
-- Auto-renewed, managed in the same dashboard as everything else
+**Key privacy guarantee:** `onblackberryhill2.tplinkdns.com` never appears in
+any Cloudflare config. The tunnel is outbound-only (Pi → Cloudflare); nobody
+can trace Cloudflare traffic back to the Pi's real IP or hostname.
 
 ---
 
-## Step 2 — Cloudflare Account Setup
-
-Already have a Cloudflare login — just add the new domain to the same account.
-If bought through Cloudflare Registrar it appears automatically.
-
----
-
-## Step 3 — Cloudflare Tunnel
-
-The tunnel replaces the current dynamic DNS setup (`tplinkdns.com`).
-The Pi makes an **outbound** connection to Cloudflare — no inbound ports needed.
-
-### Install cloudflared on the Pi
+## Step 1 — Install `cloudflared` on the Pi
 
 ```bash
-# Add Cloudflare's package repo
+# Add Cloudflare package repo
 curl -L https://pkg.cloudflare.com/cloudflare-main.gpg \
   | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
 
@@ -73,139 +65,145 @@ echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] \
   https://pkg.cloudflare.com/cloudflared any main" \
   | sudo tee /etc/apt/sources.list.d/cloudflared.list
 
-sudo apt update && sudo apt install cloudflared
+sudo apt update && sudo apt install -y cloudflared
+cloudflared --version   # confirm install
 ```
-
-### Authenticate (needs a browser — do this on your laptop, or use API token)
-
-**Option A — API token (Pi-friendly):**
-1. Cloudflare dashboard → My Profile → API Tokens → Create Token
-2. Use the "Edit Cloudflare Workers" template, add Tunnel permissions
-3. On the Pi: `export CLOUDFLARE_API_TOKEN=your_token`
-
-**Option B — Browser login:**
-```bash
-cloudflared tunnel login --no-browser
-# Prints a URL — open it on your laptop to authorize
-```
-
-### Create and configure the tunnel
-
-```bash
-cloudflared tunnel create pumphouse
-# Note the tunnel ID printed — you'll need it below
-
-cloudflared tunnel route dns pumphouse onblackberryhill.com
-# Also route any subdomains you want, e.g.:
-cloudflared tunnel route dns pumphouse www.onblackberryhill.com
-```
-
-### Tunnel config file
-
-```yaml
-# /home/pi/.cloudflared/config.yml
-tunnel: <your-tunnel-id>
-credentials-file: /home/pi/.cloudflared/<tunnel-id>.json
-
-ingress:
-  - hostname: onblackberryhill.com
-    service: https://localhost:6443
-    originRequest:
-      noTLSVerify: true        # Pi's cert is for the old hostname; Cloudflare
-                                # handles TLS for users, this is internal only
-  - hostname: www.onblackberryhill.com
-    service: https://localhost:6443
-    originRequest:
-      noTLSVerify: true
-  - service: http_status:404
-```
-
-### Install as a system service
-
-```bash
-sudo cloudflared service install
-sudo systemctl enable cloudflared
-sudo systemctl start cloudflared
-```
-
-### Lock down the Pi firewall
-
-Once the tunnel is working, block direct external access to port 6443.
-The tunnel is outbound-only so it is unaffected.
-
-```bash
-# Allow LAN access (for local testing)
-sudo ufw allow from 192.168.1.0/24 to any port 6443
-# Block everything else
-sudo ufw deny 6443
-sudo ufw enable
-```
-
-You can also remove the router's port forwarding rule for 6443 entirely.
-
-### Dynamic DNS
-
-`tplinkdns.com` is no longer needed — the Pi's external IP doesn't matter
-since all traffic goes through the tunnel. Disable or ignore it.
 
 ---
 
-## Step 4 — Cloudflare Worker + KV for Star Ratings
+## Step 2 — Create the Tunnel (browser, then Pi)
 
-The rating system moves entirely off the Pi. The Pi has no `/rate` endpoint,
-no `ratings.json` file, no cookie inspection — HTML pages become fully
-cacheable.
+**In the Cloudflare dashboard (browser/laptop):**
 
-### Create KV namespace (Cloudflare dashboard on your laptop)
+1. Go to **Zero Trust** → **Networks** → **Tunnels** → **Create a tunnel**
+2. Choose **Cloudflared** connector
+3. Name it: `pumphouse`
+4. Click **Next** — the dashboard shows an install command like:
+   ```
+   cloudflared service install eyJhIjoiABC...
+   ```
+5. **Copy the token** from that command (the long `eyJ...` string)
 
-Workers & Pages → KV → Create namespace → name it `RATINGS`
+**On the Pi:**
 
-Note the namespace ID.
+```bash
+# Install as a system service using the token from the dashboard
+sudo cloudflared service install eyJhIjoiABC...   # paste your token
 
-### Worker script
+sudo systemctl enable cloudflared
+sudo systemctl start cloudflared
+systemctl status cloudflared   # should say "active (running)"
+```
 
-Create this in the Cloudflare dashboard: Workers & Pages → Create Worker.
-Name it `pumphouse-ratings`.
+**Back in the dashboard:**
+- The tunnel should now show as **Healthy** with a green dot
+- Click **Next** to configure the Public Hostname
+
+---
+
+## Step 3 — Configure Public Hostnames (dashboard)
+
+Still in the tunnel setup wizard (or **Edit** → **Public Hostname** tab later):
+
+| Subdomain | Domain | Path | Service |
+|-----------|--------|------|---------|
+| *(blank)* | onblackberryhill.com | | `https://localhost:6443` |
+| www | onblackberryhill.com | | `https://localhost:6443` |
+
+Under **Additional application settings → TLS**:
+- Enable **No TLS Verify** (the Pi's cert is for `tplinkdns.com`, not this domain;
+  Cloudflare handles TLS for users — this tunnel leg is internal only)
+
+Click **Save tunnel**.
+
+This automatically creates CNAME DNS records for both hostnames pointing to the
+tunnel. No manual DNS changes needed.
+
+---
+
+## Step 4 — Root Domain Redirect to /timelapse (dashboard)
+
+`onblackberryhill.com/` and `www.onblackberryhill.com/` should both go to
+`/timelapse` without hitting the Pi.
+
+**Cloudflare dashboard → your domain → Rules → Redirect Rules → Create rule:**
+
+Rule 1 — Root redirect:
+- **Name:** Root to timelapse
+- **If:** `(http.host eq "onblackberryhill.com" or http.host eq "www.onblackberryhill.com") and http.request.uri.path eq "/"`
+- **Then:** Static redirect → `https://onblackberryhill.com/timelapse` → 301
+
+Rule 2 — www to apex (canonical):
+- **Name:** www to apex
+- **If:** `http.host eq "www.onblackberryhill.com" and http.request.uri.path ne "/"`
+- **Then:** Dynamic redirect → `https://onblackberryhill.com${http.request.uri.path}` → 301
+
+> Alternatively, add `@app.route('/')` → `redirect('/timelapse')` in Flask for
+> the tplinkdns direct-access path (see Step 7).
+
+---
+
+## Step 5 — Create KV Namespace for Ratings (dashboard)
+
+Ratings are stored in Cloudflare KV — the Pi reads and writes KV directly via
+the API, so ratings are consistent whether accessed via CDN or tplinkdns.
+
+**Cloudflare dashboard → Workers & Pages → KV → Create namespace:**
+- Name: `RATINGS`
+- Note the **Namespace ID** — you'll need it in Steps 6 and 7
+
+---
+
+## Step 6 — Deploy the Rating Worker (dashboard)
+
+**Cloudflare dashboard → Workers & Pages → Create → Create Worker:**
+- Name: `pumphouse-ratings`
+- Paste the script below → **Deploy**
 
 ```javascript
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // GET /api/ratings/YYYY-MM-DD  →  return current stats
+    // Redirect root to /timelapse (belt-and-suspenders; redirect rule handles it too)
+    if (url.pathname === '/') {
+      return Response.redirect(url.origin + '/timelapse', 301);
+    }
+
+    // GET /api/ratings/YYYY-MM-DD  →  read from KV
     const getMatch = url.pathname.match(/^\/api\/ratings\/(\d{4}-\d{2}-\d{2})$/);
     if (getMatch && request.method === 'GET') {
       return handleGet(getMatch[1], env);
     }
 
-    // POST /timelapse/YYYY-MM-DD/rate  →  record a rating
+    // POST /timelapse/YYYY-MM-DD/rate  →  write to KV (Pi not involved)
     const postMatch = url.pathname.match(/^\/timelapse\/(\d{4}-\d{2}-\d{2})\/rate$/);
     if (postMatch && request.method === 'POST') {
       return handlePost(postMatch[1], request, env);
     }
 
-    // Everything else passes through to the Pi (origin)
+    // Everything else passes through to Pi via tunnel
     return fetch(request);
   }
 };
 
 async function handleGet(dateStr, env) {
   const data = await readRating(dateStr, env);
-  const headers = corsHeaders({
-    'Content-Type': 'application/json',
-    'Cache-Control': 'public, max-age=60',   // stale for 60s is fine
+  return new Response(JSON.stringify(data), {
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'public, max-age=60',
+      'Access-Control-Allow-Origin': 'https://onblackberryhill.com',
+    },
   });
-  return new Response(JSON.stringify(data), { headers });
 }
 
 async function handlePost(dateStr, request, env) {
-  // Check cookie — only allow one rating per date per user
   const cookie = request.headers.get('Cookie') || '';
-  const alreadyRated = cookie.includes(`tl_rated_${dateStr}=`);
-  if (alreadyRated) {
-    const data = await readRating(dateStr, env);
-    return new Response(JSON.stringify(data), {
-      headers: corsHeaders({ 'Content-Type': 'application/json' }),
+  if (cookie.includes(`tl_rated_${dateStr}=`)) {
+    // Already rated — return current stats without writing
+    return new Response(JSON.stringify(await readRating(dateStr, env)), {
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 
@@ -218,21 +216,15 @@ async function handlePost(dateStr, request, env) {
     return new Response('Rating must be 3, 4, or 5', { status: 400 });
   }
 
-  // Read-modify-write (low traffic; eventual consistency is fine)
   const current = await readRating(dateStr, env);
-  const updated = {
-    count: current.count + 1,
-    sum:   current.sum   + rating,
-  };
+  const updated = { count: current.count + 1, sum: current.sum + rating };
   await env.RATINGS.put(dateStr, JSON.stringify(updated));
 
-  const avg = updated.sum / updated.count;
+  const avg = Math.round(updated.sum / updated.count * 10) / 10;
   const resp = new Response(
-    JSON.stringify({ count: updated.count, avg: Math.round(avg * 10) / 10 }),
-    { headers: corsHeaders({ 'Content-Type': 'application/json' }) }
+    JSON.stringify({ count: updated.count, avg }),
+    { headers: { 'Content-Type': 'application/json' } }
   );
-
-  // Set cookie for 1 year so the user can't re-rate
   const expires = new Date(Date.now() + 365 * 24 * 3600 * 1000).toUTCString();
   resp.headers.append('Set-Cookie',
     `tl_rated_${dateStr}=${rating}; Path=/; Expires=${expires}; SameSite=Lax`);
@@ -243,132 +235,191 @@ async function readRating(dateStr, env) {
   const raw = await env.RATINGS.get(dateStr);
   return raw ? JSON.parse(raw) : { count: 0, sum: 0 };
 }
-
-function corsHeaders(extra = {}) {
-  return {
-    'Access-Control-Allow-Origin': '*',   // tighten to onblackberryhill.com in prod
-    'Access-Control-Allow-Headers': 'Content-Type',
-    ...extra,
-  };
-}
 ```
 
-### Bind KV to the Worker (dashboard)
+**Bind KV to the Worker:**
 
-Worker Settings → Variables → KV Namespace Bindings:
+Worker page → **Settings** → **Variables** → **KV Namespace Bindings** → Add:
 - Variable name: `RATINGS`
-- KV Namespace: select the `RATINGS` namespace created above
+- KV Namespace: `RATINGS` (the one created in Step 5)
 
-### Worker route (dashboard)
+**Add Worker routes:**
 
-Workers & Pages → your Worker → Settings → Triggers → Add route:
+Worker page → **Settings** → **Triggers** → **Add route**:
 ```
-onblackberryhill.com/api/ratings/*
-onblackberryhill.com/timelapse/*/rate
+onblackberryhill.com/*
+www.onblackberryhill.com/*
+```
+Zone: `onblackberryhill.com`
+
+> This routes ALL traffic through the Worker. Non-rating requests fall through
+> to `fetch(request)` which hits the Pi via the tunnel.
+
+---
+
+## Step 7 — Pi Code Changes
+
+These changes make the Pi use Cloudflare KV for ratings (even on direct
+tplinkdns access), add a root redirect, and add proper cache headers.
+
+### 7a. Create a KV API token (browser)
+
+**Cloudflare dashboard → My Profile → API Tokens → Create Token:**
+- Template: **Edit Cloudflare Workers** (or Custom)
+- Permissions: `Account → Workers KV Storage → Edit`
+- Account resources: your account
+- **Save** — copy the token (shown once)
+
+### 7b. Add to Pi secrets
+
+```bash
+# Edit ~/.config/pumphouse/secrets.conf and add:
+CLOUDFLARE_ACCOUNT_ID=your_account_id        # dashboard URL: /.../<account_id>/...
+CLOUDFLARE_KV_NAMESPACE_ID=your_namespace_id  # from Step 5
+CLOUDFLARE_KV_API_TOKEN=your_api_token        # from Step 7a
+RATINGS_BACKEND=cloudflare_kv                 # set to 'local' to fall back to ratings.json
+```
+
+Your Account ID appears in the Cloudflare dashboard URL and on the Workers
+overview page (right sidebar).
+
+### 7c. Pi code changes (`monitor/web.py`)
+
+The following changes are needed in the Flask app:
+
+1. **Root route** — redirect `/` to `/timelapse` for tplinkdns direct access
+2. **KV-backed ratings** — `_read_ratings()` and `_write_ratings()` use KV API
+   when `RATINGS_BACKEND=cloudflare_kv`, fallback to `ratings.json` when `local`
+3. **Client-side rating widget** — remove server-injected `userRated`/`rCount`/`rAvg`;
+   the JS widget fetches `/api/ratings/DATE` on load and reads cookie client-side
+   so HTML pages are fully cacheable (no per-user dynamic content)
+4. **Cache headers** — past dates get `Cache-Control: public, max-age=31536000`;
+   today gets `public, max-age=600` (preview updates every 40 min)
+5. **`GET /api/ratings/DATE`** — new route the JS widget fetches; reads from KV
+   (or local file if `RATINGS_BACKEND=local`)
+
+> These Pi code changes will be implemented in a follow-up coding session once
+> the tunnel and Worker are verified working.
+
+### 7d. Migrate existing ratings.json to KV
+
+After the Worker is deployed and the KV namespace exists:
+
+```bash
+# On the Pi — one-time migration script
+python3 - <<'EOF'
+import json, urllib.request, os
+
+account_id   = "YOUR_ACCOUNT_ID"
+namespace_id = "YOUR_NAMESPACE_ID"
+api_token    = "YOUR_API_TOKEN"
+
+with open('/home/pi/timelapses/ratings.json') as f:
+    ratings = json.load(f)
+
+for date_str, data in ratings.items():
+    url = (f"https://api.cloudflare.com/client/v4/accounts/{account_id}"
+           f"/storage/kv/namespaces/{namespace_id}/values/{date_str}")
+    req = urllib.request.Request(url,
+        data=json.dumps(data).encode(),
+        method='PUT',
+        headers={
+            'Authorization': f'Bearer {api_token}',
+            'Content-Type': 'application/json',
+        })
+    with urllib.request.urlopen(req) as r:
+        print(f"{date_str}: {r.status}")
+EOF
 ```
 
 ---
 
-## Step 5 — Pi Code Changes
+## Step 8 — Cache Rules (dashboard)
 
-### Remove from `monitor/web.py`
+**Cloudflare dashboard → your domain → Caching → Cache Rules → Create rule:**
 
-- `RATINGS_FILE` constant
-- `_ratings_lock` and `_threading` import
-- `_read_ratings()` and `_write_ratings()` helpers
-- `timelapse_rate()` Flask route (`POST /timelapse/<date>/rate`)
-- Cookie check (`request.cookies.get(f'tl_rated_{date_str}')`) from `timelapse_view`
-- `rating_count`, `rating_avg`, `user_rating`, `rating_avg_js` variables
-- Server-injected JS variables `userRated`, `rCount`, `rAvg` from the template
+| Rule name | Match | Cache behavior |
+|-----------|-------|----------------|
+| Timelapse MP4s | URI path matches `*.mp4` | Cache everything; Edge TTL 1 year |
+| Past timelapse pages | URI path matches `/timelapse/20*` | Cache everything; Edge TTL 1 year |
+| Snapshot JPEGs | URI path matches `/timelapse/*/snapshot` | Cache everything; Edge TTL 1 year |
+| Rating API | URI path matches `/api/ratings/*` | Cache 60 seconds |
+| Live frame | URI path matches `/frame*` | Bypass cache |
+| Dashboard / sensor | URI path matches `/` | Bypass cache |
 
-### Change in `timelapse_view` response
-
-Add cache headers so Cloudflare knows it can cache the page:
-
-```python
-# Past dates: cache indefinitely (content never changes)
-# Today: short TTL (preview MP4 updates every 10 min)
-from datetime import date as _date
-is_today = (date_str == _date.today().isoformat())
-cache_header = 'public, max-age=600' if is_today else 'public, max-age=31536000'
-return Response(html, mimetype='text/html',
-                headers={'Cache-Control': cache_header})
-```
-
-```python
-# MP4 serve route — cache forever (files are immutable once written)
-return send_file(path, mimetype='video/mp4',
-                 max_age=365*24*3600, conditional=True)
-```
-
-### Update star rating JS in the template
-
-Replace the server-injected rating state with:
-1. Cookie read in client-side JS
-2. Fetch current stats from the Worker API
-
-```javascript
-(function() {
-  const dateStr  = '2026-02-19';                 // injected by Flask as before
-  const workerBase = 'https://onblackberryhill.com';  // same origin in prod
-
-  // Read user's previous rating from cookie (no server needed)
-  const cookieMatch = document.cookie.match(/tl_rated_2026-02-19=(\d)/);
-  let userRated = cookieMatch ? parseInt(cookieMatch[1]) : null;
-
-  // Fetch current avg/count from Worker KV
-  fetch(workerBase + '/api/ratings/2026-02-19')
-    .then(r => r.json())
-    .then(d => {
-      rCount = d.count;
-      rAvg   = d.count ? Math.round(d.sum / d.count * 10) / 10 : null;
-      showInfo(userRated, rCount, rAvg);
-    });
-
-  // ... rest of star widget logic unchanged ...
-  // POST target changes to workerBase + '/timelapse/' + dateStr + '/rate'
-})();
-```
+> Past timelapse pages are safe to cache for 1 year because content never
+> changes after a day is complete. The rating widget is now fully client-side
+> (async fetch) so cached HTML is always correct.
 
 ---
 
-## Step 6 — Cloudflare Cache Rules (dashboard)
+## Step 9 — Verify, then Harden (Pi firewall)
 
-Workers & Pages → your domain → Caching → Cache Rules:
+**Verify the tunnel works first:**
+```bash
+# From any browser, confirm these work:
+# https://onblackberryhill.com/timelapse
+# https://www.onblackberryhill.com/  (should redirect to /timelapse)
+# https://onblackberryhill.com/timelapse/YYYY-MM-DD  (check weather, stars)
+# Rate a sunset — confirm rating appears from KV
 
-| Rule | Match | Cache Behavior |
-|---|---|---|
-| Timelapse MP4s | `*.mp4` | Cache everything, Edge TTL 1 year |
-| Past timelapse pages | `/timelapse/20*` | Cache everything, Edge TTL 1 year |
-| Camera snapshot | `/sunset` | Bypass cache |
-| Rating API | `/api/ratings/*` | Cache 60s |
-| Dashboard / home | `/` | Bypass cache (has live sensor data) |
+# From Pi, confirm direct access still works:
+curl -k https://localhost:6443/timelapse
+```
+
+**Then harden the firewall:**
+```bash
+# Allow LAN (for local testing)
+sudo ufw allow from 192.168.1.0/24 to any port 6443
+# Block all external direct access to port 6443
+sudo ufw deny 6443
+sudo ufw enable
+sudo ufw status
+```
+
+You can also **remove the router's port forward for 6443** entirely — the tunnel
+is outbound-only so it's unaffected. The tplinkdns address will no longer work
+externally (which is fine — you only use it on your local network).
+
+> **If you want tplinkdns to keep working from outside your LAN**, skip the
+> router port-forward removal and the `ufw deny 6443`. The Pi's existing
+> Let's Encrypt cert and basic auth still protect it.
 
 ---
 
-## Summary of What Changes
+## Fallback: Disable CDN
 
-| Thing | Before | After |
-|---|---|---|
-| Pi reachable directly | Yes (port 6443 open) | No (tunnel only) |
-| Pi's IP exposed | Yes | No |
-| MP4 serve load on Pi | Every request | First request only |
-| HTML page caching | None (cookie-specific) | Full CDN cache |
-| Rating storage | `ratings.json` on Pi SD | Cloudflare KV |
-| Rating endpoint | Flask on Pi | Cloudflare Worker |
-| Dynamic DNS | tplinkdns.com needed | Not needed |
-| SSL cert on Pi | Let's Encrypt (public) | Can be self-signed (internal only) |
-| Router port forwarding | Required | Not needed |
+If you ever want to abandon the CDN (without losing ratings):
+
+1. Set `RATINGS_BACKEND=local` in secrets.conf
+2. Run the migration script in reverse (KV → ratings.json)
+3. Stop cloudflared: `sudo systemctl stop cloudflared`
+4. Re-open router port forward for 6443
+5. Share `tplinkdns.com:6443` URL directly
+
+All Pi code is designed to work identically in both modes.
+
+---
+
+## What Each Address Does
+
+| URL | Who uses it | Via |
+|-----|-------------|-----|
+| `https://onblackberryhill.com/timelapse` | Public | Cloudflare CDN → Tunnel → Pi |
+| `https://www.onblackberryhill.com` | Public | Redirects to apex |
+| `https://onblackberryhill2.tplinkdns.com:6443` | You only (private) | Router → Pi direct |
+
+The tplinkdns hostname **never appears** in any Cloudflare configuration.
 
 ---
 
 ## Open Questions / Later
 
-- Whether to password-protect the dashboard via **Cloudflare Access**
-  (zero-trust auth, free for up to 50 users) instead of the current
-  HTTP Basic Auth baked into Flask
-- Whether to route the existing Let's Encrypt cert renewal through the
-  new domain or switch to Cloudflare's origin CA cert (simpler, free,
-  works with `noTLSVerify: false`)
-- Subdomain structure: `onblackberryhill.com` vs `pumphouse.onblackberryhill.com`
-  if the domain is ever used for other things
+- **Cloudflare Access** (Zero Trust auth): could protect the whole site or
+  just the pumphouse sensor dashboard from anonymous access — free for ≤50 users
+- **Origin CA cert**: replace the Pi's Let's Encrypt cert with a Cloudflare
+  Origin CA cert (free, works only behind Cloudflare, no renewal needed)
+- **Analytics**: Cloudflare free tier includes basic visit analytics —
+  useful once the site is public
+- **Email routing**: onblackberryhill@gmail.com is registered; Cloudflare can
+  route `*@onblackberryhill.com` to it if you ever want a custom email address
