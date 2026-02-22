@@ -1818,8 +1818,11 @@ def timelapse_view(date_or_file):
     .star.clickable:hover {{ color:#f5c518; }}
     .star.lit {{ color:#f5c518; }}
     .rating-info {{ color:#aaa; font-size:0.85em; }}
-    .links-list a {{ color:#4CAF50; text-decoration:none; }}
-    .links-list a:hover {{ color:#fff; }}
+    .newport-links {{ max-width:960px; margin:8px 0; font-size:0.85em;
+                      color:#888; flex-wrap:wrap; }}
+    .newport-lbl {{ margin-right:4px; }}
+    .newport-links a {{ color:#4CAF50; text-decoration:none; }}
+    .newport-links a:hover {{ color:#fff; }}
     @media (max-width:600px) {{
       .nav-label  {{ display:none; }}
       .nav-center h2 {{ font-size:1.0em; }}
@@ -1862,19 +1865,17 @@ def timelapse_view(date_or_file):
     </div>
     <span id="rating-info"></span>
   </div>
+  <div class="newport-links">
+    <span class="newport-lbl">Links:</span>
+    <a href="https://www.pinesnvines.com/adventures/things-to-do-newport-or" target="_blank" rel="noopener">Things To Do</a>
+    &middot; <a href="https://www.livebeaches.com/webcams/aerial-tour-yaquina-head-lighthouse/" target="_blank" rel="noopener">Lighthouse Video</a>
+    &middot; <a href="https://www.skylinewebcams.com/en/webcam/united-states/oregon/newport/yaquina-bay-newport-oregon-coast/timelapse.html" target="_blank" rel="noopener">Newport Timelapse</a>
+    &middot; <a href="https://aquarium.org/live-cameras/seabird-cam/" target="_blank" rel="noopener">Seabird Cam</a>
+    &middot; <a href="https://www.surfline.com/surf-report/agate-beach/584204214e65fad6a7709d27" target="_blank" rel="noopener">Beach Cam</a>
+  </div>
   <details>
     <summary>All timelapses ({len(dates)})</summary>
     <ul>{list_items}</ul>
-  </details>
-  <details>
-    <summary>Explore Newport</summary>
-    <ul class="links-list">
-      <li><a href="https://www.livebeaches.com/webcams/aerial-tour-yaquina-head-lighthouse/" target="_blank" rel="noopener">Yaquina Head Lighthouse</a> &mdash; aerial promo shot from the beach</li>
-      <li><a href="https://www.skylinewebcams.com/en/webcam/united-states/oregon/newport/yaquina-bay-newport-oregon-coast/timelapse.html" target="_blank" rel="noopener">Newport Bay Timelapse</a></li>
-      <li><a href="https://aquarium.org/live-cameras/seabird-cam/" target="_blank" rel="noopener">Aquarium Seabird Cam</a></li>
-      <li><a href="https://www.surfline.com/surf-report/agate-beach/584204214e65fad6a7709d27" target="_blank" rel="noopener">Agate Beach Surf Report</a></li>
-      <li><a href="https://www.pinesnvines.com/adventures/things-to-do-newport-or" target="_blank" rel="noopener">Things To Do in Newport</a></li>
-    </ul>
   </details>
   <script>
     const vid = document.getElementById('vid');
