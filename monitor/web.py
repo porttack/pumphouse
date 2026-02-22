@@ -2117,6 +2117,20 @@ def timelapse_view(date_or_file):
           if (dy > 0 && prev) location.href = '/timelapse/' + prev;  // down → older
         }}
       }}, {{passive: true}});
+
+      // Mouse wheel / trackpad scroll navigation (desktop)
+      // Only fires when already at the top of the page (scrollY ≈ 0) so normal
+      // page scrolling still works. Disabled when chevron list is open.
+      var wheelCooldown = 0;
+      document.addEventListener('wheel', function(e) {{
+        if (details && details.open) return;           // let list scroll
+        if (window.scrollY > 10) return;               // only at page top
+        var now = Date.now();
+        if (now - wheelCooldown < 600) return;         // debounce
+        if (Math.abs(e.deltaY) < 40) return;           // ignore tiny nudges
+        if (e.deltaY < 0 && next) {{ wheelCooldown = now; location.href = '/timelapse/' + next; }}
+        if (e.deltaY > 0 && prev) {{ wheelCooldown = now; location.href = '/timelapse/' + prev; }}
+      }}, {{passive: true}});
     }})();
     // Star rating widget (3–5 stars only; one rating per day via cookie)
     // Fully client-side so the HTML page is cacheable by Cloudflare.

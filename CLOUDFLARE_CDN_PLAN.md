@@ -255,6 +255,27 @@ Zone: `onblackberryhill.com`
 > This routes ALL traffic through the Worker. Non-rating requests fall through
 > to `fetch(request)` which hits the Pi via the tunnel.
 
+**To redeploy the Worker after code changes:**
+
+The worker source lives in `cloudflare/ratings-worker.js`. Two ways to deploy:
+
+Option A — Dashboard paste (no extra tools needed):
+1. Worker page → **Edit code** → paste updated `ratings-worker.js` → **Deploy**
+
+Option B — CLI via `cloudflare/deploy.sh` (requires Node.js + wrangler):
+```bash
+# One-time setup (if not done):
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs && sudo npm install -g wrangler
+
+# Deploy (reads credentials from secrets.conf automatically):
+cd /home/pi/src/pumphouse
+./cloudflare/deploy.sh
+```
+`deploy.sh` reads `CLOUDFLARE_KV_NAMESPACE_ID` and `CLOUDFLARE_KV_API_TOKEN`
+from `~/.config/pumphouse/secrets.conf` — nothing sensitive is hardcoded or
+committed to git.
+
 ---
 
 ## Step 7 — Pi Code Changes
