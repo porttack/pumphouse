@@ -1643,6 +1643,7 @@ def timelapse_view(date_or_file):
 
     video_html = (
         f'<video id="vid" src="/timelapse/{mp4_name}" controls autoplay muted loop playsinline></video>'
+        f'<div class="ctrl-row">'
         f'<div class="speed-btns">'
         f'<span class="speed-lbl">Speed:</span>'
         f'<button class="speed-btn" data-rate="0.25">&#188;x</button>'
@@ -1655,6 +1656,7 @@ def timelapse_view(date_or_file):
         f'<div class="ctrl-btns">'
         f'<button id="pause-btn" class="speed-btn pause-btn">&#9646;&#9646; Pause</button>'
         f'<button id="dl-btn" class="speed-btn dl-btn">&#8681; Snapshot</button>'
+        f'</div>'
         f'</div>'
         if has_video else
         '<p class="no-video">No timelapse recorded for this date.</p>'
@@ -1771,9 +1773,10 @@ def timelapse_view(date_or_file):
     .stat {{ display:flex; flex-direction:column; min-width:80px; }}
     .lbl  {{ font-size:0.75em; color:#888; text-transform:uppercase; }}
     .val  {{ font-size:1.1em; color:#e0e0e0; }}
-    .speed-btns {{ max-width:960px; display:flex; align-items:center;
-                   gap:6px; margin:8px 0 4px; }}
-    .ctrl-btns  {{ max-width:960px; display:flex; gap:6px; margin:0 0 8px; }}
+    .ctrl-row   {{ max-width:960px; display:flex; flex-wrap:wrap;
+                   align-items:center; gap:6px; margin:8px 0; }}
+    .speed-btns {{ display:contents; }}
+    .ctrl-btns  {{ display:contents; }}
     .speed-lbl  {{ color:#888; font-size:0.85em; margin-right:4px; }}
     .speed-btn  {{ background:#2a2a2a; color:#4CAF50; border:1px solid #444;
                    padding:4px 10px; border-radius:4px; cursor:pointer;
@@ -1815,12 +1818,17 @@ def timelapse_view(date_or_file):
     .star.clickable:hover {{ color:#f5c518; }}
     .star.lit {{ color:#f5c518; }}
     .rating-info {{ color:#aaa; font-size:0.85em; }}
+    .links-list a {{ color:#4CAF50; text-decoration:none; }}
+    .links-list a:hover {{ color:#fff; }}
     @media (max-width:600px) {{
       .nav-label  {{ display:none; }}
       .nav-center h2 {{ font-size:1.0em; }}
       .swipe-hint {{ display:block; }}
       .thumb {{ width:44vw; height:calc(44vw * 9 / 16); }}
       .site-sub {{ font-size:0.78em; }}
+      .ctrl-row   {{ flex-direction:column; align-items:flex-start; }}
+      .speed-btns {{ display:flex; align-items:center; gap:6px; }}
+      .ctrl-btns  {{ display:flex; gap:6px; }}
     }}
   </style>
 </head>
@@ -1857,6 +1865,16 @@ def timelapse_view(date_or_file):
   <details>
     <summary>All timelapses ({len(dates)})</summary>
     <ul>{list_items}</ul>
+  </details>
+  <details>
+    <summary>Explore Newport</summary>
+    <ul class="links-list">
+      <li><a href="https://www.livebeaches.com/webcams/aerial-tour-yaquina-head-lighthouse/" target="_blank" rel="noopener">Yaquina Head Lighthouse</a> &mdash; aerial promo shot from the beach</li>
+      <li><a href="https://www.skylinewebcams.com/en/webcam/united-states/oregon/newport/yaquina-bay-newport-oregon-coast/timelapse.html" target="_blank" rel="noopener">Newport Bay Timelapse</a></li>
+      <li><a href="https://aquarium.org/live-cameras/seabird-cam/" target="_blank" rel="noopener">Aquarium Seabird Cam</a></li>
+      <li><a href="https://www.surfline.com/surf-report/agate-beach/584204214e65fad6a7709d27" target="_blank" rel="noopener">Agate Beach Surf Report</a></li>
+      <li><a href="https://www.pinesnvines.com/adventures/things-to-do-newport-or" target="_blank" rel="noopener">Things To Do in Newport</a></li>
+    </ul>
   </details>
   <script>
     const vid = document.getElementById('vid');
