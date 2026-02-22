@@ -1704,11 +1704,13 @@ def timelapse_view(date_or_file):
 
     list_items = ''.join(
         f'<li{"  class=\"current\"" if d == date_str else ""}>'
-        f'<a href="/timelapse/{d}">'
+        f'<a href="/timelapse/{d}" class="list-main">'
         f'<img class="thumb" src="/timelapse/{d}/snapshot" loading="lazy"'
         f' onerror="this.style.display=\'none\'">'
         f'<div class="list-info">{_list_html(d)}</div>'
-        f'</a></li>'
+        f'</a>'
+        f'<a href="/timelapse/{d}/snapshot" target="_blank" class="snap-link">(snapshot)</a>'
+        f'</li>'
         for d in reversed(dates)
     )
 
@@ -1756,20 +1758,26 @@ def timelapse_view(date_or_file):
     details {{ max-width:960px; margin-top:16px; }}
     summary {{ cursor:pointer; color:#4CAF50; }}
     ul {{ list-style:none; padding:0; margin:8px 0; }}
-    li a {{ display:flex; align-items:center; gap:10px; padding:4px 0;
-             color:#4CAF50; text-decoration:none; }}
-    li.current a {{ color:#fff; font-weight:bold; }}
-    li a:hover {{ color:#fff; }}
+    li {{ display:flex; align-items:center; padding:4px 0; }}
+    li a.list-main {{ display:flex; align-items:center; gap:10px; flex:1;
+                      color:#4CAF50; text-decoration:none; }}
+    li.current a.list-main {{ color:#fff; font-weight:bold; }}
+    li a.list-main:hover {{ color:#fff; }}
+    li.kbd-focus a.list-main {{ color:#fff; background:#2a2a2a; border-radius:3px;
+                                padding:2px 4px; }}
+    .snap-link {{ color:#555; font-size:0.85em; white-space:nowrap;
+                  text-decoration:none; padding:2px 8px; }}
+    .snap-link:hover {{ color:#aaa; }}
     .thumb {{ width:{THUMB_WIDTH}px; height:{THUMB_WIDTH * 9 // 16}px; object-fit:cover; border-radius:3px;
                opacity:0.8; flex-shrink:0; background:#111; }}
     li.current .thumb {{ opacity:1; outline:2px solid #4CAF50; }}
     .list-info  {{ display:flex; flex-direction:column; gap:3px; }}
-    .list-line1 {{ font-size:0.9em; }}
-    .list-rating {{ font-size:0.85em; color:#ccc; }}
+    .list-line1 {{ font-size:1.0em; }}
+    .list-rating {{ font-size:1.0em; color:#ccc; }}
     .list-stars {{ letter-spacing:1px; }}
-    .ls {{ color:#555; }}
+    .ls {{ font-size:2em; color:#555; }}
     .ls.lit {{ color:#f5c518; }}
-    .list-cond  {{ font-size:0.8em; color:#888; font-style:italic; }}
+    .list-cond  {{ font-size:0.9em; color:#888; font-style:italic; }}
     .rating {{ max-width:960px; display:flex; align-items:center; gap:10px; margin:8px 0; }}
     .rating-label {{ color:#888; font-size:0.9em; white-space:nowrap; }}
     .stars {{ display:flex; gap:1px; line-height:1; }}
@@ -1842,15 +1850,70 @@ def timelapse_view(date_or_file):
         a.click();
       }});
     }}
-    // Keyboard navigation: ← → arrow keys step through dates
+    // Keyboard navigation
+    // ← / →   : previous / next day
+    // ↓        : open chevron (or move down in list)
+    // ↑        : move up in list (close chevron from top)
+    // Escape   : close chevron
+    // Enter    : navigate to kbd-focused list item
+    // Space    : pause / play video
     (function() {{
-      const prev = {prev_js};
-      const next = {next_js};
+      const prev    = {prev_js};
+      const next    = {next_js};
+      const details = document.querySelector('details');
+      const items   = details ? Array.from(details.querySelectorAll('li')) : [];
+      let kbdIdx    = items.findIndex(li => li.classList.contains('current'));
+      if (kbdIdx < 0) kbdIdx = 0;
+
+      function setKbdFocus(idx) {{
+        items.forEach(li => li.classList.remove('kbd-focus'));
+        if (idx >= 0 && idx < items.length) {{
+          items[idx].classList.add('kbd-focus');
+          items[idx].scrollIntoView({{block: 'nearest'}});
+          kbdIdx = idx;
+        }}
+      }}
+
       document.addEventListener('keydown', function(e) {{
-        if (e.key === 'ArrowLeft'  && prev) location.href = '/timelapse/' + prev;
-        if (e.key === 'ArrowRight' && next) location.href = '/timelapse/' + next;
+        const open = details && details.open;
+
+        if (e.key === 'ArrowLeft'  && prev) {{ location.href = '/timelapse/' + prev; return; }}
+        if (e.key === 'ArrowRight' && next) {{ location.href = '/timelapse/' + next; return; }}
+
+        if (e.key === 'ArrowDown') {{
+          e.preventDefault();
+          if (!open) {{
+            if (details) {{ details.open = true; setKbdFocus(kbdIdx); }}
+          }} else {{
+            setKbdFocus(Math.min(kbdIdx + 1, items.length - 1));
+          }}
+        }}
+
+        if (e.key === 'ArrowUp') {{
+          e.preventDefault();
+          if (open) {{
+            if (kbdIdx > 0) {{
+              setKbdFocus(kbdIdx - 1);
+            }} else {{
+              details.open = false;
+              items.forEach(li => li.classList.remove('kbd-focus'));
+            }}
+          }}
+        }}
+
+        if (e.key === 'Escape' && open) {{
+          e.preventDefault();
+          details.open = false;
+          items.forEach(li => li.classList.remove('kbd-focus'));
+        }}
+
+        if (e.key === 'Enter' && open) {{
+          const link = items[kbdIdx] && items[kbdIdx].querySelector('a.list-main');
+          if (link) location.href = link.href;
+        }}
+
         if (e.key === ' ' && vid) {{
-          e.preventDefault();   // stop browser scroll
+          e.preventDefault();
           if (vid.paused) {{
             vid.play();
             if (pauseBtn) {{ pauseBtn.innerHTML = '&#9646;&#9646; Pause'; pauseBtn.classList.remove('paused'); }}
