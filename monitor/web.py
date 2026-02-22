@@ -1728,8 +1728,8 @@ def timelapse_view(date_or_file):
         f'<span class="speed-lbl">Speed:</span>'
         f'<button class="speed-btn" data-rate="0.25">&#188;x</button>'
         f'<button class="speed-btn" data-rate="0.5">&#189;x</button>'
-        f'<button class="speed-btn active" data-rate="1">1x</button>'
-        f'<button class="speed-btn" data-rate="2">2x</button>'
+        f'<button class="speed-btn" data-rate="1">1x</button>'
+        f'<button class="speed-btn active" data-rate="2">2x</button>'
         f'<button class="speed-btn" data-rate="4">4x</button>'
         f'<button class="speed-btn" data-rate="8">8x</button>'
         f'</div>'
@@ -1977,7 +1977,7 @@ def timelapse_view(date_or_file):
       try {{ localStorage.setItem('tl_speed', rate); }} catch(e) {{}}
     }}
     (function() {{
-      const s = parseFloat(localStorage.getItem('tl_speed') || '1');
+      const s = parseFloat(localStorage.getItem('tl_speed') || '2');
       if (vid && !isNaN(s)) setSpeed(s);
     }})();
     document.querySelectorAll('.speed-btn[data-rate]').forEach(btn =>
