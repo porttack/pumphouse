@@ -40,7 +40,7 @@ WINDOW_AFTER     = 60    # minutes after sunset to stop capture
 RETENTION_DAYS   = 30    # keep every day's timelapse for this many days
 WEEKLY_YEARS     = 3     # after RETENTION_DAYS, keep one per ISO week for this many years
 OUTPUT_FPS       = 24    # output video frame rate
-OUTPUT_CRF       = 32    # H.264 quality (lower = better; 23 = default, 35 = ~40x smaller)
+OUTPUT_CRF       = 33    # H.264 quality (lower = better; 23 = default, 35 = ~40x smaller)
 PREVIEW_INTERVAL = 600   # seconds between partial preview assemblies (10 min)
 CROP_BOTTOM      = 120   # pixels to remove from the bottom of each frame at capture time
                          # (source/video pixels, not display pixels; 0 = no crop)

@@ -1653,13 +1653,13 @@ def timelapse_view(date_or_file):
     import re as _re
     all_ratings = _read_ratings()
 
-    def _list_label(ds):
-        # Date
+    def _list_html(ds):
+        import json as _json
+        # Line 1: Date + sunset time
         try:
-            label = _date.fromisoformat(ds).strftime('%a, %b %-d, %Y')
+            line1 = _date.fromisoformat(ds).strftime('%a, %b %-d, %Y')
         except Exception:
-            label = ds
-        # Sunset time: prefer HHMM embedded in filename, fall back to astral
+            line1 = ds
         mp4 = _mp4_for_date(ds)
         sunset_str = None
         if mp4:
@@ -1678,20 +1678,36 @@ def timelapse_view(date_or_file):
             except Exception:
                 pass
         if sunset_str:
-            label += f'  {sunset_str}'
-        # Rating
+            line1 += f'&nbsp;&nbsp;{sunset_str}'
+        out = f'<div class="list-line1">{line1}</div>'
+        # Rating: numeric score + yellow/grey stars + count (Amazon-style)
         r = all_ratings.get(ds, {})
         if r.get('count', 0) > 0:
             avg = r['sum'] / r['count']
-            label += f'  {avg:.1f}\u2605 ({r["count"]})'
-        return label
+            n_lit = min(5, max(0, round(avg)))
+            stars = ''.join(
+                f'<span class="ls{" lit" if i <= n_lit else ""}">&#9733;</span>'
+                for i in range(1, 6)
+            )
+            out += (f'<div class="list-rating">'
+                    f'{avg:.1f}&thinsp;<span class="list-stars">{stars}</span>'
+                    f'&thinsp;({r["count"]})</div>')
+        # Conditions: from weather cache only (no API call during list render)
+        try:
+            wx = _json.loads(open(os.path.join(WEATHER_CACHE_DIR, f'{ds}.json')).read())
+            desc = wx.get('weather_desc')
+            if desc:
+                out += f'<div class="list-cond">{desc}</div>'
+        except Exception:
+            pass
+        return out
 
     list_items = ''.join(
         f'<li{"  class=\"current\"" if d == date_str else ""}>'
         f'<a href="/timelapse/{d}">'
         f'<img class="thumb" src="/timelapse/{d}/snapshot" loading="lazy"'
         f' onerror="this.style.display=\'none\'">'
-        f'<span class="list-date">{_list_label(d)}</span>'
+        f'<div class="list-info">{_list_html(d)}</div>'
         f'</a></li>'
         for d in reversed(dates)
     )
@@ -1747,7 +1763,13 @@ def timelapse_view(date_or_file):
     .thumb {{ width:{THUMB_WIDTH}px; height:{THUMB_WIDTH * 9 // 16}px; object-fit:cover; border-radius:3px;
                opacity:0.8; flex-shrink:0; background:#111; }}
     li.current .thumb {{ opacity:1; outline:2px solid #4CAF50; }}
-    .list-date {{ font-size:0.9em; }}
+    .list-info  {{ display:flex; flex-direction:column; gap:3px; }}
+    .list-line1 {{ font-size:0.9em; }}
+    .list-rating {{ font-size:0.85em; color:#ccc; }}
+    .list-stars {{ letter-spacing:1px; }}
+    .ls {{ color:#555; }}
+    .ls.lit {{ color:#f5c518; }}
+    .list-cond  {{ font-size:0.8em; color:#888; font-style:italic; }}
     .rating {{ max-width:960px; display:flex; align-items:center; gap:10px; margin:8px 0; }}
     .rating-label {{ color:#888; font-size:0.9em; white-space:nowrap; }}
     .stars {{ display:flex; gap:1px; line-height:1; }}
