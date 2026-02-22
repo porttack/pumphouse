@@ -453,7 +453,7 @@ graph TB
 ### Site Constraints
 
 - **Distance**: 10-hour round trip from primary residence; infrequent visits (monthly at best)
-- **Well power**: Controlled by neighbor's electricity — not always available; creates timing dependency for tank filling
+- **Well power**: Controlled by the highest-elevation tank in the system — not always available; creates timing dependency for tank filling
 - **Well production**: ~2–3 gallons every 15–20 minutes (not continuous high-volume flow)
 - **Guests**: Airbnb guests depend on continuous water availability
 
@@ -473,3 +473,76 @@ graph TB
 ---
 
 *Last hardware update: November 2024 — Raspberry Pi 4, Raspberry Pi OS Trixie (Debian 13), Python 3.13, coastal Oregon*
+
+---
+
+## Appendix: Useful `gpio` Commands (WiringPi)
+
+The `gpio` CLI uses BCM pin numbering when the `-g` flag is present. All relay control in this project uses `gpio -g write` to avoid multi-process conflicts with Python's RPi.GPIO.
+
+### Pin Overview
+
+```bash
+gpio readall        # Full table: WiringPi, BCM, physical pin numbers, mode, and current value
+gpio -v             # WiringPi version and Pi hardware info
+```
+
+`gpio readall` is the fastest way to see the state of every pin at a glance. The output columns are:
+`BCM | wPi | Name | Mode | V | Physical | V | Mode | Name | wPi | BCM`
+
+### Reading Pins
+
+```bash
+gpio -g read 17     # Pressure sensor  (1=LOW/pump off, 0=HIGH/pump running — NC switch)
+gpio -g read 27     # Float switch     (1=FULL/open, 0=CALLING/closed)
+gpio -g read 16     # Manual button    (1=released, 0=pressed — active LOW)
+```
+
+### Setting Pin Mode
+
+```bash
+gpio -g mode 17 in          # Set BCM 17 as input
+gpio -g mode 26 out         # Set BCM 26 as output
+gpio -g mode 17 up          # Enable pull-up resistor
+gpio -g mode 17 down        # Enable pull-down resistor
+gpio -g mode 17 tri         # Disable pull resistor (floating)
+```
+
+### Relay Control (Active-Low Board)
+
+The relay board is **active-low**: writing `0` energizes the coil (valve ON), writing `1` de-energizes it (valve OFF).
+
+```bash
+# Bypass valve (Channel 1 — BCM 26)
+gpio -g write 26 0      # Bypass ON  (valve opens)
+gpio -g write 26 1      # Bypass OFF (valve closes)
+
+# Supply override valve (Channel 2 — BCM 19)
+gpio -g write 19 0      # Override ON  (holds supply valve open)
+gpio -g write 19 1      # Override OFF (float switch resumes control)
+
+# Spin purge valve (Channel 3 — BCM 13)
+gpio -g write 13 0      # Purge ON  (opens drain on spindown filter)
+gpio -g write 13 1      # Purge OFF (closes drain)
+
+# Channel 4 / reserved (BCM 6)
+gpio -g write 6 0       # ON
+gpio -g write 6 1       # OFF
+```
+
+> **Prefer `control.sh`** for interactive use — it wraps these commands with safety checks and logging. Use raw `gpio` commands only for quick diagnostics.
+
+### I2C Diagnostics
+
+```bash
+sudo i2cdetect -y 1     # Scan I2C bus 1 — AHT20 should appear at 0x38
+i2cget -y 1 0x38 0x00   # Read a register from AHT20 (raw)
+```
+
+### Quick Status Check
+
+```bash
+# One-liner: show relay and sensor states
+gpio -g read 26; gpio -g read 19; gpio -g read 13   # relays (0=ON, 1=OFF)
+gpio -g read 17; gpio -g read 27                     # pressure, float
+```
