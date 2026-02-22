@@ -1879,27 +1879,41 @@ def timelapse_view(date_or_file):
   </details>
   <script>
     const vid = document.getElementById('vid');
-    document.querySelectorAll('.speed-btn[data-rate]').forEach(btn => {{
-      btn.addEventListener('click', () => {{
-        if (!vid) return;
-        vid.playbackRate = parseFloat(btn.dataset.rate);
-        document.querySelectorAll('.speed-btn[data-rate]').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-      }});
-    }});
+
+    // Speed control — persisted in localStorage so it survives day navigation
+    // (localStorage is client-side only; unaffected by Cloudflare page caching)
+    function setSpeed(rate) {{
+      if (!vid) return;
+      vid.playbackRate = rate;
+      document.querySelectorAll('.speed-btn[data-rate]').forEach(b =>
+        b.classList.toggle('active', parseFloat(b.dataset.rate) === rate));
+      try {{ localStorage.setItem('tl_speed', rate); }} catch(e) {{}}
+    }}
+    (function() {{
+      const s = parseFloat(localStorage.getItem('tl_speed') || '1');
+      if (vid && !isNaN(s)) setSpeed(s);
+    }})();
+    document.querySelectorAll('.speed-btn[data-rate]').forEach(btn =>
+      btn.addEventListener('click', () => setSpeed(parseFloat(btn.dataset.rate))));
+
+    // Pause / play — persisted in localStorage
     const pauseBtn = document.getElementById('pause-btn');
+    function setPause(paused) {{
+      if (!vid) return;
+      if (paused) {{
+        vid.pause();
+        if (pauseBtn) {{ pauseBtn.innerHTML = '&#9654; Play'; pauseBtn.classList.add('paused'); }}
+      }} else {{
+        vid.play();
+        if (pauseBtn) {{ pauseBtn.innerHTML = '&#9646;&#9646; Pause'; pauseBtn.classList.remove('paused'); }}
+      }}
+      try {{ localStorage.setItem('tl_paused', paused ? 'true' : 'false'); }} catch(e) {{}}
+    }}
     if (pauseBtn && vid) {{
-      pauseBtn.addEventListener('click', () => {{
-        if (vid.paused) {{
-          vid.play();
-          pauseBtn.innerHTML = '&#9646;&#9646; Pause';
-          pauseBtn.classList.remove('paused');
-        }} else {{
-          vid.pause();
-          pauseBtn.innerHTML = '&#9654; Play';
-          pauseBtn.classList.add('paused');
-        }}
-      }});
+      pauseBtn.addEventListener('click', () => setPause(!vid.paused));
+      if (localStorage.getItem('tl_paused') === 'true') {{
+        vid.addEventListener('canplay', () => setPause(true), {{ once: true }});
+      }}
     }}
     // Snapshot button: open JPEG page on touch devices; download frame on desktop
     const dlBtn = document.getElementById('dl-btn');
@@ -1920,12 +1934,13 @@ def timelapse_view(date_or_file):
       }});
     }}
     // Keyboard navigation
-    // ← / →   : previous / next day
-    // ↓        : open chevron (or move down in list)
-    // ↑        : move up in list (close chevron from top)
-    // Escape   : close chevron
-    // Enter    : navigate to kbd-focused list item
-    // Space    : pause / play video
+    // ← / →      : previous / next day
+    // ↓           : open chevron (or move down in list)
+    // ↑           : move up in list (close chevron from top)
+    // Escape      : close chevron
+    // Enter       : navigate to kbd-focused list item
+    // Space       : pause / play video
+    // 1 2 4 8     : set playback speed (1x 2x 4x 8x)
     (function() {{
       const prev    = {prev_js};
       const next    = {next_js};
@@ -1985,13 +2000,10 @@ def timelapse_view(date_or_file):
 
         if (e.key === ' ' && vid) {{
           e.preventDefault();
-          if (vid.paused) {{
-            vid.play();
-            if (pauseBtn) {{ pauseBtn.innerHTML = '&#9646;&#9646; Pause'; pauseBtn.classList.remove('paused'); }}
-          }} else {{
-            vid.pause();
-            if (pauseBtn) {{ pauseBtn.innerHTML = '&#9654; Play'; pauseBtn.classList.add('paused'); }}
-          }}
+          setPause(!vid.paused);
+        }}
+        if (['1','2','4','8'].includes(e.key) && e.target.tagName !== 'INPUT') {{
+          setSpeed(parseFloat(e.key));
         }}
       }});
     }})();
