@@ -1446,11 +1446,16 @@ def _day_weather_summary(date_str):
 
 @app.route('/timelapse')
 def timelapse_index():
-    """Redirect to the latest available timelapse date page."""
+    """Redirect to the most recent timelapse with avg rating >= 4.5, else latest."""
     dates = _timelapse_dates()
     if not dates:
         return Response('No timelapses available yet.', status=404, mimetype='text/plain')
     from flask import redirect
+    ratings = _read_ratings()
+    for d in reversed(dates):
+        r = ratings.get(d, {})
+        if r.get('count', 0) > 0 and r['sum'] / r['count'] >= 4.5:
+            return redirect(f'/timelapse/{d}')
     return redirect(f'/timelapse/{dates[-1]}')
 
 
