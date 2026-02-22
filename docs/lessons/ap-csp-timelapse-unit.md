@@ -462,3 +462,199 @@ latency, key-value, certificate, tunnel, edge, Zero Trust.
    is visible to every server you connect to.
 6. **"Zero Trust means you trust nobody ever."** — It means no *implicit* trust based on network
    location. You still trust after explicit authentication and authorization.
+
+---
+
+## Appendix A: Vocabulary Glossary
+
+Terms are grouped by the session where they are first introduced. Definitions are written for a
+high-school audience; technical precision is balanced against accessibility.
+
+### Session 1 — The Full Arc
+
+| Term | Definition |
+|------|------------|
+| **HTTP** | HyperText Transfer Protocol. The text-based language browsers and servers use to request and deliver web content. A request says "give me this file"; a response delivers it. |
+| **HTTPS** | HTTP Secure. HTTP with a TLS encryption layer. The content of every request and response is encrypted; eavesdroppers see only that a connection was made, not what was said. |
+| **TLS** | Transport Layer Security. The cryptographic protocol that encrypts HTTPS connections. Uses asymmetric encryption to agree on a shared key, then symmetric encryption for the actual data. |
+| **Certificate** | A digital document that proves a server's identity. Issued by a trusted Certificate Authority (CA). When your browser shows a padlock, it has verified the certificate. |
+| **IP Address** | A numerical label assigned to every device on a network. IPv4 addresses look like `192.168.1.42`; IPv6 like `2001:0db8::1`. Public IPs are globally routable; private IPs are local-only. |
+| **Port** | A number (0–65535) that identifies a specific service on a device. Port 443 = HTTPS. Port 80 = HTTP. Port 22 = SSH. The combination of IP + port is like a building address + apartment number. |
+| **Port Forwarding** | A router configuration that sends incoming traffic on a specific port to a specific device on the local network. Required when a server (like the Pi) is behind a home router. |
+| **DNS** | Domain Name System. A distributed directory that translates human-readable names (`sunsets.example.com`) into IP addresses (`104.21.8.192`). Often called "the phone book of the internet." |
+| **REST API** | Representational State Transfer — Application Programming Interface. A convention for requesting data over HTTP using standard URLs. `GET /forecast?lat=37.7` asks for forecast data; the server responds with structured data. |
+| **JSON** | JavaScript Object Notation. A text format for structured data using curly braces (objects), square brackets (arrays), and key-value pairs. Human-readable and parseable by nearly every programming language. |
+| **Caching** | Storing the result of a computation or request so it can be reused without re-fetching or recomputing. Trades freshness for speed. Your browser caches images; CDNs cache entire pages. |
+| **CDN** | Content Delivery Network. A globally distributed system of servers that store cached copies of content close to users. Reduces latency by serving from the nearest location rather than the origin server. |
+| **Codec** | Coder-Decoder. Software (or hardware) that compresses and decompresses media. H.264 is a video codec. MP3 is an audio codec. The codec defines how raw pixels or audio samples are encoded into a compact file. |
+| **H.264** | A widely-used video codec standard. Compresses video by storing differences between frames rather than every full frame, and by representing redundant patterns within a frame efficiently. |
+| **CRF** | Constant Rate Factor. A parameter in H.264/H.265 encoding that controls quality vs. file size. Lower = better quality, larger file. Higher = worse quality, smaller file. CRF 23 is the typical default. |
+| **RTSP** | Real Time Streaming Protocol. A network protocol for controlling streaming media servers. IP cameras typically expose an RTSP URL that clients can connect to and receive a continuous video stream. |
+| **Flask** | A lightweight Python web framework. Lets you write a web server in a few dozen lines of Python: define URL routes, generate HTML or JSON responses, serve files. |
+
+### Session 2 — The Internet Layer
+
+| Term | Definition |
+|------|------------|
+| **Packet** | A small chunk of data transmitted over a network. Large files are broken into many packets, each routed independently, then reassembled at the destination. |
+| **TCP** | Transmission Control Protocol. A reliable, ordered protocol that guarantees packets arrive and are reassembled correctly. Retransmits lost packets. Used by HTTP, HTTPS, SSH. |
+| **UDP** | User Datagram Protocol. A faster but unreliable protocol — packets may arrive out of order or not at all. Used where speed matters more than perfection (video streaming, gaming, DNS). |
+| **Router** | A device that forwards packets between networks toward their destination. Home routers connect a private LAN to the public internet. Internet backbone routers make routing decisions billions of times per second. |
+| **Latency** | The time it takes for a packet to travel from source to destination and back (round-trip time). Measured in milliseconds. Speed of light in fiber is ~200,000 km/s — a London–Oregon round trip takes ~80 ms minimum. |
+| **Bandwidth** | The maximum rate of data transfer, measured in Mbps or Gbps. A highway analogy: bandwidth is the number of lanes; latency is how fast cars travel. A wide highway can still be slow if cars are slow. |
+| **Public IP** | An IP address that is globally routable on the internet. Your ISP assigns one to your router. Every server you connect to can see it. |
+| **Private IP** | An IP address in reserved ranges (e.g., `192.168.x.x`, `10.x.x.x`) used only within a local network. Not routable on the public internet. NAT translates between private and public. |
+| **NAT** | Network Address Translation. The mechanism by which a router lets many devices share one public IP. It rewrites packet headers, tracking which internal device each connection belongs to. |
+
+### Session 3 — Data and APIs
+
+| Term | Definition |
+|------|------------|
+| **API** | Application Programming Interface. A defined contract for how software components communicate. A REST API defines URLs and expected request/response formats. Using an API means you interact with a system without knowing its internals. |
+| **Abstraction** | Hiding complexity behind a simpler interface. The weather API hides whether the data comes from a database, sensors, or a model. You just call the URL and get data. |
+| **Key-Value Store** | A simple data storage model: every piece of data is stored under a unique key and retrieved by that key. Like a dictionary or hash map. Fast for exact lookups; limited for complex queries. |
+| **Rate Limit** | A restriction on how many API requests a client can make in a time period (e.g., 1,000/day). Prevents abuse and controls infrastructure costs. Exceeded limits typically return HTTP 429. |
+| **Cache TTL** | Time To Live. How long a cached result is considered fresh before it should be re-fetched. A weather TTL of 3,600 seconds means cached data is used for up to one hour. |
+| **Endpoint** | A specific URL in an API that corresponds to a resource or action. `GET /v1/forecast` and `POST /api/ratings/2024-07-15` are two endpoints. |
+
+### Session 4 — Algorithms and Compression
+
+| Term | Definition |
+|------|------------|
+| **Algorithm** | A finite, unambiguous sequence of steps that solves a problem. The frame-selection algorithm "save every Nth frame" is an algorithm with one parameter (N). |
+| **Parameter** | A variable in an algorithm that can be tuned without changing the algorithm's structure. CRF is a parameter. N in uniform sampling is a parameter. |
+| **Lossless Compression** | Compression where the original data can be perfectly reconstructed. ZIP, PNG. Useful when every bit matters (text, code, medical images). |
+| **Lossy Compression** | Compression that permanently discards some data to achieve smaller file sizes. JPEG, MP3, H.264. Acceptable when human perception can't detect the loss. |
+| **I-Frame** | Intra-coded frame. A complete, self-contained video frame stored by H.264. Other frames reference I-frames and store only changes. Also called a keyframe. |
+| **Motion Vector** | In H.264, a record of how a block of pixels moved between frames. Instead of storing the new pixel values, the codec stores "this block moved 3px right and 1px down." |
+| **PSNR** | Peak Signal-to-Noise Ratio. A mathematical measure of image quality. Higher dB = more similar to the original. Useful for comparing codecs but doesn't always match human perception. |
+| **Uniform Sampling** | Selecting every Nth item from a sequence at regular intervals. Simple, O(n), treats all time equally. |
+| **Adaptive Sampling** | Selecting items based on how much they differ from the previous selection. More complex, better results for content with variable rate of change. |
+
+### Session 5 — Security
+
+| Term | Definition |
+|------|------------|
+| **Symmetric Encryption** | One key both encrypts and decrypts data. Fast. Problem: how do two parties securely share that key over an untrusted network? |
+| **Asymmetric Encryption** | A key pair: a public key encrypts, a private key decrypts. The public key can be shared freely. Used in TLS to securely establish a shared symmetric key. |
+| **Certificate Authority (CA)** | A trusted organization that signs certificates, vouching that a public key belongs to a specific domain. Browsers have a built-in list of trusted CAs. |
+| **SSH** | Secure Shell. An encrypted protocol for remotely logging into and running commands on a computer. Uses key-pair authentication instead of passwords when configured correctly. |
+| **.gitignore** | A file that tells Git which files to never track or commit. Used to keep secrets, credentials, and generated files out of version control. Does not retroactively remove already-committed data. |
+| **API Token** | A secret string that authenticates a program to an API. Similar to a password, but for machines. Tokens should be stored in environment variables or config files, never committed to source control. |
+| **Brute Force Attack** | Systematically trying every possible password or key until one works. Mitigated by rate limiting, account lockout, and strong passwords. SSH key authentication eliminates this attack entirely for login. |
+| **Lateral Movement** | After compromising one device on a network, an attacker moves to compromise other devices on the same network. A reason to segment networks and not trust internal traffic implicitly. |
+| **PII** | Personally Identifiable Information. Data that could identify a specific individual: name, email, IP address, device fingerprint. Subject to privacy laws (GDPR, CCPA). |
+| **DDoS** | Distributed Denial of Service. An attack that floods a server with traffic from many sources, making it unavailable to legitimate users. CDNs like Cloudflare absorb DDoS traffic before it reaches the origin. |
+
+### Session 6 / Zero Trust Sidebar
+
+| Term | Definition |
+|------|------------|
+| **Zero Trust** | A security model where no network location is inherently trusted. Every connection must authenticate and be explicitly authorized, regardless of whether it originates inside or outside the network. |
+| **Perimeter Security** | The traditional "castle and moat" model: trust everything inside the firewall, block everything outside. Fails when an attacker gets inside or when users work remotely. |
+| **Cloudflare Tunnel** | A daemon (`cloudflared`) running on the Pi that makes an outbound connection to Cloudflare. Cloudflare forwards requests through it. No inbound ports need to be open. |
+| **Edge Compute** | Running code at CDN edge nodes (close to users) rather than at a central server. Reduces latency. Cloudflare Workers are JavaScript functions deployed to 200+ edge locations. |
+| **Serverless** | A cloud model where you deploy code without managing servers. The provider runs your function on-demand and charges per invocation. "Serverless" doesn't mean no servers — it means you don't manage them. |
+| **Eventual Consistency** | A distributed system property where all copies of data will *eventually* agree, but may temporarily differ. Cloudflare KV is eventually consistent — a rating written in Tokyo may not immediately appear in London. |
+| **Cookie** | A small piece of data stored by a browser and sent with every request to the same domain. Used for session management, authentication, and in this project, deduplication (detecting if a user already rated a sunset). |
+
+---
+
+## Appendix B: Turning This Document Into a Presentation
+
+This markdown file is structured to be directly usable as input for AI-assisted slide generation.
+The hierarchy maps naturally: `##` headings → sections or divider slides, `###` headings → individual
+slides, bullet lists → slide content, tables → slide tables or comparison graphics.
+
+### Option 1: Gamma.app (Recommended — Fastest)
+
+[Gamma](https://gamma.app) takes text or markdown and generates a designed slide deck in seconds.
+
+1. Go to **gamma.app** → **Create** → **Generate from text**
+2. Paste the full contents of this file (or a selected session)
+3. Gamma will propose a slide structure — you can edit before generating
+4. Choose a theme, review generated slides, and export to PDF or PowerPoint
+
+**Tips for best results:**
+- Paste one session at a time for a focused deck (e.g., Session 1 only for the 30-minute intro)
+- Paste the entire file for a complete 6-session unit overview deck
+- Tell Gamma: *"This is a lesson plan for a high school CS class. Make slides suitable for teacher
+  use: one concept per slide, discussion questions as bullet points, vocabulary as a table."*
+- The vocabulary appendix will generate clean comparison/definition slides automatically
+
+**Gamma is free** for a generous number of AI generations per month. Export to PPTX is available
+on the free tier.
+
+---
+
+### Option 2: ChatGPT with Code Interpreter (Most Customizable)
+
+ChatGPT (GPT-4o with the data analysis tool enabled) can write and execute Python to generate a
+real `.pptx` file using the `python-pptx` library.
+
+**Prompt to use:**
+
+> "I'm going to paste a markdown lesson plan. Please generate a Python script using python-pptx
+> that creates a PowerPoint presentation from this content. Use one slide per `###` heading.
+> Bullet points become slide body text. Tables become two-column text slides. Include a title slide
+> and a divider slide for each `##` section. Style: dark background (#1a1a2e), white title text,
+> light grey body text, accent color #4CAF50.
+>
+> [paste this file]"
+
+ChatGPT will generate and execute the Python, then offer a `.pptx` download. You can iterate:
+*"Make the font larger"*, *"Add slide numbers"*, *"Use a different color for vocabulary slides."*
+
+---
+
+### Option 3: Claude (This Tool) Generating python-pptx Code
+
+Ask Claude to write `python-pptx` code, run it locally:
+
+```bash
+pip install python-pptx
+python3 generate_slides.py
+```
+
+This gives the most control — you can edit the Python to match your exact school's slide template
+or branding. Good choice if you have a required PowerPoint theme from your district.
+
+---
+
+### Option 4: Google Slides via SlidesAI
+
+[SlidesAI.io](https://slidesai.io) is a Google Slides add-on that generates slides from pasted text.
+
+1. Install SlidesAI from the Google Workspace Marketplace
+2. Open a new Google Slides deck
+3. Extensions → SlidesAI → Generate slides → paste text
+4. Free tier allows a limited number of generations per month
+
+Less powerful than Gamma but stays within Google Workspace if your school requires it.
+
+---
+
+### Suggested Slide Decks to Generate
+
+Rather than one giant deck, consider generating these separately:
+
+| Deck | Content to Paste | Audience | Length |
+|------|-----------------|----------|--------|
+| **Session 1 intro deck** | Session 1 section only + Zero Trust sidebar | Students (first day) | ~15 slides |
+| **Full unit overview** | Entire document | Teacher planning / admin | ~40 slides |
+| **Vocabulary reference** | Appendix A only | Students (study guide) | ~20 slides |
+| **Security deep-dive** | Session 5 + Zero Trust sidebar | Students (session 5) | ~12 slides |
+
+---
+
+### Prompt Engineering Tips for Best Slides
+
+When prompting any AI to generate slides from this document:
+
+- **Specify the audience:** "high school students, AP CS Principles"
+- **Specify the use:** "teacher-led discussion slides, not student self-study"
+- **Name the discussion questions explicitly:** "Put each discussion question on its own slide
+  with the question large and space below for student responses"
+- **Handle tables:** "Convert comparison tables into side-by-side text boxes, not embedded table objects"
+- **Vocabulary slides:** "One term per slide with definition and a one-sentence example"
+- **Activity slides:** "Activity instructions in a numbered list; put timing and group size prominently"
