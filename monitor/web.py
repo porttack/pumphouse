@@ -1625,7 +1625,7 @@ def timelapse_view(date_or_file):
         </div>"""
 
     video_html = (
-        f'<video id="vid" src="/timelapse/{mp4_name}" controls autoplay muted loop></video>'
+        f'<video id="vid" src="/timelapse/{mp4_name}" controls autoplay muted loop playsinline></video>'
         f'<div class="speed-btns">'
         f'<span class="speed-lbl">Speed:</span>'
         f'<button class="speed-btn" data-rate="0.25">&#188;x</button>'
@@ -1641,9 +1641,9 @@ def timelapse_view(date_or_file):
         '<p class="no-video">No timelapse recorded for this date.</p>'
     )
 
-    prev_btn = (f'<a class="nav-btn" href="/timelapse/{prev_date}">&#8592;&nbsp;{_short_date(prev_date)}</a>'
+    prev_btn = (f'<a class="nav-btn" href="/timelapse/{prev_date}">&#8592;<span class="nav-label">&nbsp;{_short_date(prev_date)}</span></a>'
                 if prev_date else '<span class="nav-btn disabled">&#8592;</span>')
-    next_btn = (f'<a class="nav-btn" href="/timelapse/{next_date}">{_short_date(next_date)}&nbsp;&#8594;</a>'
+    next_btn = (f'<a class="nav-btn" href="/timelapse/{next_date}"><span class="nav-label">{_short_date(next_date)}&nbsp;</span>&#8594;</a>'
                 if next_date else '<span class="nav-btn disabled">&#8594;</span>')
     prev_js     = f'"{prev_date}"' if prev_date else 'null'
     next_js     = f'"{next_date}"' if next_date else 'null'
@@ -1787,6 +1787,11 @@ def timelapse_view(date_or_file):
     .star.clickable:hover {{ color:#f5c518; }}
     .star.lit {{ color:#f5c518; }}
     .rating-info {{ color:#aaa; font-size:0.85em; }}
+    @media (max-width:600px) {{
+      .nav-label {{ display:none; }}
+      .nav h2 {{ font-size:1.0em; }}
+      .thumb {{ width:44vw; height:calc(44vw * 9 / 16); }}
+    }}
   </style>
 </head>
 <body>
@@ -1891,7 +1896,9 @@ def timelapse_view(date_or_file):
 
         if (e.key === 'ArrowUp') {{
           e.preventDefault();
-          if (open) {{
+          if (!open) {{
+            if (details) {{ details.open = true; setKbdFocus(kbdIdx); }}
+          }} else {{
             if (kbdIdx > 0) {{
               setKbdFocus(kbdIdx - 1);
             }} else {{
@@ -1923,6 +1930,25 @@ def timelapse_view(date_or_file):
           }}
         }}
       }});
+    }})();
+    // Touch swipe: left = newer day, right = older day
+    (function() {{
+      const prev = {prev_js};
+      const next = {next_js};
+      var tx = null, ty = null;
+      document.addEventListener('touchstart', function(e) {{
+        tx = e.touches[0].clientX;
+        ty = e.touches[0].clientY;
+      }}, {{passive: true}});
+      document.addEventListener('touchend', function(e) {{
+        if (tx === null) return;
+        var dx = e.changedTouches[0].clientX - tx;
+        var dy = e.changedTouches[0].clientY - ty;
+        tx = null; ty = null;
+        if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+        if (dx > 0 && prev) location.href = '/timelapse/' + prev;  // swipe right → older
+        if (dx < 0 && next) location.href = '/timelapse/' + next;  // swipe left  → newer
+      }}, {{passive: true}});
     }})();
     // Star rating widget (3–5 stars only; one rating per day via cookie)
     (function() {{
