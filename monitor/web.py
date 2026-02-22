@@ -1827,6 +1827,16 @@ def timelapse_view(date_or_file):
       document.addEventListener('keydown', function(e) {{
         if (e.key === 'ArrowLeft'  && prev) location.href = '/timelapse/' + prev;
         if (e.key === 'ArrowRight' && next) location.href = '/timelapse/' + next;
+        if (e.key === ' ' && vid) {{
+          e.preventDefault();   // stop browser scroll
+          if (vid.paused) {{
+            vid.play();
+            if (pauseBtn) {{ pauseBtn.innerHTML = '&#9646;&#9646; Pause'; pauseBtn.classList.remove('paused'); }}
+          }} else {{
+            vid.pause();
+            if (pauseBtn) {{ pauseBtn.innerHTML = '&#9654; Play'; pauseBtn.classList.add('paused'); }}
+          }}
+        }}
       }});
     }})();
     // Star rating widget (3–5 stars only; one rating per day via cookie)
