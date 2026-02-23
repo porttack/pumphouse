@@ -1244,6 +1244,25 @@ def _kv_read_rating(date_str):
         return None
 
 
+def _kv_delete_rating(date_str):
+    """Delete a single rating entry from Cloudflare KV. Returns True on success."""
+    import urllib.request as _ureq
+    account_id   = _CF_CONFIG.get('CLOUDFLARE_ACCOUNT_ID', '')
+    namespace_id = _CF_CONFIG.get('CLOUDFLARE_KV_NAMESPACE_ID', '')
+    api_token    = _CF_CONFIG.get('CLOUDFLARE_KV_API_TOKEN', '')
+    if not all([account_id, namespace_id, api_token]):
+        return False
+    url = (f"https://api.cloudflare.com/client/v4/accounts/{account_id}"
+           f"/storage/kv/namespaces/{namespace_id}/values/{date_str}")
+    req = _ureq.Request(url, method='DELETE',
+                        headers={'Authorization': f'Bearer {api_token}'})
+    try:
+        with _ureq.urlopen(req, timeout=5) as r:
+            return r.status in (200, 201)
+    except Exception:
+        return False
+
+
 def _read_ratings():
     import json as _j
     try:
@@ -1603,6 +1622,24 @@ def api_ratings(date_str):
                     headers={'Cache-Control': 'public, max-age=60'})
 
 
+@app.route('/api/ratings/<date_str>', methods=['DELETE'])
+def api_ratings_delete(date_str):
+    """Zero out ratings for a date. Only permitted from direct Pi access, not via Cloudflare."""
+    import re
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_str):
+        return Response('Invalid date', status=400)
+    if 'onblackberryhill.com' in request.host.lower():
+        return Response('Forbidden', status=403)
+    with _ratings_lock:
+        data = _read_ratings()
+        if date_str in data:
+            del data[date_str]
+            _write_ratings(data)
+    if _RATINGS_BACKEND == 'cloudflare_kv':
+        _kv_delete_rating(date_str)
+    return Response('', status=204)
+
+
 @app.route('/timelapse/<date_str>/rate', methods=['POST'])
 def timelapse_rate(date_str):
     """Accept a 3–5 star rating for a timelapse date, update the ratings file,
@@ -1765,8 +1802,9 @@ def timelapse_view(date_or_file):
                 if prev_date else '<span class="nav-btn disabled">&#8592;</span>')
     next_btn = (f'<a class="nav-btn" href="/timelapse/{next_date}"><span class="nav-label">{_short_date(next_date)}&nbsp;</span>&#8594;</a>'
                 if next_date else '<span class="nav-btn disabled">&#8594;</span>')
-    prev_js     = f'"{prev_date}"' if prev_date else 'null'
-    next_js     = f'"{next_date}"' if next_date else 'null'
+    prev_js      = f'"{prev_date}"' if prev_date else 'null'
+    next_js      = f'"{next_date}"' if next_date else 'null'
+    is_direct_js = 'false' if 'onblackberryhill.com' in request.host.lower() else 'true'
 
     # List all dates newest-first with snapshot thumbnails, sunset time, and rating
     import re as _re, json as _json
@@ -2048,9 +2086,11 @@ def timelapse_view(date_or_file):
     // Enter       : navigate to kbd-focused list item
     // Space       : pause / play video
     // 1 2 4 8     : set playback speed (1x 2x 4x 8x)
+    // Shift+X     : reset all ratings for this date (direct Pi access only)
     (function() {{
-      const prev    = {prev_js};
-      const next    = {next_js};
+      const prev          = {prev_js};
+      const next          = {next_js};
+      const isDirectAccess = {is_direct_js};
       const details = document.querySelector('details');
       const items   = details ? Array.from(details.querySelectorAll('li')) : [];
       let kbdIdx    = items.findIndex(li => li.classList.contains('current'));
@@ -2111,6 +2151,20 @@ def timelapse_view(date_or_file):
         }}
         if (['1','2','4','8'].includes(e.key) && e.target.tagName !== 'INPUT') {{
           setSpeed(parseFloat(e.key));
+        }}
+        if (e.key === 'X' && e.shiftKey && !e.ctrlKey && !e.metaKey && isDirectAccess) {{
+          e.preventDefault();
+          if (!confirm('Clear all ratings for {date_str}?')) return;
+          fetch('/api/ratings/{date_str}', {{method: 'DELETE'}})
+            .then(function(r) {{
+              if (r.ok) {{
+                document.cookie = 'tl_rated_{date_str}=; max-age=0; path=/; samesite=lax';
+                location.reload();
+              }} else {{
+                alert('Delete failed (' + r.status + ')');
+              }}
+            }})
+            .catch(function() {{ alert('Delete failed \u2014 network error'); }});
         }}
       }});
     }})();
