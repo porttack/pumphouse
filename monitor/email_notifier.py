@@ -792,14 +792,6 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
         <div class="content">
 """
 
-    # Add dashboard link at the top if available
-    if dashboard_url:
-        html += f"""
-            <div class="dashboard-link">
-                <a href="{email_dashboard_url}">📊 View Dashboard</a>
-            </div>
-"""
-
     # Inline snapshot image (e.g. timelapse snapshot), linked to timelapse page
     if inline_image_link:
         html += f"""
