@@ -355,7 +355,7 @@ class SimplifiedMonitor:
             priority=priority,
             tags=['droplet'],
             click_url=DASHBOARD_URL,
-            attach_url=f"{DASHBOARD_URL}api/chart.png?hours={chart_hours}",
+            attach_url=f"{DASHBOARD_URL}api/epaper.jpg?tenant=no",
             debug=self.debug
         )
 
@@ -365,7 +365,7 @@ class SimplifiedMonitor:
             message=message,
             priority=priority,
             dashboard_url=DASHBOARD_URL,
-            chart_url=f"{DASHBOARD_URL}api/chart.png?hours={chart_hours}",
+            chart_url=f"{DASHBOARD_URL}api/epaper.jpg?tenant=no",
             debug=self.debug,
             include_status=True  # Always include full status
         )
@@ -504,7 +504,7 @@ class SimplifiedMonitor:
                                 priority='high',
                                 tags=['droplet', 'warning'],
                                 click_url=DASHBOARD_URL,
-                                attach_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
+                                attach_url=f"{DASHBOARD_URL}api/epaper.jpg?tenant=no",
                                 debug=self.debug
                             )
 
@@ -515,7 +515,7 @@ class SimplifiedMonitor:
                                     message=f"Water pressure is HIGH (\u226510 PSI) - someone may be using water",
                                     priority='high',
                                     dashboard_url=DASHBOARD_URL,
-                                    chart_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
+                                    chart_url=f"{DASHBOARD_URL}api/epaper.jpg?tenant=no",
                                     debug=self.debug,
                                     include_status=True
                                 )
@@ -547,7 +547,7 @@ class SimplifiedMonitor:
                                     priority='default',
                                     tags=['droplet'],
                                     click_url=DASHBOARD_URL,
-                                    attach_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
+                                    attach_url=f"{DASHBOARD_URL}api/epaper.jpg?tenant=no",
                                     debug=self.debug
                                 )
 
@@ -560,7 +560,7 @@ class SimplifiedMonitor:
                                                f"Estimated water pumped: ~{estimated:.1f} gallons",
                                         priority='default',
                                         dashboard_url=DASHBOARD_URL,
-                                        chart_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
+                                        chart_url=f"{DASHBOARD_URL}api/epaper.jpg?tenant=no",
                                         debug=self.debug,
                                         include_status=True
                                     )
@@ -1096,7 +1096,7 @@ class SimplifiedMonitor:
                         message=message,
                         priority='default',
                         dashboard_url=DASHBOARD_URL,
-                        chart_url=f"{DASHBOARD_URL}api/chart.png?hours={DAILY_STATUS_EMAIL_CHART_HOURS}",
+                        chart_url=f"{DASHBOARD_URL}api/epaper.jpg?tenant=no",
                         debug=self.debug,
                         include_status=True
                     )
@@ -1146,7 +1146,7 @@ class SimplifiedMonitor:
                             message=f"⚠️ REMINDER: {checkout_guest} checking out today - turn down the thermostat after checkout!",
                             priority='default',
                             dashboard_url=DASHBOARD_URL,
-                            chart_url=f"{DASHBOARD_URL}api/chart.png?hours={DAILY_STATUS_EMAIL_CHART_HOURS}",
+                            chart_url=f"{DASHBOARD_URL}api/epaper.jpg?tenant=no",
                             debug=self.debug,
                             include_status=True
                         )

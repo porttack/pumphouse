@@ -336,9 +336,8 @@ def _send_timelapse_email(snapshot_path: Path, date_str: str) -> None:
     except Exception:
         pass
 
-    gal_part     = f'{int(gallons):,} gal - ' if gallons is not None else ''
-    weather_part = f' - {weather_desc}'        if weather_desc         else ''
-    subject      = f'{gal_part}Sunset timelapse{weather_part}'
+    gal_part = f'{int(gallons):,} gal - ' if gallons is not None else ''
+    subject  = f'{gal_part}{weather_desc}' if weather_desc else f'{gal_part}Sunset'
     message      = f"Today's sunset timelapse is ready for {date_str}."
 
     try:
@@ -348,6 +347,7 @@ def _send_timelapse_email(snapshot_path: Path, date_str: str) -> None:
             message=message,
             priority='default',
             dashboard_url=DASHBOARD_URL,
+            chart_url=f"{DASHBOARD_URL}api/epaper.jpg?tenant=no",
             inline_image_path=str(snapshot_path) if snapshot_path.exists() else None,
             inline_image_link=TIMELAPSE_EMAIL_LINK,
             include_status=True,

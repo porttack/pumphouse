@@ -141,7 +141,8 @@ def send_email_notification(subject, message, priority='default', dashboard_url=
                 response = requests.get(chart_url, timeout=10)
                 response.raise_for_status()
 
-                image_part = MIMEImage(response.content, _subtype='png')
+                _subtype = 'jpeg' if chart_url.lower().split('?')[0].endswith(('.jpg', '.jpeg')) else 'png'
+                image_part = MIMEImage(response.content, _subtype=_subtype)
                 image_part.add_header('Content-ID', '<chart_image>')
                 image_part.add_header('Content-Disposition', 'inline', filename='chart.png')
                 msg.attach(image_part)
@@ -1016,9 +1017,9 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
     if chart_url:
         html += """
             <div class="section">
-                <h2>TANK LEVEL HISTORY</h2>
+                <h2>STATUS DISPLAY</h2>
                 <div style="text-align: center;">
-                    <img src="cid:chart_image" alt="Tank Level Chart" style="max-width: 100%; height: auto; border: 1px solid #444; border-radius: 4px;">
+                    <img src="cid:chart_image" alt="Status Display" style="max-width: 100%; height: auto; border: 1px solid #444; border-radius: 4px;">
                 </div>
             </div>
 """
@@ -1165,7 +1166,7 @@ def test_email(debug=True):
         message="Email notification system is configured and working!",
         priority='default',
         dashboard_url=DASHBOARD_URL,
-        chart_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
+        chart_url=f"{DASHBOARD_URL}api/epaper.jpg?tenant=no",
         debug=debug
     )
 
