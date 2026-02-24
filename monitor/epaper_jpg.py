@@ -235,9 +235,17 @@ def render_epaper_jpg(
         _cache_file = None
     if _cache_file:
         try:
-            if time.time() - os.path.getmtime(_cache_file) < _cache_max_age:
-                with open(_cache_file, 'rb') as _cf:
-                    return io.BytesIO(_cf.read())
+            _cache_mtime = os.path.getmtime(_cache_file)
+            if time.time() - _cache_mtime < _cache_max_age:
+                # Also invalidate if today's snapshot is newer than the cache —
+                # this fires once each day right after the timelapse is assembled.
+                _now = datetime.now()
+                _snap_date = (_now - timedelta(days=1)).date() if _now.hour < 5 else _now.date()
+                _snap = _SNAPSHOT_DIR / f'{_snap_date}.jpg'
+                if not _snap.exists() or _snap.stat().st_mtime <= _cache_mtime:
+                    with open(_cache_file, 'rb') as _cf:
+                        return io.BytesIO(_cf.read())
+                # snapshot is newer — fall through and regenerate
         except OSError:
             pass
 
