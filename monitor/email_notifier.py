@@ -122,7 +122,7 @@ def send_email_notification(subject, message, priority='default', dashboard_url=
                 import os as _os
                 with open(inline_image_path, 'rb') as f:
                     image_data = f.read()
-                image_part = MIMEImage(image_data)
+                image_part = MIMEImage(image_data, _subtype='jpeg')
                 image_part.add_header('Content-ID', '<inline_image>')
                 image_part.add_header('Content-Disposition', 'inline',
                                       filename=_os.path.basename(inline_image_path))
@@ -141,7 +141,7 @@ def send_email_notification(subject, message, priority='default', dashboard_url=
                 response = requests.get(chart_url, timeout=10)
                 response.raise_for_status()
 
-                image_part = MIMEImage(response.content)
+                image_part = MIMEImage(response.content, _subtype='png')
                 image_part.add_header('Content-ID', '<chart_image>')
                 image_part.add_header('Content-Disposition', 'inline', filename='chart.png')
                 msg.attach(image_part)
