@@ -837,6 +837,17 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
             <div class="relay-warning">{warning}</div>
 """
 
+    # Add status display (epaper.jpg) above the numeric status blocks
+    if chart_url:
+        html += """
+            <div class="section">
+                <h2>STATUS DISPLAY</h2>
+                <div style="text-align: center;">
+                    <img src="cid:chart_image" alt="Status Display" style="max-width: 100%; height: auto; border: 1px solid #444; border-radius: 4px;">
+                </div>
+            </div>
+"""
+
     # Add tank level status if available
     if tank_data and tank_data.get('status') == 'success' and tank_data.get('gallons') is not None:
         gallons = tank_data['gallons']
@@ -1009,17 +1020,6 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
                     </div>
 """
         html += """
-                </div>
-            </div>
-"""
-
-    # Add chart if available
-    if chart_url:
-        html += """
-            <div class="section">
-                <h2>STATUS DISPLAY</h2>
-                <div style="text-align: center;">
-                    <img src="cid:chart_image" alt="Status Display" style="max-width: 100%; height: auto; border: 1px solid #444; border-radius: 4px;">
                 </div>
             </div>
 """
