@@ -66,10 +66,10 @@ log = logging.getLogger('timelapse')
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def load_camera_creds():
-    """Load CAMERA_USER / CAMERA_PASS from ~/.config/pumphouse/secrets.conf."""
+def load_secrets() -> dict:
+    """Load all key=value pairs from ~/.config/pumphouse/secrets.conf."""
     secrets = Path.home() / '.config' / 'pumphouse' / 'secrets.conf'
-    user, password = 'admin', ''
+    cfg: dict = {}
     if secrets.exists():
         with open(secrets) as f:
             for line in f:
@@ -77,12 +77,14 @@ def load_camera_creds():
                 if not line or line.startswith('#') or '=' not in line:
                     continue
                 k, v = line.split('=', 1)
-                k, v = k.strip(), v.strip()
-                if k == 'CAMERA_USER':
-                    user = v
-                elif k == 'CAMERA_PASS':
-                    password = v
-    return user, password
+                cfg[k.strip()] = v.strip()
+    return cfg
+
+
+def load_camera_creds():
+    """Load CAMERA_USER / CAMERA_PASS from ~/.config/pumphouse/secrets.conf."""
+    cfg = load_secrets()
+    return cfg.get('CAMERA_USER', 'admin'), cfg.get('CAMERA_PASS', '')
 
 
 def get_sunset(for_date=None):
@@ -287,6 +289,7 @@ def run_todays_timelapse():
 
         cleanup_old(RETENTION_DAYS)
         _send_timelapse_email(snapshot_path, date_str)
+        _purge_timelapse_cache()
 
     finally:
         for t in preview_threads:
@@ -352,6 +355,49 @@ def _send_timelapse_email(snapshot_path: Path, date_str: str) -> None:
         log.info(f"Timelapse email sent: {subject}")
     except Exception as e:
         log.error(f"Timelapse email failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Cloudflare cache purge
+# ---------------------------------------------------------------------------
+def _purge_timelapse_cache() -> None:
+    """Purge Cloudflare's cached copies of the timelapse page and assets."""
+    import json as _json, urllib.request as _ureq, urllib.error as _uerr
+
+    cfg = load_secrets()
+    zone_id  = cfg.get('CLOUDFLARE_ZONE_ID', '')
+    api_token = cfg.get('CLOUDFLARE_KV_API_TOKEN', '')
+    if not zone_id or not api_token:
+        log.warning("Cloudflare cache purge skipped: CLOUDFLARE_ZONE_ID or "
+                    "CLOUDFLARE_KV_API_TOKEN not set in secrets.conf")
+        return
+
+    urls = [
+        'https://onblackberryhill.com/timelapse',
+        'https://onblackberryhill.com/timelapse/latest.mp4',
+        'https://onblackberryhill.com/timelapse/latest.jpg',
+    ]
+    payload = _json.dumps({'files': urls}).encode()
+    req = _ureq.Request(
+        f'https://api.cloudflare.com/client/v4/zones/{zone_id}/purge_cache',
+        data=payload,
+        headers={
+            'Authorization': f'Bearer {api_token}',
+            'Content-Type': 'application/json',
+        },
+        method='POST',
+    )
+    try:
+        with _ureq.urlopen(req, timeout=10) as r:
+            body = _json.loads(r.read())
+        if body.get('success'):
+            log.info("Cloudflare cache purged for timelapse URLs")
+        else:
+            log.warning(f"Cloudflare purge returned errors: {body.get('errors')}")
+    except _uerr.HTTPError as e:
+        log.error(f"Cloudflare cache purge HTTP error {e.code}: {e.read()[:200]}")
+    except Exception as e:
+        log.error(f"Cloudflare cache purge failed: {e}")
 
 
 # ---------------------------------------------------------------------------
