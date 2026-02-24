@@ -229,9 +229,11 @@ def run_todays_timelapse():
     cmd = [
         'ffmpeg', '-y',
         '-rtsp_transport', 'tcp',
+        '-probesize', '10000000',
+        '-analyzeduration', '10000000',
         '-i', rtsp_url,
-        '-vf', (f'fps=1/{effective_interval},crop=iw:ih-{CROP_BOTTOM}:0:0'
-                if CROP_BOTTOM > 0 else f'fps=1/{effective_interval}'),
+        '-vf', (f'scale=iw:ih,fps=1/{effective_interval},crop=iw:ih-{CROP_BOTTOM}:0:0'
+                if CROP_BOTTOM > 0 else f'scale=iw:ih,fps=1/{effective_interval}'),
         '-t', str(duration),
         '-q:v', '2',
         str(frames_dir / 'frame_%04d.jpg'),

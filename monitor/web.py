@@ -575,6 +575,31 @@ def epaper_bmp():
     threshold_override = request.args.get('threshold', type=int)  # e.g. 95
     scale = max(1, min(8, request.args.get('scale', 1, type=int)))  # 1-8x resolution
 
+    # Cache pre-generated images to reduce load when multiple clients (epaper display,
+    # phone, computer) hit simultaneously.  Cache key = (tenant, scale); ad-hoc
+    # overrides (hours, occupied, threshold) always bypass the cache.
+    _cache_max_age = 8 * 60  # seconds
+    _is_cacheable = (hours_explicit is None and occupied_override is None
+                     and threshold_override is None)
+    if _is_cacheable:
+        _parts = []
+        if tenant_override:
+            _parts.append(f'tenant-{tenant_override}')
+        if scale != 1:
+            _parts.append(f's{scale}')
+        _cache_file = 'epaper_cache' + ('_' + '_'.join(_parts) if _parts else '') + '.bmp'
+    else:
+        _cache_file = None
+    if _cache_file:
+        try:
+            import time as _time
+            if _time.time() - os.path.getmtime(_cache_file) < _cache_max_age:
+                with open(_cache_file, 'rb') as _cf:
+                    cached_buf = io.BytesIO(_cf.read())
+                return send_file(cached_buf, mimetype='image/bmp', download_name='epaper.bmp')
+        except OSError:
+            pass
+
     def s(v):
         """Scale a pixel value by the resolution multiplier."""
         return int(v * scale)
@@ -691,6 +716,12 @@ def epaper_bmp():
 
         buf = io.BytesIO()
         img.save(buf, format='BMP')
+        if _cache_file:
+            try:
+                with open(_cache_file, 'wb') as _cf:
+                    _cf.write(buf.getvalue())
+            except Exception:
+                pass
         buf.seek(0)
         return send_file(buf, mimetype='image/bmp', download_name='epaper.bmp')
 
@@ -808,25 +839,35 @@ def epaper_bmp():
             for i in range(len(points) - 1):
                 draw.line([points[i], points[i + 1]], fill=1, width=2 * scale)
 
-    # Outside temperature label (inverted) at top-left of graph
+    # Outside temperature + current weather description (inverted) at top-left of graph
     outdoor_temp_f = None
     if rows:
         try:
             outdoor_temp_f = float(rows[-1].get('outdoor_temp_f', ''))
         except (ValueError, TypeError):
             pass
+    pad = s(2)
+    paste_x = graph_left + 1
+    paste_y = graph_top + 1
     if outdoor_temp_f is not None:
         temp_text = f"Outside: {int(round(outdoor_temp_f))}\u00b0"
         tb = draw.textbbox((0, 0), temp_text, font=font_small)
         tw, th = tb[2] - tb[0], tb[3] - tb[1]
-        pad = s(2)
         lbl_img = Image.new('1', (tw + pad * 2, th + pad * 2), 0)  # black bg
         ImageDraw.Draw(lbl_img).text((pad - tb[0], pad - tb[1]), temp_text, font=font_small, fill=1)
-        paste_x = graph_left + 1
-        paste_y = graph_top + 1
         region = img.crop((paste_x, paste_y, paste_x + tw + pad * 2, paste_y + th + pad * 2))
         region = ImageChops.logical_xor(region, lbl_img)
         img.paste(region, (paste_x, paste_y))
+        paste_y += th + pad * 2 + 1
+    weather_desc = _current_weather_desc()
+    if weather_desc:
+        wd_tb = draw.textbbox((0, 0), weather_desc, font=font_small)
+        wd_w, wd_h = wd_tb[2] - wd_tb[0], wd_tb[3] - wd_tb[1]
+        wd_img = Image.new('1', (wd_w + pad * 2, wd_h + pad * 2), 0)
+        ImageDraw.Draw(wd_img).text((pad - wd_tb[0], pad - wd_tb[1]), weather_desc, font=font_small, fill=1)
+        wd_region = img.crop((paste_x, paste_y, paste_x + wd_w + pad * 2, paste_y + wd_h + pad * 2))
+        wd_region = ImageChops.logical_xor(wd_region, wd_img)
+        img.paste(wd_region, (paste_x, paste_y))
 
     # "Save Water" XOR overlay when tank is low (non-tenant mode)
     if tank_is_low:
@@ -885,8 +926,33 @@ def epaper_bmp():
     # Serve as BMP
     buf = io.BytesIO()
     img.save(buf, format='BMP')
+    if _cache_file:
+        try:
+            with open(_cache_file, 'wb') as _cf:
+                _cf.write(buf.getvalue())
+        except Exception:
+            pass
     buf.seek(0)
     return send_file(buf, mimetype='image/bmp', download_name='epaper.bmp')
+
+
+@app.route('/api/epaper.jpg')
+def epaper_jpg():
+    """
+    Color JPEG version of the e-paper display at 4× resolution (1000×488).
+    Uses a live timelapse or RTSP frame as the graph background.
+
+    Query params: same as /api/epaper.bmp plus scale (default 4).
+    """
+    from monitor.epaper_jpg import render_epaper_jpg
+    buf = render_epaper_jpg(
+        hours_explicit=request.args.get('hours', type=int),
+        tenant_override=request.args.get('tenant'),
+        occupied_override=request.args.get('occupied'),
+        threshold_override=request.args.get('threshold', type=int),
+        scale=max(1, min(8, request.args.get('scale', 4, type=int))),
+    )
+    return send_file(buf, mimetype='image/jpeg', download_name='epaper.jpg')
 
 
 @app.route('/')
@@ -1307,6 +1373,56 @@ except Exception:
     pass
 
 
+_weather_desc_cache: dict = {'desc': None, 'ts': 0.0}
+
+
+def _current_weather_desc():
+    """
+    Fetch the current weather condition description from NWS KONP latest observation.
+    Falls back to Open-Meteo current weather code mapped through _WMO.
+    Result is cached for 30 minutes.
+    """
+    import json as _json
+    import urllib.request as _ureq
+    import time as _time
+
+    now = _time.time()
+    if _weather_desc_cache['desc'] is not None and now - _weather_desc_cache['ts'] < 1800:
+        return _weather_desc_cache['desc']
+
+    desc = None
+    try:
+        req = _ureq.Request(
+            'https://api.weather.gov/stations/KONP/observations/latest',
+            headers={'User-Agent': 'pumphouse-monitor/1.0', 'Accept': 'application/geo+json'},
+        )
+        with _ureq.urlopen(req, timeout=10) as resp:
+            props = _json.loads(resp.read()).get('properties', {})
+        desc = props.get('textDescription', '').strip() or None
+    except Exception:
+        pass
+
+    if not desc:
+        try:
+            url = (
+                'https://api.open-meteo.com/v1/forecast'
+                '?latitude=44.6368&longitude=-124.0535'
+                '&current=weather_code'
+                '&timezone=America%2FLos_Angeles'
+            )
+            with _ureq.urlopen(url, timeout=10) as resp:
+                code = _json.loads(resp.read()).get('current', {}).get('weather_code')
+            if code is not None:
+                desc = _WMO.get(int(code))
+        except Exception:
+            pass
+
+    if desc:
+        _weather_desc_cache['desc'] = desc
+        _weather_desc_cache['ts'] = now
+    return desc
+
+
 def _open_meteo_weather(date_str):
     """
     Fetch daily weather for date_str.
@@ -1671,6 +1787,18 @@ def timelapse_rate(date_str):
     resp.set_cookie(f'tl_rated_{date_str}', str(rating),
                     max_age=365 * 24 * 3600, samesite='Lax')
     return resp
+
+
+@app.route('/timelapse/test.mp4')
+def timelapse_test_mp4():
+    """Serve the test timelapse produced by test_timelapse.py."""
+    path = os.path.join(TIMELAPSE_DIR, 'test_timelapse.mp4')
+    if not os.path.exists(path):
+        return Response(
+            'No test timelapse found. Run test_timelapse.py first.',
+            status=404, mimetype='text/plain'
+        )
+    return send_file(path, mimetype='video/mp4', max_age=0)
 
 
 @app.route('/timelapse/<date_or_file>')
