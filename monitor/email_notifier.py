@@ -51,7 +51,7 @@ from monitor.config import (
 )
 
 
-def send_email_notification(subject, message, priority='default', dashboard_url=None, chart_url=None, debug=False, include_status=True):
+def send_email_notification(subject, message, priority='default', dashboard_url=None, chart_url=None, debug=False, include_status=True, inline_image_path=None, inline_image_link=None):
     """
     Send HTML email notification with embedded chart and system status
 
@@ -63,6 +63,8 @@ def send_email_notification(subject, message, priority='default', dashboard_url=
         chart_url: URL of chart image to embed
         debug: Print debug info
         include_status: Include current system status in email (default: True)
+        inline_image_path: Local file path to embed as the first image in the email
+        inline_image_link: URL to wrap the inline image in as a hyperlink
 
     Returns:
         True if sent successfully, False otherwise
@@ -108,11 +110,28 @@ def send_email_notification(subject, message, priority='default', dashboard_url=
             status_data = fetch_system_status(debug=debug)
 
         # Build HTML body
-        html_body = build_html_email(subject, message, priority, dashboard_url, chart_url, status_data)
+        html_body = build_html_email(subject, message, priority, dashboard_url, chart_url, status_data, inline_image_link=inline_image_link)
 
         # Attach HTML
         html_part = MIMEText(html_body, 'html')
         msg.attach(html_part)
+
+        # Embed inline image from local file if provided
+        if inline_image_path:
+            try:
+                import os as _os
+                with open(inline_image_path, 'rb') as f:
+                    image_data = f.read()
+                image_part = MIMEImage(image_data)
+                image_part.add_header('Content-ID', '<inline_image>')
+                image_part.add_header('Content-Disposition', 'inline',
+                                      filename=_os.path.basename(inline_image_path))
+                msg.attach(image_part)
+                if debug:
+                    print(f"Inline image attached ({len(image_data):,} bytes): {inline_image_path}")
+            except Exception as e:
+                if debug:
+                    print(f"Warning: Could not attach inline image: {e}", file=sys.stderr)
 
         # Fetch and embed chart image if provided
         if chart_url:
@@ -501,7 +520,7 @@ def format_pressure_state(state):
         return "LOW (<10 PSI)"
 
 
-def build_html_email(subject, message, priority, dashboard_url, chart_url, status_data=None):
+def build_html_email(subject, message, priority, dashboard_url, chart_url, status_data=None, inline_image_link=None):
     """Build HTML email body with styling similar to status.html and full system status"""
 
     # Determine priority color
@@ -777,6 +796,24 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
         html += f"""
             <div class="dashboard-link">
                 <a href="{email_dashboard_url}">📊 View Dashboard</a>
+            </div>
+"""
+
+    # Inline snapshot image (e.g. timelapse snapshot), linked to timelapse page
+    if inline_image_link:
+        html += f"""
+            <div style="margin: 20px 0; text-align: center;">
+                <a href="{inline_image_link}" style="display: block;">
+                    <img src="cid:inline_image" alt="Snapshot"
+                         style="max-width: 100%; height: auto; display: block;
+                                border-radius: 4px; border: 1px solid #444;">
+                </a>
+                <div style="margin-top: 8px;">
+                    <a href="{inline_image_link}"
+                       style="color: #4CAF50; font-size: 13px; text-decoration: none;">
+                        ▶ Watch timelapse →
+                    </a>
+                </div>
             </div>
 """
 

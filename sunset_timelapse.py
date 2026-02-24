@@ -286,6 +286,7 @@ def run_todays_timelapse():
             log.info(f"Saved snapshot: frame {frame_idx} → {snapshot_path.name}")
 
         cleanup_old(RETENTION_DAYS)
+        _send_timelapse_email(snapshot_path, date_str)
 
     finally:
         for t in preview_threads:
@@ -293,6 +294,64 @@ def run_todays_timelapse():
         if frames_dir.exists():
             shutil.rmtree(frames_dir)
             log.info("Cleaned up frames")
+
+
+# ---------------------------------------------------------------------------
+# Timelapse completion email
+# ---------------------------------------------------------------------------
+def _send_timelapse_email(snapshot_path: Path, date_str: str) -> None:
+    """Send a timelapse-complete email with the snapshot inline, if configured."""
+    try:
+        from monitor.config import ENABLE_TIMELAPSE_EMAIL, TIMELAPSE_EMAIL_LINK, DASHBOARD_URL
+        if not ENABLE_TIMELAPSE_EMAIL:
+            return
+    except Exception as e:
+        log.warning(f"Timelapse email: could not load config: {e}")
+        return
+
+    # Gallons from latest snapshot row
+    gallons = None
+    try:
+        import csv as _csv
+        with open('snapshots.csv') as f:
+            rows = list(_csv.DictReader(f))
+        if rows:
+            gallons = float(rows[-1]['tank_gallons'])
+    except Exception:
+        pass
+
+    # Weather description from NWS
+    weather_desc = None
+    try:
+        import json as _json, urllib.request as _ureq
+        req = _ureq.Request(
+            'https://api.weather.gov/stations/KONP/observations/latest',
+            headers={'User-Agent': 'pumphouse/1.0'},
+        )
+        with _ureq.urlopen(req, timeout=5) as r:
+            weather_desc = _json.loads(r.read())['properties'].get('textDescription') or None
+    except Exception:
+        pass
+
+    gal_part     = f'{int(gallons):,} gal - ' if gallons is not None else ''
+    weather_part = f' - {weather_desc}'        if weather_desc         else ''
+    subject      = f'{gal_part}Sunset timelapse{weather_part}'
+    message      = f"Today's sunset timelapse is ready for {date_str}."
+
+    try:
+        from monitor.email_notifier import send_email_notification
+        send_email_notification(
+            subject=subject,
+            message=message,
+            priority='default',
+            dashboard_url=DASHBOARD_URL,
+            inline_image_path=str(snapshot_path) if snapshot_path.exists() else None,
+            inline_image_link=TIMELAPSE_EMAIL_LINK,
+            include_status=True,
+        )
+        log.info(f"Timelapse email sent: {subject}")
+    except Exception as e:
+        log.error(f"Timelapse email failed: {e}")
 
 
 # ---------------------------------------------------------------------------

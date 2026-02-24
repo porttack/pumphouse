@@ -73,6 +73,10 @@ DAILY_STATUS_EMAIL_CHART_HOURS = 72  # Hours of history to show in daily status 
 ENABLE_CHECKOUT_REMINDER = True  # Send checkout reminder to turn down thermostat
 CHECKOUT_REMINDER_TIME = "11:00"  # Time to send checkout reminder (HH:MM in 24-hour format)
 
+# Timelapse Email Configuration
+ENABLE_TIMELAPSE_EMAIL = True   # Send email after each day's sunset timelapse is assembled
+TIMELAPSE_EMAIL_LINK = "https://onblackberryhill.com/timelapse"  # Link target for the inline snapshot image
+
 # Notification Rules - Which events trigger notifications
 NOTIFY_TANK_DECREASING = [1300, 1150, 1000, 700, 500, 250]  # Alert when tank crosses these levels going DOWN
 NOTIFY_TANK_INCREASING = [500, 750, 1000, 1200, 1300]  # Alert when tank crosses these levels going UP
