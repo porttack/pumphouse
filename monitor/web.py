@@ -765,6 +765,22 @@ def epaper_bmp():
     except Exception:
         pass
 
+    # ── Adaptive smoothing: large window when flat, raw when changing ─────
+    _SMOOTH_WINDOW   = 11   # points (~2.5 hr at 15-min snapshots)
+    _NOISE_THRESHOLD = 15   # gallons — above this → real movement, use raw
+    if len(graph_gallons) >= _SMOOTH_WINDOW:
+        smoothed = []
+        half = _SMOOTH_WINDOW // 2
+        for i in range(len(graph_gallons)):
+            lo = max(0, i - half)
+            hi = min(len(graph_gallons), i + half + 1)
+            window_vals = graph_gallons[lo:hi]
+            if max(window_vals) - min(window_vals) > _NOISE_THRESHOLD:
+                smoothed.append(graph_gallons[i])   # real change — use raw
+            else:
+                smoothed.append(sum(window_vals) / len(window_vals))
+        graph_gallons = smoothed
+
     # Compute Y-axis range
     g_min_raw = min(graph_gallons) if len(graph_gallons) >= 2 else 0
     g_max_raw = max(graph_gallons) if len(graph_gallons) >= 2 else 0

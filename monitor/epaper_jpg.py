@@ -439,6 +439,25 @@ def render_epaper_jpg(
     draw.text((graph_right - (nl_bbox[2] - nl_bbox[0]) - s(1), graph_bottom + s(1)),
               now_label, font=font_small, fill=AXIS_COLOR)
 
+    # ── Adaptive smoothing: large window when flat, raw when changing ─────
+    # Each snapshot is ~15 min; window=11 → ~2.5 hr when tank is quiet.
+    # When the window range exceeds the noise threshold (real movement),
+    # fall back to the raw value so genuine trends aren't blurred.
+    _SMOOTH_WINDOW   = 11   # points (~2.5 hr)
+    _NOISE_THRESHOLD = 15   # gallons — above this → real movement, use raw
+    if len(graph_gallons) >= _SMOOTH_WINDOW:
+        smoothed = []
+        half = _SMOOTH_WINDOW // 2
+        for i in range(len(graph_gallons)):
+            lo = max(0, i - half)
+            hi = min(len(graph_gallons), i + half + 1)
+            window_vals = graph_gallons[lo:hi]
+            if max(window_vals) - min(window_vals) > _NOISE_THRESHOLD:
+                smoothed.append(graph_gallons[i])   # real change — use raw
+            else:
+                smoothed.append(sum(window_vals) / len(window_vals))
+        graph_gallons = smoothed
+
     # ── Data line (no fill) ───────────────────────────────────────────────
     if len(graph_gallons) >= 2:
         points = []
