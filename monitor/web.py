@@ -884,6 +884,22 @@ def epaper_bmp():
         wd_region = img.crop((paste_x, paste_y, paste_x + wd_w + pad * 2, paste_y + wd_h + pad * 2))
         wd_region = ImageChops.logical_xor(wd_region, wd_img)
         img.paste(wd_region, (paste_x, paste_y))
+        paste_y += wd_h + pad * 2 + 1
+
+    # "Override ON" label (XOR) when tenant=no is explicit and supply override is active
+    if tenant_override == 'no':
+        try:
+            if get_all_relay_status().get('supply_override') == 'ON':
+                ov_text = 'Override ON'
+                ov_tb = draw.textbbox((0, 0), ov_text, font=font_small)
+                ov_w, ov_h = ov_tb[2] - ov_tb[0], ov_tb[3] - ov_tb[1]
+                ov_img = Image.new('1', (ov_w + pad * 2, ov_h + pad * 2), 0)
+                ImageDraw.Draw(ov_img).text((pad - ov_tb[0], pad - ov_tb[1]), ov_text, font=font_small, fill=1)
+                ov_region = img.crop((paste_x, paste_y, paste_x + ov_w + pad * 2, paste_y + ov_h + pad * 2))
+                ov_region = ImageChops.logical_xor(ov_region, ov_img)
+                img.paste(ov_region, (paste_x, paste_y))
+        except Exception:
+            pass
 
     # "Save Water" XOR overlay when tank is low (non-tenant mode)
     if tank_is_low:

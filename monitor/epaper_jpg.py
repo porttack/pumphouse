@@ -43,6 +43,7 @@ from monitor.config import (
     TANK_CAPACITY_GALLONS,
     TANK_URL,
 )
+from monitor.relay import get_all_relay_status
 from monitor.occupancy import (
     get_checkin_datetime,
     get_next_reservation,
@@ -490,6 +491,15 @@ def render_epaper_jpg(
     if weather_desc:
         wb = draw.textbbox((0, 0), weather_desc, font=font_small)
         draw.text((graph_left + pad - wb[0], py - wb[1]), weather_desc, font=font_small, fill=WHITE)
+        py += (wb[3] - wb[1]) + s(3)
+
+    # "Override ON" label when tenant=no is explicit and supply override is active
+    if tenant_override == 'no':
+        try:
+            if get_all_relay_status().get('supply_override') == 'ON':
+                draw.text((graph_left + pad, py), 'Override ON', font=font_small, fill=WHITE)
+        except Exception:
+            pass
 
     # Occupancy text centred near graph bottom (owner/unoccupied mode only)
     if not is_tenant:
