@@ -300,7 +300,8 @@ class NotificationManager:
                     self.well_dry_alerted = state.get('well_dry_alerted', False)
                     self.high_flow_alerted_ts = state.get('high_flow_alerted_ts')
                     # Support both old backflush_alerted_ts and new backflush_alerted_date
-                    self.backflush_alerted_date = state.get('backflush_alerted_date') or state.get('backflush_alerted_ts', '')[:10] if state.get('backflush_alerted_ts') else None
+                    old_ts = state.get('backflush_alerted_ts')
+                    self.backflush_alerted_date = state.get('backflush_alerted_date') or (old_ts[:10] if old_ts else None)
                     # Migrate from old full_flow_alerted_ts to boolean flag
                     self.full_flow_active_alerted = state.get('full_flow_active_alerted',
                         state.get('full_flow_alerted_ts') is not None)
