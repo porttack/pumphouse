@@ -1212,46 +1212,226 @@ def sunset():
     return Response(f'Camera unavailable: {last_err}', status=503)
 
 
+SNAPSHOT_CROP_BOTTOM = 120   # keep in sync with sunset_timelapse.py CROP_BOTTOM
+SNAPSHOT_CAMERA_IP   = '192.168.1.81'
+SNAPSHOT_CAMERA_PORT = 554
+
+
 @app.route('/frame')
-def frame():
+@app.route('/snapshot')
+def snapshot():
     """
-    Grab a single JPEG frame from the camera RTSP stream via ffmpeg.
-    Faster than /sunset (no HTTP digest auth round-trips).
+    Return a live camera frame, with an HTML weather-info wrapper by default.
+
+    If a timelapse is currently being recorded (frames exist in
+    /tmp/timelapse-frames/YYYY-MM-DD/) the most recent completed frame is
+    served directly instead of opening a competing RTSP connection.
 
     Query params:
-        raw - 1 = return full uncropped frame; default applies CROP_BOTTOM
+        info - 0 = return raw JPEG only (no HTML wrapper); default shows info page
+        crop - 1 = apply SNAPSHOT_CROP_BOTTOM pixels from bottom; ignored when
+                   serving a timelapse frame (already cropped at capture time)
     """
     import subprocess
-    CROP_BOTTOM = 120   # keep in sync with sunset_timelapse.py
-    CAMERA_IP   = '192.168.1.81'
-    CAMERA_PORT = 554
+    import base64 as _base64
+    from datetime import date as _date, datetime as _dt
+    from zoneinfo import ZoneInfo as _ZI
+    from pathlib import Path as _Path
 
-    raw  = request.args.get('raw', 0, type=int)
-    rtsp = (f'rtsp://{CAMERA_USER}:{CAMERA_PASS}@{CAMERA_IP}:{CAMERA_PORT}'
-            f'/cam/realmonitor?channel=1&subtype=0')
+    info = request.args.get('info', 1, type=int)
+    crop = request.args.get('crop', 0, type=int)
 
-    vf = None if raw or CROP_BOTTOM == 0 else f'crop=iw:ih-{CROP_BOTTOM}:0:0'
-    cmd = [
-        'ffmpeg', '-y',
-        '-rtsp_transport', 'tcp',
-        '-i', rtsp,
-        '-vframes', '1',
-        '-f', 'image2pipe',
-        '-vcodec', 'mjpeg',
-    ]
-    if vf:
-        cmd += ['-vf', vf]
-    cmd.append('pipe:1')
+    # ------------------------------------------------------------------
+    # Frame acquisition: prefer in-progress timelapse frames to avoid
+    # fighting the timelapse daemon for the RTSP stream.
+    # ------------------------------------------------------------------
+    today     = _date.today()
+    date_str  = today.isoformat()
+    frames_dir = _Path('/tmp/timelapse-frames') / date_str
+    jpeg_bytes = None
+    from_timelapse = False
 
+    if frames_dir.exists():
+        frames = sorted(frames_dir.glob('frame_*.jpg'))
+        # Skip the last frame — it may still be mid-write by ffmpeg
+        candidate = frames[-2] if len(frames) >= 2 else (frames[0] if frames else None)
+        if candidate:
+            try:
+                jpeg_bytes = candidate.read_bytes()
+                from_timelapse = True
+            except Exception:
+                pass  # fall through to RTSP grab
+
+    if jpeg_bytes is None:
+        # Live RTSP grab
+        rtsp = (f'rtsp://{CAMERA_USER}:{CAMERA_PASS}@{SNAPSHOT_CAMERA_IP}:{SNAPSHOT_CAMERA_PORT}'
+                f'/cam/realmonitor?channel=1&subtype=0')
+        vf = f'crop=iw:ih-{SNAPSHOT_CROP_BOTTOM}:0:0' if (crop and SNAPSHOT_CROP_BOTTOM) else None
+        cmd = [
+            'ffmpeg', '-y',
+            '-rtsp_transport', 'tcp',
+            '-i', rtsp,
+            '-vframes', '1',
+            '-f', 'image2pipe',
+            '-vcodec', 'mjpeg',
+        ]
+        if vf:
+            cmd += ['-vf', vf]
+        cmd.append('pipe:1')
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, timeout=15)
+            if result.returncode != 0 or not result.stdout:
+                return Response('Frame grab failed', status=503)
+            jpeg_bytes = result.stdout
+        except subprocess.TimeoutExpired:
+            return Response('Camera timeout', status=503)
+        except Exception as e:
+            return Response(f'Error: {e}', status=503)
+
+    if info == 0:
+        return Response(jpeg_bytes, status=200, mimetype='image/jpeg')
+
+    # --- HTML page with weather panel ---
     try:
-        result = subprocess.run(cmd, capture_output=True, timeout=15)
-        if result.returncode != 0 or not result.stdout:
-            return Response('Frame grab failed', status=503)
-        return Response(result.stdout, status=200, mimetype='image/jpeg')
-    except subprocess.TimeoutExpired:
-        return Response('Camera timeout', status=503)
-    except Exception as e:
-        return Response(f'Error: {e}', status=503)
+        title_date = today.strftime('%A, %B %-d, %Y')
+    except Exception:
+        title_date = date_str
+
+    tz      = _ZI('America/Los_Angeles')
+    now_str = _dt.now(tz).strftime('%-I:%M %p')
+    src_note = 'from timelapse' if from_timelapse else 'live grab'
+    img_b64 = _base64.b64encode(jpeg_bytes).decode()
+
+    # Weather data
+    wx = _day_weather_summary(date_str)
+    om = _open_meteo_weather(date_str)
+    cc = _current_conditions()
+
+    # Sunrise / sunset from astral (reliable for today; archive API lags)
+    sunrise_str = sunset_str = None
+    try:
+        from astral import LocationInfo as _LI
+        from astral.sun import sun as _sun
+        _loc = _LI('Newport, OR', 'Oregon', 'America/Los_Angeles', 44.6368, -124.0535)
+        _st  = _sun(_loc.observer, date=today, tzinfo=tz)
+        sunrise_str = _st['sunrise'].strftime('%-I:%M %p')
+        sunset_str  = _st['sunset'].strftime('%-I:%M %p')
+    except Exception:
+        sunrise_str = om.get('sunrise') if om else None
+        sunset_str  = (wx.get('sunset') if wx else None) or (om.get('sunset') if om else None)
+
+    def stat(label, val, unit=''):
+        if val is None:
+            return ''
+        return (f'<div class="stat"><span class="lbl">{label}</span>'
+                f'<span class="val">{val}{unit}</span></div>')
+
+    # Weather description + quip from daily data
+    desc_html = ''
+    if om and om.get('weather_desc'):
+        import random as _random
+        _opts      = _QUIPS.get(om['weather_desc'].lower(), [])
+        _quip      = _random.choice(_opts) if _opts else ''
+        _quip_html = f' <span class="wx-quip">{_quip}</span>' if _quip else ''
+        desc_html  = f'<div class="wx-desc">{om["weather_desc"]}{_quip_html}</div>'
+
+    wind_label = cc.get('wind_label', 'Wind')
+    humidity   = (wx.get('humidity_avg') if wx else None) or (om.get('humidity') if om else None)
+
+    wx_html = f"""
+        <div class="weather">
+          {desc_html}
+          <div class="wx-group">
+            {stat('Now',     now_str,    '')}
+            {stat('Sunrise', sunrise_str,'')}
+            {stat('Sunset',  sunset_str, '')}
+          </div>
+          <div class="wx-group">
+            {stat(wind_label, cc.get('wind'),  ' mph')}
+            {stat('Cloud',    cc.get('cloud'), '%')}
+            {stat('Humidity', humidity,        '%')}
+          </div>
+        </div>"""
+
+    # Most-recent timelapse date for the "Timelapses" link
+    tl_dates  = _timelapse_dates()
+    tl_link   = f'/timelapse/{tl_dates[-1]}' if tl_dates else '/timelapse'
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Snapshot &mdash; {title_date} &mdash; {now_str}</title>
+  <style>
+    * {{ box-sizing: border-box; }}
+    body {{ font-family: monospace; background:#1a1a1a; color:#e0e0e0;
+           margin:0; padding:16px; }}
+    h2   {{ margin:0; color:#fff; }}
+    .site-header {{ max-width:960px; padding:4px 0 10px; margin-bottom:4px;
+                    border-bottom:1px solid #333; display:flex;
+                    flex-wrap:wrap; align-items:baseline; gap:0 10px; }}
+    .site-name {{ font-size:1.2em; color:#fff; font-weight:bold; }}
+    .site-sub  {{ font-size:0.85em; color:#888; }}
+    .site-sub a {{ color:#4CAF50; text-decoration:none; }}
+    .site-sub a:hover {{ color:#fff; }}
+    .page-header {{ max-width:960px; display:flex; justify-content:center;
+                    align-items:center; margin:12px 0; }}
+    .snapshot-wrap {{ max-width:860px; margin:12px 0; }}
+    .snapshot-wrap img {{ width:100%; display:block; border-radius:4px;
+                          cursor:pointer; }}
+    .snapshot-wrap img:hover {{ opacity:0.92; }}
+    .weather {{ max-width:860px; background:#222; border:1px solid #333;
+                border-radius:4px; padding:12px 16px; margin:12px 0;
+                display:flex; flex-direction:column; gap:8px; }}
+    .wx-desc  {{ font-size:1.05em; color:#aed6f1; font-weight:bold; }}
+    .wx-quip  {{ font-size:0.9em; color:#888; font-weight:normal; font-style:italic; }}
+    .wx-group {{ display:flex; flex-wrap:wrap; gap:12px; }}
+    .stat {{ display:flex; flex-direction:column; min-width:80px; }}
+    .lbl  {{ font-size:0.75em; color:#888; text-transform:uppercase; }}
+    .val  {{ font-size:1.1em; color:#e0e0e0; }}
+    .actions {{ max-width:860px; display:flex; flex-wrap:wrap;
+                align-items:center; gap:10px; margin:10px 0; }}
+    .btn {{ background:#2a2a2a; color:#4CAF50; border:1px solid #444;
+            padding:6px 16px; border-radius:4px; text-decoration:none;
+            font-family:monospace; font-size:0.95em; cursor:pointer; }}
+    .btn:hover {{ background:#333; color:#fff; }}
+    .captured-at {{ color:#666; font-size:0.85em; }}
+    @media (max-width:600px) {{
+      .page-header h2 {{ font-size:1.0em; }}
+      .site-sub {{ font-size:0.78em; }}
+    }}
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <span class="site-name">On Blackberry Hill</span>
+    <span class="site-sub">Newport, OR &middot; Available via
+      <a href="https://www.meredithlodging.com/listings/1830" target="_blank" rel="noopener">Meredith</a>
+      &middot; <a href="https://www.airbnb.com/rooms/894278114876445404" target="_blank" rel="noopener">Airbnb</a>
+      &middot; <a href="https://www.vrbo.com/9829179ha" target="_blank" rel="noopener">Vrbo</a>
+    </span>
+  </header>
+  <div class="page-header">
+    <h2>Snapshot &mdash; {title_date} &mdash; {now_str}</h2>
+  </div>
+  <div class="snapshot-wrap">
+    <a href="/snapshot?info=0" target="_blank" title="Open raw image">
+      <img src="data:image/jpeg;base64,{img_b64}" alt="Live snapshot">
+    </a>
+  </div>
+  {wx_html}
+  <div class="actions">
+    <button class="btn" onclick="location.reload()">&#8635; New Snapshot</button>
+    <a class="btn" href="{tl_link}">Timelapses</a>
+    <a class="btn" href="/">Dashboard</a>
+    <span class="captured-at">Captured {now_str} &middot; {src_note}</span>
+  </div>
+</body>
+</html>"""
+
+    return Response(html, status=200, mimetype='text/html')
 
 
 TIMELAPSE_DIR     = '/home/pi/timelapses'
@@ -1671,6 +1851,53 @@ def _day_weather_summary(date_str):
         return None
 
 
+def _current_conditions():
+    """
+    Fetch point-in-time wind speed and cloud cover for the snapshot page.
+
+    Wind  – most recent wind_gust_mph from snapshots.csv (local Ambient Weather station).
+    Cloud – Open-Meteo forecast current conditions (cloud_cover %).
+            Also supplies wind as a fallback when the local sensor reading is absent.
+    """
+    import csv as _csv
+    import urllib.request as _ureq
+    import json as _json
+
+    result = {}
+
+    # Most recent local sensor wind reading
+    try:
+        with open('snapshots.csv') as f:
+            rows = list(_csv.DictReader(f))
+        if rows:
+            v = rows[-1].get('wind_gust_mph', '')
+            if v not in ('', None):
+                result['wind']       = f'{float(v):.0f}'
+                result['wind_label'] = 'Gust'
+    except Exception:
+        pass
+
+    # Cloud cover from Open-Meteo current forecast; wind as fallback
+    try:
+        url = ('https://api.open-meteo.com/v1/forecast'
+               '?latitude=44.6368&longitude=-124.0535'
+               '&current=cloud_cover,wind_speed_10m'
+               '&wind_speed_unit=mph&timezone=America%2FLos_Angeles')
+        with _ureq.urlopen(url, timeout=8) as resp:
+            cur = _json.loads(resp.read()).get('current', {})
+        cc = cur.get('cloud_cover')
+        if cc is not None:
+            result['cloud'] = str(int(round(cc)))
+        ws = cur.get('wind_speed_10m')
+        if ws is not None and 'wind' not in result:
+            result['wind']       = f'{ws:.0f}'
+            result['wind_label'] = 'Wind'
+    except Exception:
+        pass
+
+    return result
+
+
 @app.route('/timelapse')
 def timelapse_index():
     """Redirect to a timelapse date.
@@ -1921,6 +2148,10 @@ def timelapse_view(date_or_file):
           </div>
         </div>"""
 
+    is_direct    = 'onblackberryhill.com' not in request.host.lower()
+    is_direct_js = 'true' if is_direct else 'false'
+    now_btn      = '<a href="/snapshot" class="speed-btn dl-btn">Now</a>' if is_direct else ''
+
     video_html = (
         f'<video id="vid" src="/timelapse/{mp4_name}" controls autoplay muted loop playsinline></video>'
         f'<div class="ctrl-row">'
@@ -1936,6 +2167,7 @@ def timelapse_view(date_or_file):
         f'<div class="ctrl-btns">'
         f'<button id="pause-btn" class="speed-btn pause-btn">&#9646;&#9646; Pause</button>'
         f'<button id="dl-btn" class="speed-btn dl-btn">&#8681; Snapshot</button>'
+        f'{now_btn}'
         f'</div>'
         f'</div>'
         if has_video else
@@ -1948,7 +2180,6 @@ def timelapse_view(date_or_file):
                 if next_date else '<span class="nav-btn disabled">&#8594;</span>')
     prev_js      = f'"{prev_date}"' if prev_date else 'null'
     next_js      = f'"{next_date}"' if next_date else 'null'
-    is_direct_js = 'false' if 'onblackberryhill.com' in request.host.lower() else 'true'
 
     # List all dates newest-first with snapshot thumbnails, sunset time, and rating
     import re as _re, json as _json

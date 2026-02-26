@@ -103,7 +103,7 @@ python -m monitor.web
 |-------|-------------|
 | `GET /` | Web dashboard (requires auth) |
 | `GET /sunset` | Live camera JPEG from Amcrest via RTSP; `?enhance=1` for contrast boost |
-| `GET /frame` | Live single frame (cropped); `?raw=1` for uncropped |
+| `GET /snapshot` | Live camera frame with weather panel; `?info=0` for raw JPEG |
 | `GET /timelapse` | Redirects to most recent timelapse |
 | `GET /timelapse/YYYY-MM-DD` | Timelapse viewer for specific date |
 | `GET /timelapse/latest.mp4` | Redirect to most recent MP4 |

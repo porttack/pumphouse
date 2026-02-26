@@ -175,7 +175,7 @@ Your domain → Caching → Cache Rules → Create rule:
 | Past timelapse pages | URI path matches `/timelapse/20*` | Cache everything; Edge TTL 1 year |
 | Snapshot JPEGs | URI path matches `/timelapse/*/snapshot` | Cache everything; Edge TTL 1 year |
 | Rating API | URI path matches `/api/ratings/*` | Cache 60 seconds |
-| Live frame | URI path matches `/frame*` | Bypass cache |
+| Live snapshot | URI path matches `/snapshot*` or `/frame*` | Bypass cache |
 | Dashboard | URI path matches `/` | Bypass cache |
 
 > **This step is not yet complete.** Without the HTML cache rule, Cloudflare won't cache timelapse viewer pages (only MP4/JPEG are cached automatically).

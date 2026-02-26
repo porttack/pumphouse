@@ -214,7 +214,7 @@
 <body>
     <div class="container">
         <h1>PUMPHOUSE SYSTEM STATUS <span style="font-size: 14px; color: #888; font-weight: normal;">v{{ version }}</span></h1>
-        <div class="timestamp">Last Updated: {{ now.strftime('%Y-%m-%d %H:%M:%S') }} (auto-refresh: 60s)</div>
+        <div class="timestamp">Last Updated: {{ now.strftime('%Y-%m-%d %H:%M:%S') }} (auto-refresh: 60s) &middot; <a href="/timelapse" style="color:#4CAF50; text-decoration:none;">Timelapses</a></div>
 
         <!-- Tank Level Section -->
         <div class="section">
@@ -258,14 +258,23 @@
                 {% endif %}
             </div>
 
-            {% if tank_data.depth > tank_height %}
-            <div class="warning">
-                ⚠️ WARNING: Water level is {{ "%.2f"|format(tank_data.depth - tank_height) }}" above normal tank height!
-            </div>
-            {% endif %}
             {% else %}
             <div class="error">
                 ❌ Error: {{ tank_data.get('error_message', 'Could not fetch tank data') }}
+            </div>
+            {% endif %}
+
+            <!-- E-paper display (no tenant name) — spans full grid width, scales responsively -->
+            <div class="status-grid">
+                <div class="status-item" style="grid-column: 1 / -1; padding: 8px;">
+                    <img src="/api/epaper.jpg?tenant=no" alt="E-paper display"
+                         style="width:100%; max-width:500px; display:block; border-radius:3px;">
+                </div>
+            </div>
+
+            {% if tank_data.status == 'success' and tank_data.depth is not none and tank_data.depth > tank_height %}
+            <div class="warning">
+                ⚠️ WARNING: Water level is {{ "%.2f"|format(tank_data.depth - tank_height) }}" above normal tank height!
             </div>
             {% endif %}
         </div>

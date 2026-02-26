@@ -15,8 +15,8 @@ Daily sunset timelapses captured from the pumphouse Amcrest camera at Newport, O
 | `/timelapse/latest.jpg` | Redirects to the most recent snapshot JPEG |
 | `/timelapse/YYYY-MM-DD/snapshot` | Snapshot JPEG (~35 min after sunset) |
 | `/api/ratings/YYYY-MM-DD` | JSON aggregate rating `{count, avg}` (served by Cloudflare Worker) |
-| `/frame` | Live single frame from the RTSP camera (cropped) |
-| `/frame?raw=1` | Live single frame, uncropped |
+| `/snapshot` | Live camera frame with weather panel and date; `?info=0` for raw JPEG |
+| `/frame` | Alias for `/snapshot` (backwards compat) |
 
 ---
 
