@@ -228,15 +228,6 @@
             </div>
 
             <div class="status-grid">
-                <div class="status-item">
-                    <div class="status-label">Depth</div>
-                    <div class="status-value">
-                        {{ "%.2f"|format(tank_data.depth) }}" / {{ tank_height }}" ({{ "%.1f"|format(tank_data.percentage) }}%)
-                        {% if tank_data.pt_percentage %}
-                            <span style="color: #888; font-size: 14px;">(<a href="{{ tank_url }}" target="_blank" style="color: #2196F3; text-decoration: none;">PT: {{ tank_data.pt_percentage }}%</a>)</span>
-                        {% endif %}
-                    </div>
-                </div>
                 {% if stats and stats.tank_change_1hr is not none and stats.tank_change_24hr is not none %}
                 <div class="status-item">
                     <div class="status-label">Change (1 hour / 24 hours)</div>
@@ -284,6 +275,17 @@
         <div class="section">
             <h2>SENSORS</h2>
             <div class="status-grid">
+                {% if tank_data.status == 'success' and tank_data.depth is not none %}
+                <div class="status-item">
+                    <div class="status-label">Depth</div>
+                    <div class="status-value">
+                        {{ "%.2f"|format(tank_data.depth) }}" / {{ tank_height }}" ({{ "%.1f"|format(tank_data.percentage) }}%)
+                        {% if tank_data.pt_percentage %}
+                            <span style="color: #888; font-size: 14px;">(<a href="{{ tank_url }}" target="_blank" style="color: #2196F3; text-decoration: none;">PT: {{ tank_data.pt_percentage }}%</a>)</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
                 <div class="status-item">
                     <div class="status-label">Float Switch</div>
                     <div class="status-value {{ 'full' if sensor_data.float == FLOAT_STATE_FULL else 'calling' }}">

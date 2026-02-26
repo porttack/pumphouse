@@ -792,6 +792,33 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
         <div class="content">
 """
 
+    # Add status display (epaper.jpg) at the top, before the alert message
+    if chart_url:
+        html += """
+            <div style="margin: 15px 0; text-align: center;">
+                <img src="cid:chart_image" alt="Status Display" style="max-width: 100%; height: auto; border: 1px solid #444; border-radius: 4px;">
+            </div>
+"""
+
+    # Add relay warnings if any are ON
+    if relay_status:
+        warnings = []
+        if relay_status.get('supply_override') == 'ON':
+            warnings.append("⚠️ SUPPLY OVERRIDE IS ON")
+        if relay_status.get('bypass') == 'ON':
+            warnings.append("⚠️ BYPASS IS ON")
+
+        for warning in warnings:
+            html += f"""
+            <div class="relay-warning">{warning}</div>
+"""
+
+    html += f"""
+            <div class="alert-box">
+                <p class="alert-message">{message}</p>
+            </div>
+"""
+
     # Inline snapshot image (e.g. timelapse snapshot), linked to timelapse page
     if inline_image_link:
         html += f"""
@@ -810,104 +837,21 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
             </div>
 """
 
-    html += f"""
-            <div class="alert-box">
-                <p class="alert-message">{message}</p>
-            </div>
-"""
-
-    # Add relay warnings if any are ON
-    if relay_status:
-        warnings = []
-        if relay_status.get('supply_override') == 'ON':
-            warnings.append("⚠️ SUPPLY OVERRIDE IS ON")
-        if relay_status.get('bypass') == 'ON':
-            warnings.append("⚠️ BYPASS IS ON")
-
-        for warning in warnings:
-            html += f"""
-            <div class="relay-warning">{warning}</div>
-"""
-
-    # Add status display (epaper.jpg) above the numeric status blocks
-    if chart_url:
-        html += """
-            <div class="section">
-                <h2>STATUS DISPLAY</h2>
-                <div style="text-align: center;">
-                    <img src="cid:chart_image" alt="Status Display" style="max-width: 100%; height: auto; border: 1px solid #444; border-radius: 4px;">
-                </div>
-            </div>
-"""
-
-    # Add tank level status if available
-    if tank_data and tank_data.get('status') == 'success' and tank_data.get('gallons') is not None:
-        gallons = tank_data['gallons']
-        percentage = tank_data['percentage']
-        depth = tank_data['depth']
-
-        html += f"""
-            <div class="section">
-                <h2>TANK LEVEL</h2>
-                <div class="tank-bar">
-                    <div class="tank-label">{percentage:.1f}% ({gallons:.0f} gal)</div>
-                    <div class="tank-fill" style="width: {percentage:.1f}%;"></div>
-                </div>
-                <div class="status-grid">
-                    <div class="status-item">
-                        <div class="status-label">Depth</div>
-                        <div class="status-value">{depth:.2f}" / {TANK_HEIGHT_INCHES}" ({percentage:.1f}%)</div>
-                    </div>
-                    <div class="status-item">
-                        <div class="status-label">Gallons</div>
-                        <div class="status-value">{gallons:.0f} / {TANK_CAPACITY_GALLONS} gal</div>
-                    </div>
-"""
-
-        # Add stats if available
-        if stats:
-            if stats.get('tank_change_1hr') is not None:
-                change_1hr = stats['tank_change_1hr']
-                change_1hr_class = 'positive' if change_1hr >= 0 else 'negative'
-                html += f"""
-                    <div class="status-item">
-                        <div class="status-label">Change (1 hour)</div>
-                        <div class="status-value"><span class="{change_1hr_class}">{change_1hr:+.0f} gal</span></div>
-                    </div>
-"""
-            if stats.get('tank_change_24hr') is not None:
-                change_24hr = stats['tank_change_24hr']
-                change_24hr_class = 'positive' if change_24hr >= 0 else 'negative'
-                html += f"""
-                    <div class="status-item">
-                        <div class="status-label">Change (24 hours)</div>
-                        <div class="status-value"><span class="{change_24hr_class}">{change_24hr:+.0f} gal</span></div>
-                    </div>
-"""
-            if stats.get('last_refill_50_days') is not None:
-                refill_days = stats['last_refill_50_days']
-                if refill_days < 1:
-                    refill_str = f"{refill_days * 24:.1f} hours ago"
-                else:
-                    refill_str = f"{refill_days:.1f} days ago"
-                html += f"""
-                    <div class="status-item">
-                        <div class="status-label">Last refill 50+ gal</div>
-                        <div class="status-value">{refill_str}</div>
-                    </div>
-"""
-
-        html += """
-                </div>
-            </div>
-"""
-
     # Add sensor status if available
     if pressure is not None or float_state is not None:
         html += """
             <div class="section">
                 <h2>SENSORS</h2>
                 <div class="status-grid">
+"""
+        if tank_data and tank_data.get('status') == 'success' and tank_data.get('depth') is not None:
+            depth = tank_data['depth']
+            percentage = tank_data['percentage']
+            html += f"""
+                    <div class="status-item">
+                        <div class="status-label">Depth</div>
+                        <div class="status-value">{depth:.2f}" / {TANK_HEIGHT_INCHES}" ({percentage:.1f}%)</div>
+                    </div>
 """
         if float_state is not None:
             from monitor.gpio_helpers import FLOAT_STATE_FULL
