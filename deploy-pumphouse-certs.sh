@@ -7,7 +7,7 @@ PROJECT_DIR="/home/pi/src/pumphouse"
 APP_USER="pi"
 # Your domain name
 # Set this to your DDNS hostname (same as PUMPHOUSE_HOST in secrets.conf)
-DOMAIN="your-hostname.example.com"
+DOMAIN="onblackberryhill2.tplinkdns.com"
 
 # --- Script ---
 # Stop on any error
@@ -40,9 +40,6 @@ echo "Permissions set successfully."
 # This command finds the running web.py process and kills it.
 # You would then need to restart it, ideally with a systemd service.
 echo "Restarting pumphouse web server..."
-pkill -f "python -m monitor.web" || true # Use '|| true' to not fail if it's not running
-
-# NOTE: This hook only stops the server. You need a separate mechanism
-# (like a systemd service) to ensure it restarts automatically.
+systemctl restart pumphouse-web.service
 
 echo "Deployment hook finished."

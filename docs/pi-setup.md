@@ -207,10 +207,24 @@ cd ~/src/pumphouse
 sudo apt install -y certbot
 sudo certbot certonly --standalone -d your-hostname.tplinkdns.com
 # Cert lands in /etc/letsencrypt/live/your-hostname.tplinkdns.com/
-# Copy or symlink to pumphouse/cert.pem and pumphouse/key.pem
 ```
 
-> **Note**: Check `pumphouse/certs/` — a Let's Encrypt cert may already be present from a previous setup.
+Then deploy the cert to the app and install the auto-renewal hook:
+
+```bash
+# First-time copy
+sudo cp /etc/letsencrypt/live/your-hostname.tplinkdns.com/fullchain.pem ~/src/pumphouse/certs/fullchain.pem
+sudo cp /etc/letsencrypt/live/your-hostname.tplinkdns.com/privkey.pem ~/src/pumphouse/certs/privkey.pem
+sudo chown pi:pi ~/src/pumphouse/certs/*.pem
+
+# Install the deploy hook so certbot auto-copies on every renewal
+sudo cp ~/src/pumphouse/deploy-pumphouse-certs.sh /etc/letsencrypt/renewal-hooks/deploy/pumphouse.sh
+sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/pumphouse.sh
+```
+
+> **Important**: The cert files must be named `fullchain.pem` and `privkey.pem` inside `certs/`. The deploy hook (`deploy-pumphouse-certs.sh`) handles copying and restarting `pumphouse-web` automatically on every renewal — without it, the app will serve an expired cert even after certbot renews.
+
+> **Note**: Check `pumphouse/certs/` — a Let's Encrypt cert may already be present from a previous setup. Verify it's not expired with `openssl x509 -noout -dates -in ~/src/pumphouse/certs/fullchain.pem`.
 
 ---
 
@@ -385,5 +399,23 @@ sudo journalctl -u pumphouse-monitor -n 50
 ```bash
 sudo systemctl status pumphouse-web
 sudo journalctl -u pumphouse-web -n 20
-# Check cert.pem and key.pem exist in ~/src/pumphouse/
+# Check fullchain.pem and privkey.pem exist in ~/src/pumphouse/certs/
 ```
+
+### Browser shows ERR_CERT_DATE_INVALID
+
+Certbot renews to `/etc/letsencrypt/live/` but the app uses a local copy in `certs/`. If the copy wasn't updated after the last renewal:
+
+```bash
+# Compare dates — if the app's copy is older, it needs refreshing
+openssl x509 -noout -dates -in ~/src/pumphouse/certs/fullchain.pem
+sudo openssl x509 -noout -dates -in /etc/letsencrypt/live/onblackberryhill2.tplinkdns.com/fullchain.pem
+
+# Fix: copy the fresh cert and restart
+sudo cp /etc/letsencrypt/live/onblackberryhill2.tplinkdns.com/fullchain.pem ~/src/pumphouse/certs/fullchain.pem
+sudo cp /etc/letsencrypt/live/onblackberryhill2.tplinkdns.com/privkey.pem ~/src/pumphouse/certs/privkey.pem
+sudo chown pi:pi ~/src/pumphouse/certs/*.pem
+sudo systemctl restart pumphouse-web
+```
+
+The deploy hook at `/etc/letsencrypt/renewal-hooks/deploy/pumphouse.sh` prevents this from recurring by auto-copying and restarting on every certbot renewal.

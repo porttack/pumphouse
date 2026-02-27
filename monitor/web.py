@@ -2167,6 +2167,7 @@ def timelapse_view(date_or_file):
     is_direct    = 'onblackberryhill.com' not in request.host.lower()
     is_direct_js = 'true' if is_direct else 'false'
     now_btn      = '<a href="/snapshot" class="speed-btn dl-btn">Now</a>' if is_direct else ''
+    dash_btn     = '<a href="/" class="speed-btn dl-btn">Dashboard</a>' if is_direct else ''
 
     video_html = (
         f'<video id="vid" src="/timelapse/{mp4_name}" controls autoplay muted loop playsinline></video>'
@@ -2184,6 +2185,7 @@ def timelapse_view(date_or_file):
         f'<button id="pause-btn" class="speed-btn pause-btn">&#9646;&#9646; Pause</button>'
         f'<button id="dl-btn" class="speed-btn dl-btn">&#8681; Snapshot</button>'
         f'{now_btn}'
+        f'{dash_btn}'
         f'</div>'
         f'</div>'
         if has_video else
