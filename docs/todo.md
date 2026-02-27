@@ -8,8 +8,8 @@ Pending tasks, security items, ideas, and completed history.
 
 ### Security (High Priority)
 
-- [ ] **`pumphouse/certs/privkey.pem`** — investigate how this is used; may need to be excluded from git or removed
-- [ ] **Remove `nohup.out` from git tracking** — contains external IP addresses and server logs; add to `.gitignore`
+- [x] **`pumphouse/certs/privkey.pem`** — excluded from git; `certs/` added to `.gitignore`; deploy hook manages cert updates
+- [x] **Remove `nohup.out` from git tracking** — added to `.gitignore`, removed from git index
 - [ ] **Move email addresses to secrets.conf** — personal Gmail addresses are in `monitor/config.py`
 - [ ] **Move Ambient Weather dashboard URL to secrets.conf** — unique dashboard ID in `monitor/config.py`
 - [ ] **Scrub git history** after moving secrets — use `git filter-repo` or BFG to remove sensitive data from past commits (without this, secrets remain accessible in git history even after removal)

@@ -34,6 +34,12 @@ secrets.conf
 *.secret
 .env
 
+# SSL certificates (managed by certbot deploy hook)
+certs/
+
+# Runtime output
+nohup.out
+
 # Runtime state files
 notification_state.json
 relay_state.json
