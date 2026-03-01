@@ -23,7 +23,8 @@ from monitor.config import (
     SECRET_BYPASS_ON_TOKEN, SECRET_BYPASS_OFF_TOKEN,
     SECRET_PURGE_TOKEN, MANAGEMENT_FEE_PERCENT,
     AMBIENT_WEATHER_DASHBOARD_URL,
-    CAMERA_USER, CAMERA_PASS
+    CAMERA_USER, CAMERA_PASS,
+    DASHBOARD_URL
 )
 from monitor.gpio_helpers import (
     read_pressure, read_float_sensor, init_gpio, cleanup_gpio,
@@ -1167,7 +1168,8 @@ def index():
                          ecobee_temp=ecobee_temp,
                          gph_metrics=gph_metrics,
                          FLOAT_STATE_FULL=FLOAT_STATE_FULL,
-                         FLOAT_STATE_CALLING=FLOAT_STATE_CALLING)
+                         FLOAT_STATE_CALLING=FLOAT_STATE_CALLING,
+                         snapshot_url=DASHBOARD_URL.rstrip('/') + '/snapshot' if DASHBOARD_URL else None)
 
 @app.route('/sunset')
 def sunset():
