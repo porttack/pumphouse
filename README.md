@@ -96,7 +96,8 @@ pumphouse/
 │   ├── variables.tf             # Input variables (account ID, zone ID, tunnel secret)
 │   ├── tunnel.tf                # Zero Trust Tunnel + DNS records
 │   ├── worker.tf                # KV namespace, Worker script, routes
-│   ├── rules.tf                 # Cache rules, redirect rules (DoS mitigations)
+│   ├── redirects.tf             # Redirect rules (/ → /timelapse, www → apex)
+│   ├── cache.tf                 # Cache rules (HTML caching, DoS mitigations)
 │   ├── outputs.tf               # Tunnel token, KV namespace ID
 │   └── terraform.tfvars.example # Template — copy to terraform.tfvars (gitignored)
 ├── ecobee/                      # Ecobee thermostat scripts (historical / reference)

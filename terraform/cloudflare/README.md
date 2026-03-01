@@ -16,9 +16,9 @@ UFW firewall) see [docs/cloudflare.md](../../docs/cloudflare.md).
 | `RATINGS` KV namespace | `worker.tf` |
 | `pumphouse-ratings` Worker script (reads `cloudflare/ratings-worker.js`) | `worker.tf` |
 | Worker routes (`onblackberryhill.com/*`, `www.*`) | `worker.tf` |
-| Redirect rules (/ → /timelapse, www → apex) | `rules.tf` |
-| Cache rule — timelapse HTML pages | `rules.tf` |
-| Cache rule — ignore query string (DoS mitigation) | `rules.tf` |
+| Redirect rules (/ → /timelapse, www → apex) | `redirects.tf` |
+| Cache rule — timelapse HTML pages | `cache.tf` |
+| Cache rule — ignore query string (DoS mitigation) | `cache.tf` |
 
 ## What this does NOT manage
 
