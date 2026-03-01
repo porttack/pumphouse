@@ -52,3 +52,9 @@ restart_tracker.json
 *_old.py
 *_debug.html
 reservations_debug.html
+
+# Test / scratch scripts
+test_*.py
+test_*.csv
+*.bak
+snapshots.csv.backup

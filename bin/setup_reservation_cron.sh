@@ -1,7 +1,7 @@
 #!/bin/bash
 # Setup cron job to scrape reservations twice daily
 
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
 UPDATE_SCRIPT="$SCRIPT_DIR/update_reservations.sh"
 LOG_FILE="$SCRIPT_DIR/reservation_updates.log"
 

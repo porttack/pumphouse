@@ -107,13 +107,16 @@ pumphouse/
 │   ├── fetch_ecobee_temp_cron.sh # Cron wrapper for temperature fetch
 │   ├── scrape_ecobee.py         # Web scraping fallback
 │   └── scrape_ecobee_selenium.py # Selenium-based scraping
+├── bin/                         # Setup and admin scripts (run once or rarely)
+│   ├── install-services.sh      # Copies & enables all systemd services
+│   ├── generate_cert.sh         # Self-signed SSL certificate generator
+│   ├── deploy-pumphouse-certs.sh # Copies Let's Encrypt certs, restarts web service
+│   └── setup_reservation_cron.sh # Installs reservation-scraper cron entries
 ├── docs/                        # All documentation
 │   ├── conversations/           # Development session notes
 │   └── lessons/                 # Educational content
 ├── sunset_timelapse.py          # Timelapse capture daemon (pumphouse-timelapse)
 ├── control.sh                   # Safe relay control script (no GPIO conflicts)
-├── install-services.sh          # Copies & enables all systemd services
-├── generate_cert.sh             # Self-signed SSL certificate generator
 ├── pumphouse-monitor.service    # systemd service definitions
 ├── pumphouse-web.service
 ├── pumphouse-timelapse.service
