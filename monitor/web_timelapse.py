@@ -38,7 +38,13 @@ def snapshot():
     from pathlib import Path as _Path
 
     info = request.args.get('info', 1, type=int)
-    crop = request.args.get('crop', 0, type=int)
+    # Default crop=1 (remove camera privacy bar).
+    # Requests via Cloudflare always get crop=1 regardless of param — the
+    # Worker normalizes the URL before caching so crop=0 is never served
+    # through the CDN.
+    crop = request.args.get('crop', 1, type=int)
+    if request.headers.get('CF-Ray'):
+        crop = 1
 
     # ------------------------------------------------------------------
     # Frame acquisition: prefer in-progress timelapse frames to avoid

@@ -2,11 +2,14 @@
  * pumphouse-ratings Worker
  *
  * Handles rating reads/writes at the Cloudflare edge so the Pi is not
- * involved in rating operations.
+ * involved in rating operations.  Also caches /snapshot and /frame for
+ * 5 minutes so the Pi cannot be DoS'd by the "Now" button.
  *
- * Routes (all other requests pass through to the Pi via tunnel):
+ * Routes:
+ *   GET  /snapshot, /frame          → 5-min CDN cache; crop=0 stripped (crop=1 enforced)
  *   GET  /api/ratings/YYYY-MM-DD   → read rating from KV
  *   POST /timelapse/YYYY-MM-DD/rate → write rating to KV
+ *   All others                      → pass through to Pi via tunnel
  *
  * KV binding: RATINGS (set in Worker Settings → Variables → KV Namespace Bindings)
  *
@@ -21,6 +24,11 @@ export default {
     // Redirect root to /timelapse (belt-and-suspenders; redirect rule handles it too)
     if (url.pathname === '/') {
       return Response.redirect(url.origin + '/timelapse', 301);
+    }
+
+    // GET /snapshot or /frame  →  5-min CDN cache, crop=1 enforced
+    if ((url.pathname === '/snapshot' || url.pathname === '/frame') && request.method === 'GET') {
+      return handleSnapshot(request, url);
     }
 
     // GET /api/ratings/YYYY-MM-DD  →  read from KV
@@ -39,6 +47,56 @@ export default {
     return fetch(request);
   }
 };
+
+async function handleSnapshot(request, url) {
+  // Normalize the cache key:
+  //   - Strip the `crop` param entirely (Pi now defaults to crop=1, and the
+  //     CF-Ray header on the Pi side enforces it regardless).
+  //   - Keep `info` param because info=0 (raw JPEG) and info=1 (HTML page)
+  //     are different content types.
+  const normUrl = new URL(url.toString());
+  normUrl.searchParams.delete('crop');
+
+  // Strip browser cache-bypass headers so `location.reload()` and hard
+  // refreshes cannot force a Pi hit — the CDN 5-min policy wins.
+  const piHeaders = new Headers(request.headers);
+  piHeaders.delete('Cache-Control');
+  piHeaders.delete('Pragma');
+  piHeaders.delete('If-None-Match');
+  piHeaders.delete('If-Modified-Since');
+
+  // Check the CDN cache (per Cloudflare PoP)
+  const cache = caches.default;
+  const cacheKey = new Request(normUrl.toString(), { method: 'GET' });
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  // Cache miss — fetch from Pi (crop defaults to 1 on the Pi side now)
+  const piResp = await fetch(normUrl.toString(), {
+    method: 'GET',
+    headers: piHeaders,
+  });
+
+  // Don't cache error responses
+  if (!piResp.ok) {
+    return piResp;
+  }
+
+  // Build a cacheable response with 5-minute TTL
+  const headers = new Headers(piResp.headers);
+  headers.set('Cache-Control', 'public, max-age=300');
+
+  // We need two independent copies of the body: one for the cache, one for
+  // the client.  Clone before any body reads.
+  const cloned = piResp.clone();
+  const toCache  = new Response(cloned.body,   { status: cloned.status,   headers });
+  const toClient = new Response(piResp.body,   { status: piResp.status,   headers });
+
+  await cache.put(cacheKey, toCache);
+  return toClient;
+}
 
 async function handleGet(dateStr, env) {
   const data = await readRating(dateStr, env);

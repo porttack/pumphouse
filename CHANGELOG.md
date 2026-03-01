@@ -2,6 +2,31 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.22.0] - 2026-03-01
+
+### Added — Snapshot Caching via Cloudflare
+- **`/snapshot` and `/frame` now served through Cloudflare CDN** with a 5-minute
+  cache: the Pi is hit at most once per 5 minutes regardless of how many users
+  click "New Snapshot"
+- **`crop=1` is now the default** for all snapshot/frame requests; previously
+  defaulted to uncropped
+- **`crop=0` blocked on Cloudflare**: the Worker strips the `crop` param before
+  caching so all CDN requests get the cropped (privacy-preserving) image;
+  direct Pi access (tplinkdns) still allows `crop=0`
+- **`CF-Ray` enforcement on Pi**: Flask also forces `crop=1` when the request
+  arrives via Cloudflare, as belt-and-suspenders in case the Worker ever changes
+- **Browser cache-bypass headers stripped in Worker** (`Cache-Control`, `Pragma`,
+  `If-None-Match`, `If-Modified-Since`) so `location.reload()` and hard refreshes
+  respect the 5-min CDN policy rather than punching through to the Pi
+
+### Technical
+- `cloudflare/ratings-worker.js`: new `handleSnapshot()` function intercepts
+  `/snapshot` and `/frame`, normalizes the cache key (removes `crop` param),
+  checks `caches.default`, fetches from Pi on miss, stores with
+  `Cache-Control: public, max-age=300`
+- `monitor/web_timelapse.py`: `crop` parameter default changed from `0` to `1`;
+  added `CF-Ray` header guard
+
 ## [2.21.0] - 2026-03-01
 
 ### Fixed — Crash Loop on Excessive Restarts
