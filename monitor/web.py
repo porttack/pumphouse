@@ -13,6 +13,7 @@ from functools import wraps
 
 from monitor import __version__
 from monitor.config import (
+    EVENTS_FILE, RESERVATIONS_FILE,
     TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS,
     EPAPER_CONSERVE_WATER_THRESHOLD, EPAPER_OWNER_STAY_TYPES,
     EPAPER_DEFAULT_HOURS_TENANT, EPAPER_DEFAULT_HOURS_OTHER,
@@ -654,7 +655,7 @@ def epaper_bmp():
             pass
 
     # Determine occupancy and whether current guest is owner
-    reservations = load_reservations('reservations.csv')
+    reservations = load_reservations(RESERVATIONS_FILE)
     occupancy = is_occupied(reservations)
     next_res = get_next_reservation(reservations)
 
@@ -1016,7 +1017,7 @@ def index():
 
     # Read CSV files
     snapshot_headers, snapshot_rows = read_csv_tail('snapshots.csv', max_rows=DASHBOARD_SNAPSHOT_COUNT)
-    event_headers, event_rows = read_events_by_time('events.csv', hours=hours)
+    event_headers, event_rows = read_events_by_time(EVENTS_FILE, hours=hours)
 
     # Filter events based on DASHBOARD_HIDE_EVENT_TYPES
     if event_headers and event_rows and 'event_type' in event_headers:
@@ -1030,7 +1031,7 @@ def index():
     relay_status = get_all_relay_status()
 
     # Get occupancy status and reservations
-    reservations_csv = 'reservations.csv'
+    reservations_csv = RESERVATIONS_FILE
     occupancy_status = get_occupancy_status(reservations_csv)
 
     # Get cached Ecobee temperature
@@ -1271,7 +1272,7 @@ def control(token):
         from monitor.logger import log_event
         relay_status = get_all_relay_status()
         log_event(
-            'events.csv',
+            EVENTS_FILE,
             'REMOTE_CONTROL',
             read_pressure(),
             read_float_sensor(),

@@ -32,6 +32,7 @@ from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
 from monitor.config import (
+    RESERVATIONS_FILE,
     CAMERA_PASS,
     CAMERA_USER,
     EPAPER_CONSERVE_WATER_THRESHOLD,
@@ -163,7 +164,7 @@ def render_epaper_jpg(
     threshold_override: int | None = None,
     scale: int = 4,
     snapshots_csv: str = 'snapshots.csv',
-    reservations_csv: str = 'reservations.csv',
+    reservations_csv = None,
 ) -> io.BytesIO:
     """
     Render a color JPEG of the e-paper display and return it as a BytesIO buffer.
@@ -245,6 +246,8 @@ def render_epaper_jpg(
             pass
 
     # ── Occupancy ────────────────────────────────────────────────────────
+    if reservations_csv is None:
+        reservations_csv = RESERVATIONS_FILE
     reservations   = load_reservations(reservations_csv)
     occupancy      = is_occupied(reservations)
     next_res       = get_next_reservation(reservations)

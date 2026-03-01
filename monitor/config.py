@@ -139,10 +139,19 @@ EPAPER_DEFAULT_HOURS_OTHER = 72  # Default graph hours for owner or unoccupied
 EPAPER_LOW_WATER_HOURS_THRESHOLD = 75  # Tank % at or below which switches to extended graph (None to disable)
 EPAPER_LOW_WATER_HOURS = 168  # Graph hours when tank is below threshold (168 = 7 days)
 
-# Default file paths
-DEFAULT_LOG_FILE = 'pressure_log.txt'
-DEFAULT_EVENTS_FILE = 'events.csv'
-DEFAULT_SNAPSHOTS_FILE = 'snapshots.csv'  # Now has a default!
+# Data directory (XDG Base Directory: ~/.local/share/pumphouse)
+DATA_DIR = Path.home() / '.local' / 'share' / 'pumphouse'
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# Canonical data file paths
+EVENTS_FILE                = DATA_DIR / 'events.csv'
+RESERVATIONS_FILE          = DATA_DIR / 'reservations.csv'
+RESERVATIONS_SNAPSHOT_FILE = DATA_DIR / 'reservations_snapshot.csv'
+
+# Default file paths (used by main.py CLI args and legacy callers)
+DEFAULT_LOG_FILE       = 'pressure_log.txt'
+DEFAULT_EVENTS_FILE    = str(EVENTS_FILE)
+DEFAULT_SNAPSHOTS_FILE = 'snapshots.csv'  # snapshots stay in project dir for now
 
 # Config file path (optional)
 CONFIG_FILE = Path.home() / '.config' / 'pumphouse' / 'monitor.conf'

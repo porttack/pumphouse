@@ -24,6 +24,10 @@ OWNER_PORTAL_URL = f"{TRACKHS_BASE_URL}/owner/"
 LOGIN_URL = OWNER_PORTAL_URL  # Owner Connect login
 RESERVATIONS_URL = f"{TRACKHS_BASE_URL}/owner/reservations/"
 
+# Data directory for output files
+DATA_DIR = Path.home() / '.local' / 'share' / 'pumphouse'
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
 # Load credentials from secrets file
 SECRETS_PATH = Path.home() / ".config" / "pumphouse" / "secrets.conf"
 
@@ -349,7 +353,7 @@ def download_reservations_csv(session, output_file='reservations.csv', debug=Fal
 def main():
     parser = argparse.ArgumentParser(description='Download TrackHS reservations CSV')
     parser.add_argument('--debug', action='store_true', help='Enable debug output')
-    parser.add_argument('--output', default='reservations.csv', help='Output CSV filename')
+    parser.add_argument('--output', default=str(DATA_DIR / 'reservations.csv'), help='Output CSV filename')
     args = parser.parse_args()
 
     print("TrackHS Reservation Scraper")

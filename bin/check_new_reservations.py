@@ -17,7 +17,8 @@ from datetime import datetime
 from pathlib import Path
 
 # Add monitor module to path
-sys.path.insert(0, str(Path(__file__).parent / 'monitor'))
+sys.path.insert(0, str(Path(__file__).parent.parent))  # project root
+from monitor.config import EVENTS_FILE, RESERVATIONS_FILE, RESERVATIONS_SNAPSHOT_FILE
 
 def load_reservations_csv(filepath):
     """
@@ -161,7 +162,7 @@ def log_new_reservation(reservation):
         reservation: Dict with reservation data
     """
     try:
-        events_file = Path(__file__).parent / 'events.csv'
+        events_file = EVENTS_FILE
 
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         guest = reservation.get('Guest', 'Unknown')
@@ -363,7 +364,7 @@ def send_notification_changed(current_res, old_res, changed_fields, debug=False)
 def log_canceled_reservation(reservation):
     """Log canceled reservation to events.csv."""
     try:
-        events_file = Path(__file__).parent / 'events.csv'
+        events_file = EVENTS_FILE
 
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         guest = reservation.get('Guest', 'Unknown')
@@ -412,7 +413,7 @@ def log_canceled_reservation(reservation):
 def log_changed_reservation(current_res, old_res, changed_fields):
     """Log changed reservation to events.csv."""
     try:
-        events_file = Path(__file__).parent / 'events.csv'
+        events_file = EVENTS_FILE
 
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         guest = current_res.get('Guest', 'Unknown')
@@ -475,7 +476,7 @@ def check_checkin_checkout_events(events_file, debug=False):
         from monitor.occupancy import is_occupied, load_reservations, get_checkin_datetime, get_checkout_datetime
         from datetime import datetime, timedelta
 
-        reservations = load_reservations('reservations.csv')
+        reservations = load_reservations(RESERVATIONS_FILE)
         now = datetime.now()
 
         # Check recent CHECK-IN events (within last 4 hours)
@@ -593,10 +594,9 @@ def main():
     parser.add_argument('--debug', action='store_true', help='Enable debug output')
     args = parser.parse_args()
 
-    script_dir = Path(__file__).parent
-    current_file = script_dir / 'reservations.csv'
-    snapshot_file = script_dir / 'reservations_snapshot.csv'
-    events_file = script_dir / 'events.csv'
+    current_file  = RESERVATIONS_FILE
+    snapshot_file = RESERVATIONS_SNAPSHOT_FILE
+    events_file   = EVENTS_FILE
 
     if not current_file.exists():
         print(f"No reservations file found at {current_file}")

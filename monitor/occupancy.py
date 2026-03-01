@@ -1,3 +1,4 @@
+from monitor.config import RESERVATIONS_FILE
 #!/usr/bin/env python3
 """
 Occupancy detection based on reservation data.
@@ -265,7 +266,7 @@ def get_occupancy_status(csv_path, current_time=None):
 if __name__ == '__main__':
     # Test
     import sys
-    csv_path = Path(__file__).parent.parent / 'reservations.csv'
+    csv_path = RESERVATIONS_FILE
 
     print("Occupancy Status Test")
     print("=" * 50)

@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import signal
 
 from monitor.config import (
+    RESERVATIONS_FILE,
     POLL_INTERVAL, TANK_POLL_INTERVAL, SNAPSHOT_INTERVAL,
     RESIDUAL_PRESSURE_SECONDS, SECONDS_PER_GALLON,
     ENABLE_PURGE, MIN_PURGE_INTERVAL,
@@ -1004,7 +1005,7 @@ class SimplifiedMonitor:
                     # Check occupancy status
                     occupied_status = 'NO'
                     try:
-                        reservations = load_reservations('reservations.csv')
+                        reservations = load_reservations(RESERVATIONS_FILE)
                         occupancy = is_occupied(reservations)
                         if occupancy['occupied']:
                             occupied_status = 'YES'
@@ -1065,7 +1066,7 @@ class SimplifiedMonitor:
                     # Check if there's a check-in today
                     checkin_today = False
                     try:
-                        reservations = load_reservations('reservations.csv')
+                        reservations = load_reservations(RESERVATIONS_FILE)
                         today = datetime.now().date()
                         for res in reservations:
                             checkin_date = parse_date(res.get('Check-In'))
@@ -1122,7 +1123,7 @@ class SimplifiedMonitor:
                     checkout_today = False
                     checkout_guest = None
                     try:
-                        reservations = load_reservations('reservations.csv')
+                        reservations = load_reservations(RESERVATIONS_FILE)
                         today = datetime.now().date()
                         for res in reservations:
                             checkout_date = parse_date(res.get('Checkout'))

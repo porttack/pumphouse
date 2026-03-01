@@ -115,19 +115,19 @@ pumphouse/
 │   ├── fetch_ecobee_temp_cron.sh # Cron wrapper for temperature fetch
 │   ├── scrape_ecobee.py         # Web scraping fallback
 │   └── scrape_ecobee_selenium.py # Selenium-based scraping
-├── bin/                         # Setup and admin scripts (run once or rarely)
+├── bin/                         # Scripts: setup/admin (run once) + cron-called scripts
 │   ├── install-services.sh      # Copies & enables all systemd services
 │   ├── generate_cert.sh         # Self-signed SSL certificate generator
 │   ├── deploy-pumphouse-certs.sh # Copies Let's Encrypt certs, restarts web service
-│   └── setup_reservation_cron.sh # Installs reservation-scraper cron entries
+│   ├── setup_reservation_cron.sh # Installs reservation-scraper cron entries
+│   ├── update_reservations.sh   # Cron wrapper: scrape + check + notify
+│   ├── scrape_reservations.py   # TrackHS reservation downloader
+│   └── check_new_reservations.py # New/changed/canceled booking detector
 ├── docs/                        # All documentation
 │   ├── conversations/           # Development session notes
 │   └── lessons/                 # Educational content
 ├── sunset_timelapse.py          # Timelapse capture daemon (pumphouse-timelapse)
 ├── control.sh                   # Safe relay control script (no GPIO conflicts)
-├── scrape_reservations.py       # TrackHS reservation downloader
-├── check_new_reservations.py    # New booking detector / notifier
-├── update_reservations.sh       # Cron wrapper: scrape + check
 ├── log_daily_gph.py             # Daily GPH metric logger (runs via cron)
 ├── system_health_monitor.sh     # System vitals logger (runs via cron)
 ├── requirements.txt
@@ -141,6 +141,11 @@ pumphouse/
     secrets.conf              # All credentials (600 permissions, never in git)
     monitor.conf              # Optional config overrides (see docs/installation.md)
     ecobee_tokens.json        # Ecobee OAuth tokens (auto-generated on first run)
+
+~/.local/share/pumphouse/    # Application data (XDG data dir)
+    events.csv                # All state-change events
+    reservations.csv          # Current TrackHS reservations
+    reservations_snapshot.csv # Previous snapshot for change detection
 
 ~/timelapses/                 # Timelapse archive (written by pumphouse-timelapse)
     YYYY-MM-DD_HHMM.mp4       # Daily MP4s (sunset time in filename)
@@ -161,10 +166,7 @@ pumphouse/
     cloudflared.service       # Cloudflare Tunnel (installed by cloudflared)
 
 # Data files in the repo directory (excluded from git):
-events.csv                    # All state-change events
 snapshots.csv                 # 15-minute aggregated summaries
-reservations.csv              # Current TrackHS reservations
-reservations_snapshot.csv     # Previous snapshot for change detection
 gph_cache.csv                 # GPH calculation cache (24 h TTL)
 gph_log.txt                   # Daily GPH logger output
 system_health.log             # System vitals log

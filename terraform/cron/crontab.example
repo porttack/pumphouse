@@ -9,9 +9,10 @@ VENV=$PROJECT/venv/bin/python3
 
 # --- Reservation scraper ---
 # Scrape TrackHS reservations 3× daily and notify on new/changed bookings.
-0  5 * * * $PROJECT/update_reservations.sh >> $PROJECT/reservation_updates.log 2>&1
-0 16 * * * $PROJECT/update_reservations.sh >> $PROJECT/reservation_updates.log 2>&1
-0 22 * * * $PROJECT/update_reservations.sh >> $PROJECT/reservation_updates.log 2>&1
+# Data is written to ~/.local/share/pumphouse/ by the scripts in bin/.
+0  5 * * * $PROJECT/bin/update_reservations.sh >> $PROJECT/reservation_updates.log 2>&1
+0 16 * * * $PROJECT/bin/update_reservations.sh >> $PROJECT/reservation_updates.log 2>&1
+0 22 * * * $PROJECT/bin/update_reservations.sh >> $PROJECT/reservation_updates.log 2>&1
 
 # --- System health monitor ---
 # Log CPU temp, throttling, disk, memory every 5 minutes.
@@ -19,7 +20,6 @@ VENV=$PROJECT/venv/bin/python3
 
 # --- Ecobee temperature fetch ---
 # Fetch thermostat readings twice daily for the dashboard.
-# NOTE: script is now at ecobee/fetch_ecobee_temp_cron.sh — update path below.
 30  5 * * * $PROJECT/ecobee/fetch_ecobee_temp_cron.sh
  0 21 * * * $PROJECT/ecobee/fetch_ecobee_temp_cron.sh
 

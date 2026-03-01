@@ -25,6 +25,7 @@ def format_human_time(timestamp_str):
         return timestamp_str
 
 from monitor.config import (
+    EVENTS_FILE, RESERVATIONS_FILE,
     ENABLE_EMAIL_NOTIFICATIONS,
     EMAIL_TO,
     EMAIL_FROM,
@@ -305,11 +306,13 @@ def get_outdoor_weather(filepath='snapshots.csv'):
         return None
 
 
-def get_recent_events(filepath='events.csv', max_rows=None, hide_types=None):
+def get_recent_events(filepath=None, max_rows=None, hide_types=None):
     """Get recent events with optional filtering"""
     import os
     import csv
 
+    if filepath is None:
+        filepath = EVENTS_FILE
     if max_rows is None:
         max_rows = DASHBOARD_MAX_EVENTS
     if hide_types is None:
@@ -427,7 +430,7 @@ def fetch_system_status(debug=False):
         occupancy_status = None
         reservation_list = []
         try:
-            reservations_csv = 'reservations.csv'
+            reservations_csv = RESERVATIONS_FILE
             occupancy_status = get_occupancy_status(reservations_csv)
 
             # Load all reservations including checked out
