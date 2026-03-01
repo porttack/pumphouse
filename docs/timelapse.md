@@ -195,6 +195,32 @@ Weather is shown per day using two sources:
 | `/timelapse/DATE/frame-view-client` | `public, max-age=3600` | Static JS template; image lives in browser `localStorage`, never reaches Pi |
 | `/api/ratings/DATE` | `public, max-age=60` | Served by Worker from KV |
 
+### DoS risks and mitigations
+
+**Pi IP and DNS are not exposed.** The Pi connects outbound to Cloudflare Tunnel (cloudflared) — no public ports are open, and DNS for `onblackberryhill.com` resolves to Cloudflare's Anycast IPs, not the Pi's. The camera's internal IP (`192.168.1.81`) is used only server-side and never appears in any response.
+
+**Residual DoS vectors:**
+
+| Vector | How it works | Severity |
+|--------|-------------|----------|
+| **Query-string cache busting** | Cloudflare's cache key includes the full URL. Requesting `/timelapse/2026-01-01_1750.mp4?x=1`, then `?x=2`, etc. creates a new cache miss on each variant. For a ~4 MB MP4, a script doing this could saturate the Pi's residential upload bandwidth. | Medium |
+| **HTML page flood** | Timelapse HTML pages have 5-min TTLs for today/yesterday. Cache-busting query params force re-generation on every hit. The Pi's Python work is cheap but not free. | Low |
+| **Cloudflare edge priming** | Each of Cloudflare's edge nodes caches independently. For today's preview MP4 (`max-age=600`, updated every 10 min), each edge primes once per update cycle — manageable under normal traffic but multiplied under attack. | Low |
+
+**`/snapshot` and `/frame` are fully protected** — the Worker strips `crop` and cache-bypass headers, enforces the 5-min CDN TTL, and never passes through to the Pi more than once per TTL window.
+
+**Recommended mitigations (Cloudflare dashboard):**
+
+1. **Cache Rule — "Ignore Query String"** on path `/timelapse/*`
+   Makes `?x=1` and `?x=2` resolve to the same cache entry. This is the most effective fix for the cache-busting attack on both MP4s and HTML pages.
+   *Cloudflare dashboard → Caching → Cache Rules → Create rule*
+
+2. **Rate Limiting (WAF rule)** — e.g., limit any single IP to 60 requests/minute to the origin.
+   Catches scripted flooding even if the attacker rotates query strings.
+   *Cloudflare dashboard → Security → WAF → Rate Limiting Rules*
+
+At current traffic levels (vacation rental guests + owner) neither attack is likely. The "Ignore Query String" Cache Rule is low-effort and worth adding. Rate limiting is a good belt-and-suspenders if the site ever gets more exposure.
+
 ### Why short TTLs on HTML pages are safe
 
 Cloudflare caches **per URL per edge node**. If one visitor browses through 30 old pages, all 30 URLs are primed for everyone else at that edge. The Pi sees at most one re-fetch per URL per TTL period per edge node — not one per visitor. With 10 edge nodes and 60 past pages, `max-age=3600` means at most 600 Pi requests per hour for old HTML, all trivially fast (no DB or external API calls for past dates).
