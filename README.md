@@ -64,7 +64,7 @@ See [docs/hardware-reference.md](docs/hardware-reference.md) for GPIO pin assign
 
 - **Secrets file**: All credentials in `~/.config/pumphouse/secrets.conf` (mode 600, excluded from git)
 - **TLS**: Let's Encrypt cert on the `tplinkdns.com` hostname for direct LAN access; Cloudflare manages TLS for the public domain
-- **Authentication**: HTTP Basic Auth protects the web dashboard
+- **Authentication**: HTTP Basic Auth over TLS protects the web dashboard — credentials are encrypted in transit by the TLS layer
 - **Remote relay control**: 256-bit random tokens in the secrets file; one-click buttons embedded in email alerts; URLs not guessable
 - **No publicly published open ports**: Public access exclusively via Cloudflare Tunnel (outbound-only connection from Pi); the LAN hostname and real IP are never exposed
 
