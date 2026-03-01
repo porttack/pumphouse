@@ -110,8 +110,9 @@ def snapshot():
     # displayed time is always a safe over-estimate (nobody complains it expired).
     _exp_dt  = (_now_dt + _td(minutes=5)).replace(second=0, microsecond=0) + _td(minutes=1)
     cached_until_str = _exp_dt.strftime('%-I:%M %p')
-    src_note = 'from timelapse' if from_timelapse else 'live grab'
-    img_b64 = _base64.b64encode(jpeg_bytes).decode()
+    src_note  = 'from timelapse' if from_timelapse else 'live grab'
+    is_direct = 'onblackberryhill.com' not in request.host.lower()
+    img_b64   = _base64.b64encode(jpeg_bytes).decode()
 
     # Weather data
     wx = _day_weather_summary(date_str)
@@ -237,7 +238,7 @@ def snapshot():
   <div class="actions">
     <button class="btn" onclick="location.reload()">&#8635; New Snapshot</button>
     <a class="btn" href="{tl_link}">Timelapses</a>
-    <a class="btn" href="/">Dashboard</a>
+    {'<a class="btn" href="/">Dashboard</a>' if is_direct else ''}
     <a class="btn" href="data:image/jpeg;base64,{img_b64}" download="snapshot-{date_str}.jpg">&#8681; Download</a>
     <span class="captured-at">Captured {now_str} &middot; {src_note}</span>
   </div>
@@ -1096,7 +1097,7 @@ def timelapse_view(date_or_file):
 
     is_direct    = 'onblackberryhill.com' not in request.host.lower()
     is_direct_js = 'true' if is_direct else 'false'
-    now_btn      = '<a href="/snapshot" class="speed-btn dl-btn">Now</a>' if is_direct else ''
+    now_btn      = '<a href="/snapshot" class="speed-btn dl-btn">Now</a>'
     dash_btn     = '<a href="/" class="speed-btn dl-btn">Dashboard</a>' if is_direct else ''
     public_link  = (f'&middot; (<a href="https://onblackberryhill.com/timelapse/{date_str}">public site</a>)'
                     if is_direct else '')
