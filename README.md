@@ -4,7 +4,7 @@ Remote monitoring and control system for a well-water pump house serving an Airb
 
 ---
 
-**Built and maintained by [Eric Brown](https://porttack.com/) — engineer, teacher, sailor.** Eric teaches Computer Science at San Lorenzo Valley High School (CA) and previously worked as an engineer at Khan Academy, Apple, Adobe, Sony, Kodak, and others. This project grew from a practical problem into a teaching vehicle; the timelapse system is used as a real-world case study in his AP Computer Science Principles course.
+**Built and maintained by [Eric Brown](https://porttack.com/) — engineer, teacher, sailor.** Eric teaches Computer Science at San Lorenzo Valley High School (CA) and previously worked as an engineer at Khan Academy, Apple, Adobe, Sony, Kodak, and others. This project grew from a practical problem into a teaching vehicle; the timelapse system is used as a real-world case study in his AP Computer Science Principles course. See his website and blog at [porttack.com](https://porttack.com/).
 
 **AP CSP lesson plans using this project:**
 - [Part 1 — From a Single JPEG to an Interactive Web Viewer](docs/lessons/ap-csp-timelapse-part1.md) (4 × 30 min: HTTP, networking, APIs, compression)
