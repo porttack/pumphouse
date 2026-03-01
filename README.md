@@ -89,7 +89,23 @@ pumphouse/
 │   └── README.md                # Display daemon installation & troubleshooting
 ├── cloudflare/                  # Cloudflare Worker & deploy scripts
 │   ├── ratings-worker.js        # KV-backed ratings Worker source
+│   ├── deploy.sh                # Deploy worker (reads credentials from secrets.conf)
 │   └── wrangler.toml            # Wrangler deploy config
+├── terraform/cloudflare/        # Cloudflare infrastructure as code (Terraform)
+│   ├── main.tf                  # Provider config & required versions
+│   ├── variables.tf             # Input variables (account ID, zone ID, tunnel secret)
+│   ├── tunnel.tf                # Zero Trust Tunnel + DNS records
+│   ├── worker.tf                # KV namespace, Worker script, routes
+│   ├── rules.tf                 # Cache rules, redirect rules (DoS mitigations)
+│   ├── outputs.tf               # Tunnel token, KV namespace ID
+│   └── terraform.tfvars.example # Template — copy to terraform.tfvars (gitignored)
+├── ecobee/                      # Ecobee thermostat scripts (historical / reference)
+│   ├── ecobee_control.py        # Direct Ecobee API control
+│   ├── fetch_ecobee_data.py     # Fetch thermostat data
+│   ├── fetch_ecobee_temp.py     # Fetch temperature readings
+│   ├── fetch_ecobee_temp_cron.sh # Cron wrapper for temperature fetch
+│   ├── scrape_ecobee.py         # Web scraping fallback
+│   └── scrape_ecobee_selenium.py # Selenium-based scraping
 ├── docs/                        # All documentation
 │   ├── conversations/           # Development session notes
 │   └── lessons/                 # Educational content
