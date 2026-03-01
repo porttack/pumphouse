@@ -33,7 +33,7 @@ def snapshot():
     """
     import subprocess
     import base64 as _base64
-    from datetime import date as _date, datetime as _dt
+    from datetime import date as _date, datetime as _dt, timedelta as _td
     from zoneinfo import ZoneInfo as _ZI
     from pathlib import Path as _Path
 
@@ -104,7 +104,12 @@ def snapshot():
         title_date = date_str
 
     tz      = _ZI('America/Los_Angeles')
-    now_str = _dt.now(tz).strftime('%-I:%M %p')
+    _now_dt  = _dt.now(tz)
+    now_str  = _now_dt.strftime('%-I:%M %p')
+    # "Cached until" = now + 5 min, rounded up to next whole minute so the
+    # displayed time is always a safe over-estimate (nobody complains it expired).
+    _exp_dt  = (_now_dt + _td(minutes=5)).replace(second=0, microsecond=0) + _td(minutes=1)
+    cached_until_str = _exp_dt.strftime('%-I:%M %p')
     src_note = 'from timelapse' if from_timelapse else 'live grab'
     img_b64 = _base64.b64encode(jpeg_bytes).decode()
 
@@ -170,7 +175,7 @@ def snapshot():
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Snapshot &mdash; {title_date} &mdash; {now_str}</title>
+  <title>Snapshot &mdash; {title_date} &mdash; {now_str} (cached until {cached_until_str})</title>
   <style>
     * {{ box-sizing: border-box; }}
     body {{ font-family: monospace; background:#1a1a1a; color:#e0e0e0;
@@ -183,7 +188,7 @@ def snapshot():
     .site-sub  {{ font-size:0.85em; color:#888; }}
     .site-sub a {{ color:#4CAF50; text-decoration:none; }}
     .site-sub a:hover {{ color:#fff; }}
-    .page-header {{ max-width:960px; display:flex; justify-content:center;
+    .page-header {{ max-width:860px; display:flex; justify-content:center;
                     align-items:center; margin:12px 0; }}
     .snapshot-wrap {{ max-width:860px; margin:12px 0; }}
     .snapshot-wrap img {{ width:100%; display:block; border-radius:4px;
@@ -221,7 +226,7 @@ def snapshot():
     </span>
   </header>
   <div class="page-header">
-    <h2>Snapshot &mdash; {title_date} &mdash; {now_str}</h2>
+    <h2>Snapshot &mdash; {title_date} &mdash; {now_str} (cached until {cached_until_str})</h2>
   </div>
   <div class="snapshot-wrap">
     <a href="/snapshot?info=0" target="_blank" title="Open raw image">
