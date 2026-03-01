@@ -184,16 +184,30 @@ Weather is shown per day using two sources:
 
 ## Caching (Cloudflare CDN)
 
-| Content | Cache-Control |
-|---------|--------------|
-| Past HTML pages (`date < today`) | `public, max-age=31536000, immutable` |
-| Today's HTML page | `public, max-age=600, must-revalidate` |
-| Past MP4 files | `max-age=31536000` |
-| Today's MP4 (preview) | `max-age=600` |
-| Snapshot JPEGs | `max-age=31536000` |
-| `/api/ratings/DATE` | `public, max-age=60` |
+| Content | Cache-Control | Rationale |
+|---------|--------------|-----------|
+| Today's HTML page | `public, max-age=300, must-revalidate` | Preview MP4 and "All Timelapses" chevron change every ~10 min during recording |
+| Yesterday's HTML page | `public, max-age=300, must-revalidate` | "Next →" nav button must appear within minutes of today's first MP4 (~20 min before sunset) |
+| HTML pages 2+ days old | `public, max-age=3600` | Content is stable; 1-hour TTL lets the chevron slowly propagate to cached pages |
+| Past MP4 files | `max-age=31536000` | Immutable once finalized |
+| Today's MP4 (preview) | `max-age=600` | Updated in-place every ~10 min during recording |
+| Snapshot JPEGs | `max-age=31536000` | Immutable once written by daemon |
+| `/timelapse/DATE/frame-view-client` | `public, max-age=3600` | Static JS template; image lives in browser `localStorage`, never reaches Pi |
+| `/api/ratings/DATE` | `public, max-age=60` | Served by Worker from KV |
 
-**Note:** Cloudflare caches binary assets (MP4, JPEG) based on headers. HTML pages require a Cache Rule: "Cache Everything" for `/timelapse/20*` — see [docs/cloudflare.md](cloudflare.md).
+### Why short TTLs on HTML pages are safe
+
+Cloudflare caches **per URL per edge node**. If one visitor browses through 30 old pages, all 30 URLs are primed for everyone else at that edge. The Pi sees at most one re-fetch per URL per TTL period per edge node — not one per visitor. With 10 edge nodes and 60 past pages, `max-age=3600` means at most 600 Pi requests per hour for old HTML, all trivially fast (no DB or external API calls for past dates).
+
+### The `immutable` trap
+
+The previous code used `immutable` on all past pages (`date < today`), which caused a correctness bug: **yesterday's "Next →" button never activated** after today's timelapse was generated, because Cloudflare would serve the stale HTML for a full year. The fix uses a three-tier TTL:
+
+1. Today + yesterday → 5 min (active/changing content)
+2. 2+ days old → 1 hour (stable but eventually consistent)
+3. MP4s and JPEGs → 1 year (truly immutable binary assets)
+
+**Note:** HTML page caching requires a Cloudflare Cache Rule set to "Cache Everything" for URI path `/timelapse/20*`. Binary assets (MP4, JPEG) are cached automatically based on `Cache-Control` headers. See the [Cloudflare CDN setup notes](conversations/cloudflare-cdn-setup.md).
 
 ---
 

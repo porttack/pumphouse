@@ -2936,10 +2936,19 @@ def timelapse_view(date_or_file):
   </script>
 </body>
 </html>"""
-    from datetime import date as _date
-    is_past = date_str < _date.today().isoformat()
-    cache_hdr = ('public, max-age=31536000, immutable' if is_past
-                 else 'public, max-age=600, must-revalidate')
+    from datetime import date as _date, timedelta as _td
+    _today     = _date.today().isoformat()
+    _yesterday = (_date.today() - _td(days=1)).isoformat()
+    if date_str >= _yesterday:
+        # Today:     page changes during recording (new preview MP4, chevron grows)
+        # Yesterday: "next" button must appear within minutes of today's first MP4
+        cache_hdr = 'public, max-age=300, must-revalidate'
+    else:
+        # Older pages: content is stable, but 1-hour TTL lets the "All Timelapses"
+        # chevron slowly propagate to cached pages without meaningful DoS risk
+        # (Cloudflare caches per-URL, so a single user browsing old pages primes
+        # the cache for everyone else).
+        cache_hdr = 'public, max-age=3600'
     return Response(html, mimetype='text/html', headers={'Cache-Control': cache_hdr})
 
 
