@@ -1,8 +1,9 @@
-# AP CSP Lesson Unit: From a Single JPEG to a Global CDN
+# AP CSP Lesson Unit — Part 1 of 2: From a Single JPEG to an Interactive Web Viewer
 ### A Real-World Project-Based Unit on Computer Science Principles
 
 **Course:** AP Computer Science Principles (CS50-based)
-**Total Time:** 6 sessions × 30 minutes
+**Total Time:** 4 sessions × 30 minutes
+**Part 1 of 2** — Part 2 covers CDN, edge computing, and infrastructure as code
 **Central Project:** A Raspberry Pi sunset timelapse system that grew from one image into a
 full CDN-backed, edge-computed, Zero Trust video platform.
 **Driving Question:** *How does a single photo become a globally distributed, edge-computed,
@@ -25,13 +26,8 @@ The project was built incrementally — each new feature was driven by a problem
 5. Flask web server on the Pi serving the MP4s and a viewer page
 6. Fetching weather data from NWS and Open-Meteo REST APIs; caching JSON results
 7. HTML/CSS/JavaScript viewer — speed controls, keyboard shortcuts, touch swipe navigation
-8. Domain purchase, DNS, Cloudflare as CDN
-9. **Cloudflare Zero Trust Tunnel** (outbound-only, no open ports, identity-verified)
-10. Cloudflare Workers (edge compute intercepting ratings API calls)
-11. Cloudflare KV store (distributed key-value store for star ratings)
-12. Cache-Control headers strategy (immutable past pages, short TTL for today)
-13. Client-side vs. server-side rendering tradeoffs (driven by cacheability requirements)
-14. Security: rotating API tokens, `.gitignore` secrets, firewall hardening
+
+→ Part 2 continues with steps 8–14
 
 ---
 
@@ -143,6 +139,8 @@ User in London → Cloudflare London Edge → (cache hit: done)
 
 **AP CSP tie-in:** CSN-1.A (routing and latency); CSN-1.E (redundancy and fault tolerance)
 
+Part 2 of this unit goes deep on how CDN caching works, what a DoS attack is, and how the Pi is protected.
+
 ---
 
 ### Beat 5 — Zero Trust and Edge Compute (4 min)
@@ -164,6 +162,8 @@ the current average from KV, updates it, and writes back. The Pi is never involv
 3. Is it strange that the rating data lives on Cloudflare's servers, not the Pi?
 
 **AP CSP tie-in:** DAT-2.C (key-value stores); IOC-2.B (privacy and data ownership)
+
+Zero Trust and edge compute are covered in depth in Part 2.
 
 ---
 
@@ -325,66 +325,6 @@ renewal for either.
 
 ---
 
-## SIDEBAR: Zero Trust — What It Means and Why It Matters
-
-### The Old Model: Castle and Moat
-
-Traditional network security assumed that everything *inside* your network perimeter was safe.
-The firewall was the moat. If you got inside — as an employee, an authorized device, or an attacker
-who found one open port — you were largely trusted to talk to any resource on the internal network.
-
-This works until it doesn't. One compromised device inside the perimeter can move laterally to attack
-everything else. One misconfigured firewall rule exposes a service. One credential stolen over VPN
-gives an attacker the keys to the kingdom.
-
-### Zero Trust: "Never Trust, Always Verify"
-
-Zero Trust (a term coined by Forrester Research, popularized by Google's "BeyondCorp" project) inverts
-the assumption. **No network location is inherently trusted** — not your home network, not your
-corporate LAN, not even localhost. Every connection must:
-
-- **Identify** itself (who are you?)
-- **Authenticate** (prove it)
-- **Be authorized** for the specific resource requested (are you allowed to do this?)
-
-### How the Timelapse Project Uses Zero Trust
-
-| Traditional (Port Forwarding) | Zero Trust (Cloudflare Tunnel) |
-|-------------------------------|-------------------------------|
-| Port 443 open on router | No ports open anywhere |
-| Anyone on the internet can attempt a connection | Only Cloudflare's servers can reach the Pi |
-| Pi must evaluate every inbound request | Cloudflare filters before traffic reaches Pi |
-| Home IP address visible to the world | Home IP address never exposed |
-| DDoS attack hits the Pi directly | DDoS absorbed by Cloudflare's infrastructure |
-
-The Pi runs `cloudflared` — a small daemon that makes a persistent **outbound** connection to
-Cloudflare. Cloudflare forwards authenticated requests *through* that tunnel. An attacker on the
-internet cannot initiate a connection to the Pi at all — there is no port to knock on.
-
-This is the Zero Trust principle applied at the network layer: *the Pi does not trust inbound
-connections, so it accepts none.*
-
-### Zero Trust at the Application Layer
-
-The ratings Worker also embodies Zero Trust at the application layer:
-- Every rating submission is validated (correct date format? valid star value?)
-- Cookie-based deduplication prevents one user from submitting unlimited ratings
-- The Worker rejects anything that doesn't match the expected schema
-
-Zero Trust isn't a single product — it's a design philosophy. Ask: *"What is the minimum access
-this component needs, and how do we verify every request rather than trusting network location?"*
-
-### Discussion Questions
-
-1. Your school's network probably uses the castle-and-moat model (a firewall at the edge, trust
-   inside). What are the risks of that model for a school environment?
-2. Google requires employees to authenticate to every internal service individually, even on the
-   corporate network. What is the security benefit? What is the usability cost?
-3. The Cloudflare Tunnel means Cloudflare can see all traffic to the Pi. We traded one trust
-   assumption (open ports) for another (trusting Cloudflare). Was that a good trade?
-
----
-
 ---
 
 ## Session 2 (30 min): "How Does a Packet Find Your Pi?"
@@ -486,87 +426,6 @@ Students answer in pairs:
 
 ---
 
-## Session 5 (30 min): "What Could Go Wrong?"
-
-**AP CSP Big Idea:** IOC + CSN security · **Learning Objectives:** IOC-2.A, IOC-2.B
-
-### Opening: The Leak (3 min)
-
-Show an example of an exposed API key in a public GitHub repo (real or constructed):
-```
-# Found in commit history:
-CLOUDFLARE_API_TOKEN=v1.0-abc123def456...
-```
-"This happens thousands of times a day. Within minutes, attackers scrape new commits and use the key."
-
-### Threat Model Walkthrough (12 min)
-
-Draw the full system. For each component:
-
-- **Pi / SSH:** Password "password123" → brute force. Fix: key authentication, fail2ban.
-- **Secrets in code:** Hardcoding API tokens → commits leak them. Fix: environment variables,
-  `.env` files, `.gitignore`. But: committing once means it's in history forever — `git filter-repo`
-  needed for full removal.
-- **Port forwarding vs. Tunnel:** Open port = attackers can knock. Tunnel = no port, no knocking.
-  But: Cloudflare now sees everything. Different trust, not zero trust.
-- **Cookie deduplication for ratings:** Prevents trivial spam. Doesn't prevent determined attackers.
-  Discuss: what threat model justifies a cookie check for a sunset rating site?
-
-### Activity: Threat Model Exercise (10 min)
-
-Groups of 3–4. Each group gets a scenario:
-- **A:** School grade-checking website. List 5 threats + 1 mitigation each.
-- **B:** Open-sourcing home automation code. What belongs in the repo? What doesn't?
-- **C:** Friend says "I don't need HTTPS, it's just a text site." Convince them or explain why they might be right.
-- **D:** A Cloudflare Worker with an infinite loop bug. Who pays? What happens?
-
-### AP Exam Focus (5 min)
-
-Key terms: symmetric vs. asymmetric encryption, certificate authority, PII, phishing vs. malware vs.
-DDoS. Work through one multiple-choice question on data protection.
-
----
-
-## Session 6 (30 min): "Should You Build This?"
-
-**AP CSP Big Idea:** IOC · **Learning Objectives:** IOC-1.A, IOC-1.B, IOC-2.A, IOC-2.B, IOC-2.C
-
-### Discussion Arc 1: Access and Power (8 min)
-
-"Cloudflare's free tier lets an individual developer serve content globally at the same speed as Netflix."
-
-- Who could actually build this project? (Prerequisites: programming, English docs, credit card, hardware)
-- Cloudflare dropped service to a website under public pressure in 2019. Should a private company
-  have that power over internet access?
-- The Pi films continuous video of the neighborhood. Did the neighbors consent?
-
-### Discussion Arc 2: Every Decision Has Values (8 min)
-
-| Decision | Convenience Gained | What Was Given Up |
-|---|---|---|
-| Cloudflare CDN | Global speed, DDoS protection | Cloudflare sees all traffic |
-| Cloudflare Workers | No server to manage | Code runs on third-party infrastructure |
-| NWS/Open-Meteo APIs | Rich data, free | Dependency on external services |
-| Home Pi vs. cloud VM | Low cost, physical control | Home bandwidth limits, IP exposure |
-| Cookies for deduplication | Simple spam prevention | Implicit user tracking |
-| Zero Trust Tunnel | No open ports | Must trust Cloudflare instead |
-
-"There is no purely good option. Every architectural decision is also an ethical decision."
-
-### Activity: AP-Style Written Response (12 min)
-
-> *"The timelapse system uses a Cloudflare Tunnel to route all web traffic through Cloudflare's servers.
-> Identify one beneficial effect and one potentially harmful effect of this design decision, and explain
-> whether the beneficial effect justifies the harmful effect."*
-
-**Scoring criteria:**
-- Must identify a *specific* benefit (not vague: "it's faster")
-- Must identify a *specific* harm (not vague: "privacy issues")
-- Must make a reasoned judgment connecting the two
-- Responses that only list facts without taking a position score lower
-
----
-
 ## AP CSP Alignment Map
 
 | Session | Topic | Big Ideas | Key Learning Objectives |
@@ -575,8 +434,6 @@ DDoS. Work through one multiple-choice question on data protection.
 | 2 | Internet and networking | CSN | CSN-1.A–1.E |
 | 3 | Data, APIs, caching | DAT | DAT-1.A, DAT-2.B, DAT-2.C |
 | 4 | Algorithms and compression | AAP, DAT | AAP-2.A, AAP-2.B, DAT-1.B |
-| 5 | Security | IOC, CSN | IOC-2.A, IOC-2.B |
-| 6 | Impact and tradeoffs | IOC | IOC-1.A, IOC-1.B, IOC-2.C |
 
 ---
 
@@ -694,6 +551,8 @@ high-school audience; technical precision is balanced against accessibility.
 
 ### Session 5 — Security
 
+*(Included here because these terms surface in Session 4 discussions and the security threat model walkthrough in Part 2 builds on them.)*
+
 | Term | Definition |
 |------|------------|
 | **Symmetric Encryption** | One key both encrypts and decrypts data. Fast. Problem: how do two parties securely share that key over an untrusted network? |
@@ -707,21 +566,11 @@ high-school audience; technical precision is balanced against accessibility.
 | **PII** | Personally Identifiable Information. Data that could identify a specific individual: name, email, IP address, device fingerprint. Subject to privacy laws (GDPR, CCPA). |
 | **DDoS** | Distributed Denial of Service. An attack that floods a server with traffic from many sources, making it unavailable to legitimate users. CDNs like Cloudflare absorb DDoS traffic before it reaches the origin. |
 
-### Session 6 / Zero Trust Sidebar
-
-| Term | Definition |
-|------|------------|
-| **Zero Trust** | A security model where no network location is inherently trusted. Every connection must authenticate and be explicitly authorized, regardless of whether it originates inside or outside the network. |
-| **Perimeter Security** | The traditional "castle and moat" model: trust everything inside the firewall, block everything outside. Fails when an attacker gets inside or when users work remotely. |
-| **Cloudflare Tunnel** | A daemon (`cloudflared`) running on the Pi that makes an outbound connection to Cloudflare. Cloudflare forwards requests through it. No inbound ports need to be open. |
-| **Edge Compute** | Running code at CDN edge nodes (close to users) rather than at a central server. Reduces latency. Cloudflare Workers are JavaScript functions deployed to 200+ edge locations. |
-| **Serverless** | A cloud model where you deploy code without managing servers. The provider runs your function on-demand and charges per invocation. "Serverless" doesn't mean no servers — it means you don't manage them. |
-| **Eventual Consistency** | A distributed system property where all copies of data will *eventually* agree, but may temporarily differ. Cloudflare KV is eventually consistent — a rating written in Tokyo may not immediately appear in London. |
-| **Cookie** | A small piece of data stored by a browser and sent with every request to the same domain. Used for session management, authentication, and in this project, deduplication (detecting if a user already rated a sunset). |
-
 ---
 
 ## Appendix B: Turning This Document Into a Presentation
+
+See also [Part 2](ap-csp-timelapse-part2.md) for the CDN, edge computing, and Terraform sessions.
 
 This markdown file is structured to be directly usable as input for AI-assisted slide generation.
 The hierarchy maps naturally: `##` headings → sections or divider slides, `###` headings → individual
@@ -738,7 +587,7 @@ slides, bullet lists → slide content, tables → slide tables or comparison gr
 
 **Tips for best results:**
 - Paste one session at a time for a focused deck (e.g., Session 1 only for the 30-minute intro)
-- Paste the entire file for a complete 6-session unit overview deck
+- Paste the entire file for a complete 4-session unit overview deck
 - Tell Gamma: *"This is a lesson plan for a high school CS class. Make slides suitable for teacher
   use: one concept per slide, discussion questions as bullet points, vocabulary as a table."*
 - The vocabulary appendix will generate clean comparison/definition slides automatically
@@ -802,9 +651,9 @@ Rather than one giant deck, consider generating these separately:
 | Deck | Content to Paste | Audience | Length |
 |------|-----------------|----------|--------|
 | **Session 1 intro deck** | Session 1 section only + TLS sidebar | Students (first day) | ~15 slides |
-| **Full unit overview** | Entire document | Teacher planning / admin | ~45 slides |
-| **Vocabulary reference** | Appendix A only | Students (study guide) | ~25 slides |
-| **Security deep-dive** | Session 5 + TLS sidebar + Zero Trust sidebar | Students (session 5) | ~18 slides |
+| **Full Part 1 unit overview** | Entire Part 1 document | Teacher planning / admin | ~30 slides |
+| **Vocabulary reference** | Appendix A only | Students (study guide) | ~20 slides |
+| **Security deep-dive** | Session 5 terms + TLS sidebar | Students (session 4 review) | ~15 slides |
 
 ---
 
