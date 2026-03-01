@@ -2,6 +2,31 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.21.0] - 2026-03-01
+
+### Fixed — Crash Loop on Excessive Restarts
+- **Root cause**: `log_event()` in `logger.py` called `relay_status.get()` without a
+  None guard; `restart_tracker.py` passes `relay_status=None` when logging
+  `EXCESSIVE_RESTARTS`, causing a crash on every startup → 3,282-cycle crash loop
+- **`logger.py`**: added `relay_status.get(...) if relay_status else ''` guard in
+  `log_event()` and `log_snapshot()`
+- **`restart_tracker.py`**: added 20-second sleep immediately on crash-loop detection
+  (before logging or emailing) to throttle restart rate and protect the journal
+
+### Changed — Web Module Refactoring
+- **`web_timelapse.py`** (new): extracted all timelapse and snapshot routes from
+  `web.py` (~1,720 lines) into a Flask Blueprint (`timelapse_bp`); includes `/frame`,
+  `/snapshot`, `/timelapse/*`, and `/api/ratings/*` — 22 routes total
+- **`weather_api.py`** (new): consolidated shared weather utilities (`_WMO`,
+  `_QUIPS`, `_weather_desc_cache`, `current_weather_desc()`) from three separate
+  files into one module
+  - Eliminates duplicate `_WMO` + `_current_weather_desc()` implementation that
+    existed independently in `epaper_jpg.py`
+  - Removes awkward cross-module private-function import from `web.py` into
+    `web_timelapse.py`
+  - `web.py`, `web_timelapse.py`, and `epaper_jpg.py` all import from `weather_api`
+- **`web.py`**: reduced from 3,074 lines to ~1,357 lines
+
 ## [2.20.0] - 2026-02-22
 
 ### Added — Canceled & Changed Reservation Alerts
