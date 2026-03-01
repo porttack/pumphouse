@@ -10,6 +10,12 @@ Pending tasks, security items, ideas, and completed history.
 
 - [x] **`pumphouse/certs/privkey.pem`** — excluded from git; `certs/` added to `.gitignore`; deploy hook manages cert updates
 - [x] **Remove `nohup.out` from git tracking** — added to `.gitignore`, removed from git index
+- [ ] **Upgrade dashboard auth from Basic to Digest (or session-based)**
+  - Current: HTTP Basic Auth (`requires_auth` decorator in `monitor/web.py`)
+  - Basic over TLS is acceptable (credentials encrypted in transit), but Digest
+    would hash credentials client-side before sending, removing dependence on TLS
+  - Options: Flask-HTTPAuth Digest (low effort), or session cookie login (better UX, logout support)
+  - README security section should be updated once changed
 - [ ] **Move email addresses to secrets.conf** — personal Gmail addresses are in `monitor/config.py`
 - [ ] **Move Ambient Weather dashboard URL to secrets.conf** — unique dashboard ID in `monitor/config.py`
 - [ ] **Scrub git history** after moving secrets — use `git filter-repo` or BFG to remove sensitive data from past commits (without this, secrets remain accessible in git history even after removal)
