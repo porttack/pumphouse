@@ -73,15 +73,30 @@ See [docs/hardware-reference.md](docs/hardware-reference.md) for GPIO pin assign
 ```
 pumphouse/
 ├── monitor/                     # Main monitoring package (pumphouse-monitor + pumphouse-web)
-│   ├── config.py                # All configuration constants
-│   ├── web.py                   # Flask web server & all API routes
-│   ├── poll.py                  # Main monitoring loop
-│   ├── notifications.py         # Notification rule engine
-│   ├── email_notifier.py        # HTML email construction & sending
+│   ├── config.py                # All configuration constants; loads secrets.conf + monitor.conf
+│   ├── main.py                  # Entry point: CLI arg parsing, GPIO init, starts monitor loop
+│   ├── poll.py                  # Main monitoring loop (pressure, float, tank, relay, snapshots)
+│   ├── web.py                   # Flask web server & all API routes (dashboard, /api/*, timelapse)
+│   ├── web_timelapse.py         # Timelapse viewer routes and MP4/JPG serving
+│   ├── state.py                 # SystemState dataclass — shared live sensor state
+│   ├── stats.py                 # Snapshot-based statistics (GPH, pressure %, averages)
+│   ├── logger.py                # CSV event & snapshot logging
+│   ├── notifications.py         # Notification rule engine (triggers, cooldowns, dispatch)
+│   ├── email_notifier.py        # HTML email construction & SMTP sending
 │   ├── ntfy.py                  # ntfy.sh push notifications
-│   ├── gph_calculator.py        # Well GPH calculation & caching
-│   ├── ecobee.py                # Ecobee thermostat control (web scraping)
+│   ├── tank.py                  # mypt.in tank sensor scraping & timestamp parsing
+│   ├── gpio_helpers.py          # GPIO access with retry logic and mock support
+│   ├── relay.py                 # Relay open/close control
+│   ├── relay_state.py           # Relay state persistence (relay_state.json)
+│   ├── purge.py                 # Automatic filter purge relay control
+│   ├── gph_calculator.py        # Well GPH calculation & caching (gph_cache.csv)
+│   ├── ecobee.py                # Ecobee thermostat data (web scraping, token refresh)
 │   ├── occupancy.py             # Occupancy detection from reservations.csv
+│   ├── ambient_weather.py       # Ambient Weather station API integration
+│   ├── weather_api.py           # NWS & Open-Meteo ERA5 weather data (cached per-day)
+│   ├── epaper_jpg.py            # E-paper BMP/JPG image generation for display & widget
+│   ├── restart_tracker.py       # Crash loop detection (restart_tracker.json)
+│   ├── check.py                 # Status checker & diagnostic test runner (--test-email, etc.)
 │   └── templates/status.html   # Web dashboard Jinja2 template
 ├── pistat/                      # E-paper display daemon (runs on separate Pi)
 │   ├── epaper_daemon.py
