@@ -1,0 +1,28 @@
+# Pumphouse crontab — install with: crontab -e
+#
+# Replace /home/pi/src/pumphouse with your actual project path if different.
+# To install: crontab terraform/cron/crontab.example
+#             (or paste into `crontab -e`)
+
+PROJECT=/home/pi/src/pumphouse
+VENV=$PROJECT/venv/bin/python3
+
+# --- Reservation scraper ---
+# Scrape TrackHS reservations 3× daily and notify on new/changed bookings.
+0  5 * * * $PROJECT/update_reservations.sh >> $PROJECT/reservation_updates.log 2>&1
+0 16 * * * $PROJECT/update_reservations.sh >> $PROJECT/reservation_updates.log 2>&1
+0 22 * * * $PROJECT/update_reservations.sh >> $PROJECT/reservation_updates.log 2>&1
+
+# --- System health monitor ---
+# Log CPU temp, throttling, disk, memory every 5 minutes.
+*/5 * * * * $PROJECT/system_health_monitor.sh
+
+# --- Ecobee temperature fetch ---
+# Fetch thermostat readings twice daily for the dashboard.
+# NOTE: script is now at ecobee/fetch_ecobee_temp_cron.sh — update path below.
+30  5 * * * $PROJECT/ecobee/fetch_ecobee_temp_cron.sh
+ 0 21 * * * $PROJECT/ecobee/fetch_ecobee_temp_cron.sh
+
+# --- Daily GPH logger ---
+# Calculate and log well gallons-per-hour at 2 AM.
+0 2 * * * cd $PROJECT && $VENV log_daily_gph.py >> $PROJECT/gph_log.txt 2>&1

@@ -3,11 +3,14 @@
 
 set -e
 
+PROJECT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )"
+SERVICES_DIR="$PROJECT_DIR/terraform/services"
+
 echo "Installing Pumphouse systemd services..."
 
 # Copy service files to systemd directory
-sudo cp pumphouse-monitor.service /etc/systemd/system/
-sudo cp pumphouse-web.service /etc/systemd/system/
+sudo cp "$SERVICES_DIR/pumphouse-monitor.service" /etc/systemd/system/
+sudo cp "$SERVICES_DIR/pumphouse-web.service" /etc/systemd/system/
 
 # Reload systemd to recognize new services
 sudo systemctl daemon-reload

@@ -91,15 +91,23 @@ pumphouse/
 │   ├── ratings-worker.js        # KV-backed ratings Worker source
 │   ├── deploy.sh                # Deploy worker (reads credentials from secrets.conf)
 │   └── wrangler.toml            # Wrangler deploy config
-├── terraform/cloudflare/        # Cloudflare infrastructure as code (Terraform)
-│   ├── main.tf                  # Provider config & required versions
-│   ├── variables.tf             # Input variables (account ID, zone ID, tunnel secret)
-│   ├── tunnel.tf                # Zero Trust Tunnel + DNS records
-│   ├── worker.tf                # KV namespace, Worker script, routes
-│   ├── redirects.tf             # Redirect rules (/ → /timelapse, www → apex)
-│   ├── cache.tf                 # Cache rules (HTML caching, DoS mitigations)
-│   ├── outputs.tf               # Tunnel token, KV namespace ID
-│   └── terraform.tfvars.example # Template — copy to terraform.tfvars (gitignored)
+├── terraform/                   # Infrastructure configuration
+│   ├── cloudflare/              # Cloudflare infrastructure as code (Terraform)
+│   │   ├── main.tf              # Provider config & required versions
+│   │   ├── variables.tf         # Input variables (account ID, zone ID, tunnel secret)
+│   │   ├── tunnel.tf            # Zero Trust Tunnel + DNS records
+│   │   ├── worker.tf            # KV namespace, Worker script, routes
+│   │   ├── redirects.tf         # Redirect rules (/ → /timelapse, www → apex)
+│   │   ├── cache.tf             # Cache rules (HTML caching, DoS mitigations)
+│   │   ├── outputs.tf           # Tunnel token, KV namespace ID
+│   │   └── terraform.tfvars.example
+│   ├── services/                # systemd service unit files
+│   │   ├── pumphouse-monitor.service
+│   │   ├── pumphouse-web.service
+│   │   └── pumphouse-timelapse.service
+│   └── cron/                    # Crontab reference and install docs
+│       ├── crontab.example      # All scheduled jobs with correct paths
+│       └── README.md
 ├── ecobee/                      # Ecobee thermostat scripts (historical / reference)
 │   ├── ecobee_control.py        # Direct Ecobee API control
 │   ├── fetch_ecobee_data.py     # Fetch thermostat data
@@ -117,9 +125,6 @@ pumphouse/
 │   └── lessons/                 # Educational content
 ├── sunset_timelapse.py          # Timelapse capture daemon (pumphouse-timelapse)
 ├── control.sh                   # Safe relay control script (no GPIO conflicts)
-├── pumphouse-monitor.service    # systemd service definitions
-├── pumphouse-web.service
-├── pumphouse-timelapse.service
 ├── scrape_reservations.py       # TrackHS reservation downloader
 ├── check_new_reservations.py    # New booking detector / notifier
 ├── update_reservations.sh       # Cron wrapper: scrape + check
