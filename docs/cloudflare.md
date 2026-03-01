@@ -12,7 +12,9 @@ Serves `onblackberryhill.com` via Cloudflare CDN with a Tunnel — no open inbou
 - ✅ Rating Worker deployed (`pumphouse-ratings`, routes: `onblackberryhill.com/*`)
 - ✅ Pi code updated (KV backend, cache headers, client-side rating widget, `/api/ratings/DATE`)
 - ✅ Existing ratings.json migrated to KV
-- ⬜ Cache rule for HTML pages (`/timelapse/20*`) — Step 8 — still needed
+- ✅ Worker handles `/snapshot` and `/frame` (5-min CDN cache, crop=1 enforced)
+- ⬜ Cache Rule for timelapse HTML pages (`/timelapse/20*`) — Step 8 — still needed
+- ⬜ Cache Rule — Ignore Query String for `/timelapse/*` — Step 9 — DoS mitigation
 - ⬜ Firewall hardening (deferred — do in person)
 
 ---
@@ -25,10 +27,13 @@ Public browser
   ▼
 Cloudflare Edge  (onblackberryhill.com)
   ├─ Redirect Rule: / → /timelapse
-  ├─ Cache: MP4s (1 yr), past HTML pages (1 yr), snapshots (1 yr)
+  ├─ Worker: GET /snapshot, /frame   →  5-min CDN cache; Pi hit ≤ once/5 min
+  ├─ Worker: GET /api/ratings/*      →  read KV   (Pi not involved)
   ├─ Worker: POST /timelapse/*/rate  →  write KV  (Pi not involved)
-  ├─ Worker: GET  /api/ratings/*     →  read KV   (Pi not involved)
-  └─ Cache miss / other routes       →  Tunnel → Pi Flask :6443
+  ├─ Cache Rule (/timelapse/20*): Cache Everything; respects origin Cache-Control
+  │    today + yesterday → 5-min TTL  |  2+ days old → 1-hour TTL
+  ├─ Auto-cached by extension: *.mp4 (1 yr), snapshot *.jpg (1 yr)
+  └─ Everything else     →  Tunnel → Pi Flask :6443
        │
        ▼
   cloudflared daemon (outbound from Pi, no open ports)
@@ -165,24 +170,45 @@ Your Account ID appears in the Cloudflare dashboard URL and Workers overview pag
 
 ---
 
-## Step 8 — Cache Rules (dashboard)
+## Step 8 — Cache Rule: Timelapse HTML pages (dashboard)
 
-Your domain → Caching → Cache Rules → Create rule:
+Cloudflare will not cache `text/html` responses by default. This rule overrides that for the timelapse viewer pages.
 
-| Rule name | Match | Cache behavior |
-|-----------|-------|----------------|
-| Timelapse MP4s | URI path matches `*.mp4` | Cache everything; Edge TTL 1 year |
-| Past timelapse pages | URI path matches `/timelapse/20*` | Cache everything; Edge TTL 1 year |
-| Snapshot JPEGs | URI path matches `/timelapse/*/snapshot` | Cache everything; Edge TTL 1 year |
-| Rating API | URI path matches `/api/ratings/*` | Cache 60 seconds |
-| Live snapshot | URI path matches `/snapshot*` or `/frame*` | Bypass cache |
-| Dashboard | URI path matches `/` | Bypass cache |
+Your domain → **Caching → Cache Rules → Create rule:**
 
-> **This step is not yet complete.** Without the HTML cache rule, Cloudflare won't cache timelapse viewer pages (only MP4/JPEG are cached automatically).
+- **Rule name:** Timelapse HTML pages
+- **When incoming requests match:** `URI Path` starts with `/timelapse/20`
+- **Cache status:** Cache everything
+- **Edge TTL:** Respect origin TTL *(the Pi sends `max-age=300` for today/yesterday and `max-age=3600` for older pages — Cloudflare will honour those values)*
+
+Leave all other settings at their defaults.
+
+> ⬜ **Not yet created.** Without this rule, Cloudflare passes every timelapse page view through to the Pi.
+
+MP4 and JPEG files do **not** need a Cache Rule — Cloudflare caches them automatically based on file extension and the `Cache-Control` headers the Pi sends (`max-age=31536000` for past files).
 
 ---
 
-## Step 9 — Firewall Hardening (do in person)
+## Step 9 — Cache Rule: Ignore Query String (DoS mitigation)
+
+Without this rule, a script can bypass Cloudflare's cache by appending random query parameters (`?x=1`, `?x=2`, …), forcing the Pi to serve a fresh response — including potentially streaming a 4 MB MP4 — on every request.
+
+Your domain → **Caching → Cache Rules → Create rule:**
+
+- **Rule name:** Ignore query string — timelapse
+- **When incoming requests match:** `URI Path` starts with `/timelapse/`
+- **Cache status:** Cache everything
+- **Cache key → Query string:** Ignore all
+
+This makes `/timelapse/2026-01-01_1750.mp4?x=1` and `?x=2` resolve to the same cache entry. Timelapse pages and MP4s don't use query parameters for content, so ignoring them is safe.
+
+> ⬜ **Not yet created.**
+
+**Optional belt-and-suspenders:** Cloudflare dashboard → Security → WAF → Rate Limiting Rules → limit any single IP to 60 requests/minute to the origin.
+
+---
+
+## Step 10 — Firewall Hardening (do in person)
 
 After verifying the tunnel works end-to-end:
 
