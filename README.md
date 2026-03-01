@@ -1,6 +1,6 @@
-# Pumphouse Monitor
+# Pumphouse Monitor & Timelapse
 
-Remote monitoring and control system for a well-water pump house serving an Airbnb property on the Oregon coast. Monitors tank levels, pump activity, water quality, and captures daily sunset timelapses — all managed remotely from a Raspberry Pi 4.
+Remote monitoring and control system for a well-water pump house serving an Airbnb property on the Oregon coast. Monitors tank levels, pump activity, water quality, and captures daily sunset timelapses — all managed remotely from a Raspberry Pi 4. Daily sunset timelapses can be seen at [onblackberryhill.com](https://onblackberryhill.com).
 
 ---
 
