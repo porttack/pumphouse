@@ -50,52 +50,47 @@ export default {
 
 async function handleSnapshot(request, url) {
   // Normalize the cache key:
-  //   - Strip the `crop` param entirely (Pi now defaults to crop=1, and the
-  //     CF-Ray header on the Pi side enforces it regardless).
-  //   - Keep `info` param because info=0 (raw JPEG) and info=1 (HTML page)
-  //     are different content types.
+  //   - Strip the `crop` param (Pi now defaults to crop=1, and the CF-Ray
+  //     header enforces it regardless).  Keeps `info` because info=0 (raw
+  //     JPEG) and info=1 (HTML page) are different content types.
   const normUrl = new URL(url.toString());
   normUrl.searchParams.delete('crop');
 
-  // Strip browser cache-bypass headers so `location.reload()` and hard
-  // refreshes cannot force a Pi hit — the CDN 5-min policy wins.
+  // Strip browser cache-bypass headers so location.reload() and hard
+  // refreshes cannot force a Pi hit — the 5-min CDN policy wins.
   const piHeaders = new Headers(request.headers);
   piHeaders.delete('Cache-Control');
   piHeaders.delete('Pragma');
   piHeaders.delete('If-None-Match');
   piHeaders.delete('If-Modified-Since');
 
-  // Check the CDN cache (per Cloudflare PoP)
-  const cache = caches.default;
-  const cacheKey = new Request(normUrl.toString(), { method: 'GET' });
-  const cached = await cache.match(cacheKey);
-  if (cached) {
-    return cached;
-  }
-
-  // Cache miss — fetch from Pi (crop defaults to 1 on the Pi side now)
+  // Fetch from Pi — or from Cloudflare's CDN cache if already stored.
+  //
+  // WHY cf.cacheEverything instead of caches.default.put():
+  //   Cloudflare's Cache API (caches.default) silently refuses to store
+  //   text/html responses regardless of Cache-Control headers, because
+  //   Cloudflare treats HTML as dynamic by default.  The cf.cacheEverything
+  //   flag overrides that policy, instructing Cloudflare to cache this
+  //   response at the CDN layer just like it would cache an image or CSS
+  //   file.  On subsequent Worker invocations, fetch() returns from the
+  //   CDN cache without contacting the Pi at all.
+  //
+  // cacheTtlByStatus ensures errors (camera timeout, etc.) are never cached.
   const piResp = await fetch(normUrl.toString(), {
     method: 'GET',
     headers: piHeaders,
+    cf: {
+      cacheEverything: true,
+      cacheTtlByStatus: { '200': 300 },  // 5-min TTL for success only
+    },
   });
 
-  // Don't cache error responses
-  if (!piResp.ok) {
-    return piResp;
-  }
-
-  // Build a cacheable response with 5-minute TTL
+  // Propagate 5-min Cache-Control to browsers for their own local cache
   const headers = new Headers(piResp.headers);
-  headers.set('Cache-Control', 'public, max-age=300');
-
-  // We need two independent copies of the body: one for the cache, one for
-  // the client.  Clone before any body reads.
-  const cloned = piResp.clone();
-  const toCache  = new Response(cloned.body,   { status: cloned.status,   headers });
-  const toClient = new Response(piResp.body,   { status: piResp.status,   headers });
-
-  await cache.put(cacheKey, toCache);
-  return toClient;
+  if (piResp.ok) {
+    headers.set('Cache-Control', 'public, max-age=300');
+  }
+  return new Response(piResp.body, { status: piResp.status, headers });
 }
 
 async function handleGet(dateStr, env) {
