@@ -49,6 +49,7 @@ import matplotlib.dates as mdates
 app = Flask(__name__)
 
 from monitor.web_timelapse import timelapse_bp  # noqa: E402
+from monitor.weather_api import current_weather_desc  # noqa: E402
 app.register_blueprint(timelapse_bp)
 
 # Configuration
@@ -879,7 +880,7 @@ def epaper_bmp():
         region = ImageChops.logical_xor(region, lbl_img)
         img.paste(region, (paste_x, paste_y))
         paste_y += th + pad * 2 + 1
-    weather_desc = _current_weather_desc()
+    weather_desc = current_weather_desc()
     if weather_desc:
         wd_tb = draw.textbbox((0, 0), weather_desc, font=font_small)
         wd_w, wd_h = wd_tb[2] - wd_tb[0], wd_tb[3] - wd_tb[1]

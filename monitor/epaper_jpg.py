@@ -51,6 +51,7 @@ from monitor.occupancy import (
     load_reservations,
 )
 from monitor.tank import get_tank_data
+from monitor.weather_api import current_weather_desc
 
 # ── Camera / timelapse paths ───────────────────────────────────────────────
 _FRAME_BASE    = pathlib.Path('/tmp/timelapse-frames')
@@ -60,55 +61,6 @@ _CAMERA_PORT   = 554
 _CROP_BOTTOM   = 120  # keep in sync with sunset_timelapse.py
 # A frame directory is considered "active" if its newest frame is younger than this
 _ACTIVE_THRESHOLD_SECONDS = 600  # 10 minutes
-
-# ── Simple weather-description cache (independent of web.py) ──────────────
-_weather_cache: dict = {'desc': None, 'ts': 0.0}
-
-_WMO = {
-    0: 'Clear', 1: 'Mostly Clear', 2: 'Partly Cloudy', 3: 'Overcast',
-    45: 'Foggy', 48: 'Icy Fog',
-    51: 'Light Drizzle', 53: 'Drizzle', 55: 'Heavy Drizzle',
-    61: 'Light Rain', 63: 'Rain', 65: 'Heavy Rain',
-    71: 'Light Snow', 73: 'Snow', 75: 'Heavy Snow',
-    80: 'Light Showers', 81: 'Showers', 82: 'Heavy Showers',
-    95: 'Thunderstorm',
-}
-
-
-def _current_weather_desc() -> str | None:
-    """Return current weather description, cached for 30 minutes."""
-    import json
-    import urllib.request
-
-    now = time.time()
-    if _weather_cache['desc'] is not None and now - _weather_cache['ts'] < 1800:
-        return _weather_cache['desc']
-
-    desc = None
-    try:
-        url = 'https://api.weather.gov/stations/KONP/observations/latest'
-        req = urllib.request.Request(url, headers={'User-Agent': 'pumphouse/1.0'})
-        with urllib.request.urlopen(req, timeout=5) as r:
-            data = json.loads(r.read())
-        desc = data['properties'].get('textDescription') or None
-    except Exception:
-        pass
-
-    if not desc:
-        try:
-            url = ('https://api.open-meteo.com/v1/forecast'
-                   '?latitude=44.6368&longitude=-124.0535&current=weather_code')
-            with urllib.request.urlopen(url, timeout=5) as r:
-                data = json.loads(r.read())
-            code = data['current']['weather_code']
-            desc = _WMO.get(code)
-        except Exception:
-            pass
-
-    _weather_cache['desc'] = desc
-    _weather_cache['ts']   = now
-    return desc
-
 
 # ── Camera background helpers ──────────────────────────────────────────────
 
@@ -487,7 +439,7 @@ def render_epaper_jpg(
         draw.text((graph_left + pad - tb[0], py - tb[1]), text, font=font_small, fill=WHITE)
         py += (tb[3] - tb[1]) + s(3)
 
-    weather_desc = _current_weather_desc()
+    weather_desc = current_weather_desc()
     if weather_desc:
         wb = draw.textbbox((0, 0), weather_desc, font=font_small)
         draw.text((graph_left + pad - wb[0], py - wb[1]), weather_desc, font=font_small, fill=WHITE)
