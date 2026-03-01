@@ -2,6 +2,16 @@
 
 Remote monitoring and control system for a well-water pump house serving an Airbnb property on the Oregon coast. Monitors tank levels, pump activity, water quality, and captures daily sunset timelapses — all managed remotely from a Raspberry Pi 4.
 
+---
+
+**Built and maintained by [Eric Brown](https://porttack.com/) — engineer, teacher, sailor.** Eric teaches Computer Science at San Lorenzo Valley High School (CA) and previously worked as an engineer at Khan Academy, Apple, Adobe, Sony, Kodak, and others. This project grew from a practical problem into a teaching vehicle; the timelapse system is used as a real-world case study in his AP Computer Science Principles course.
+
+**AP CSP lesson plans using this project:**
+- [Part 1 — From a Single JPEG to an Interactive Web Viewer](docs/lessons/ap-csp-timelapse-part1.md) (4 × 30 min: HTTP, networking, APIs, compression)
+- [Part 2 — From Single Server to Global Edge Infrastructure](docs/lessons/ap-csp-timelapse-part2.md) (4 × 30 min: CDN, DoS, edge computing, Terraform/IaC)
+
+---
+
 ## Why
 
 - **Remote operation**: The property is a 10-hour round trip. Every issue that can be diagnosed and resolved remotely is a trip saved.
@@ -162,4 +172,5 @@ cert.pem / key.pem            # TLS certificate files
 | [pistat/README.md](pistat/README.md) | E-paper daemon installation & troubleshooting |
 | [pistat/IPHONE_WIDGET.md](pistat/IPHONE_WIDGET.md) | iPhone Scriptable widget setup |
 | [docs/conversations/](docs/conversations/) | Development session logs — design decisions, debugging, implementation history |
-| [docs/lessons/ap-csp-timelapse-unit.md](docs/lessons/ap-csp-timelapse-unit.md) | AP CSP lesson unit using this project as a real-world teaching example (6 × 30 min sessions) |
+| [docs/lessons/ap-csp-timelapse-part1.md](docs/lessons/ap-csp-timelapse-part1.md) | AP CSP Part 1 — From a Single JPEG to an Interactive Web Viewer (4 × 30 min: HTTP, networking, APIs, compression) |
+| [docs/lessons/ap-csp-timelapse-part2.md](docs/lessons/ap-csp-timelapse-part2.md) | AP CSP Part 2 — From Single Server to Global Edge Infrastructure (4 × 30 min: CDN, DoS, edge computing, Terraform/IaC) |
