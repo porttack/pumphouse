@@ -1,0 +1,11 @@
+# Terraform provider cache — large, machine-specific, re-downloaded by `terraform init`
+.terraform/
+
+# State files — contain resource IDs and sensitive outputs (tunnel token, etc.)
+terraform.tfstate
+terraform.tfstate.backup
+
+# Variable files with actual secrets
+# terraform.tfvars.example is committed; terraform.tfvars is not
+*.tfvars
+!terraform.tfvars.example

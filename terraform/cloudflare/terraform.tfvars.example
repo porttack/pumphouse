@@ -1,0 +1,15 @@
+# Copy this file to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored — never commit it (contains secrets).
+
+cloudflare_account_id = "abc123def456..."   # dash.cloudflare.com → right sidebar of any page
+cloudflare_zone_id    = "789ghi012jkl..."   # dash.cloudflare.com → your domain → Overview → right sidebar
+
+# tunnel_secret: a base64-encoded 32-byte random value.
+# Generate a fresh one with:  openssl rand -base64 32
+# Or set via environment to keep it out of files entirely:
+#   export TF_VAR_tunnel_secret="$(openssl rand -base64 32)"
+#
+# If importing an EXISTING tunnel, use its original secret from the Pi:
+#   cat ~/.cloudflared/<TUNNEL_ID>.json | python3 -c "import sys,json; print(json.load(sys.stdin)['TunnelSecret'])"
+#
+# tunnel_secret = "..."
