@@ -2095,7 +2095,7 @@ def timelapse_frame_view_client(date_str):
 </body>
 </html>"""
     return Response(html, status=200, mimetype='text/html',
-                    headers={{'Cache-Control': 'public, max-age=3600'}})
+                    headers={'Cache-Control': 'public, max-age=3600'})
 
 
 @app.route('/timelapse/<date_str>/frame-view', methods=['POST'])
