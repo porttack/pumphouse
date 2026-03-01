@@ -2,6 +2,8 @@
 
 Serves `onblackberryhill.com` via Cloudflare CDN with a Tunnel — no open inbound ports on the Pi.
 
+For **infrastructure-as-code** (Terraform) see [terraform/cloudflare/README.md](../terraform/cloudflare/README.md).
+
 ---
 
 ## Status
