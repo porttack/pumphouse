@@ -1345,14 +1345,16 @@ def snapshot():
         return (f'<div class="stat"><span class="lbl">{label}</span>'
                 f'<span class="val">{val}{unit}</span></div>')
 
-    # Weather description + quip from daily data
+    # Weather description: prefer real-time current conditions over daily summary
+    # so the description is consistent with the current cloud % shown below it.
     desc_html = ''
-    if om and om.get('weather_desc'):
+    _desc = cc.get('weather_desc') or (om.get('weather_desc') if om else None)
+    if _desc:
         import random as _random
-        _opts      = _QUIPS.get(om['weather_desc'].lower(), [])
+        _opts      = _QUIPS.get(_desc.lower(), [])
         _quip      = _random.choice(_opts) if _opts else ''
         _quip_html = f' <span class="wx-quip">{_quip}</span>' if _quip else ''
-        desc_html  = f'<div class="wx-desc">{om["weather_desc"]}{_quip_html}</div>'
+        desc_html  = f'<div class="wx-desc">{_desc}{_quip_html}</div>'
 
     wind_label = cc.get('wind_label', 'Wind')
     humidity   = (wx.get('humidity_avg') if wx else None) or (om.get('humidity') if om else None)
@@ -1444,6 +1446,7 @@ def snapshot():
     <button class="btn" onclick="location.reload()">&#8635; New Snapshot</button>
     <a class="btn" href="{tl_link}">Timelapses</a>
     <a class="btn" href="/">Dashboard</a>
+    <a class="btn" href="data:image/jpeg;base64,{img_b64}" download="snapshot-{date_str}.jpg">&#8681; Download</a>
     <span class="captured-at">Captured {now_str} &middot; {src_note}</span>
   </div>
 </body>
@@ -1642,23 +1645,35 @@ def _open_meteo_weather(date_str):
     Fetch daily weather for date_str.
 
     Stage 1 – NWS KONP (Newport Municipal Airport): actual station observations.
-              Provides weather description, precip, wind, humidity.
-    Stage 2 – Open-Meteo ERA5: supplements with cloud cover and radiation;
+              Provides weather description, precip, wind, humidity, and cloud cover
+              derived from cloudLayers (CLR/FEW/SCT/BKN/OVC).  Description and
+              cloud cover are taken from the observation closest to sunset so they
+              reflect timelapse conditions rather than midday.
+    Stage 2 – Open-Meteo ERA5: supplements with radiation and times;
               used as full fallback when NWS data is unavailable (date too old,
-              network error, etc.).
+              network error, etc.).  ERA5 cloud_cover_mean is only used when NWS
+              cloudLayers data is absent (ERA5 models high-altitude cloud that
+              can disagree with ground observations).
 
-    Results are cached; archive data never changes once a day is complete.
+    Results are cached; past days' data never changes once complete.
+    Today's data is re-fetched after 30 minutes so in-progress days stay fresh.
     """
     import json as _json
     import urllib.request as _ureq
     import urllib.parse as _uparse
+    import time as _time
     from datetime import date as _date, datetime as _dt
     from zoneinfo import ZoneInfo as _ZI
+
+    # NWS cloud layer coverage codes → approximate percent
+    _COV = {'CLR': 0, 'SKC': 0, 'FEW': 13, 'SCT': 38, 'BKN': 63, 'OVC': 100, 'VV': 100}
 
     os.makedirs(WEATHER_CACHE_DIR, exist_ok=True)
     cache = os.path.join(WEATHER_CACHE_DIR, f'{date_str}.json')
 
-    if os.path.exists(cache):
+    is_today = (date_str == _date.today().isoformat())
+    cache_age = _time.time() - os.path.getmtime(cache) if os.path.exists(cache) else float('inf')
+    if cache_age < (1800 if is_today else float('inf')):
         try:
             return _json.loads(open(cache).read())
         except Exception:
@@ -1683,8 +1698,18 @@ def _open_meteo_weather(date_str):
         with _ureq.urlopen(req, timeout=15) as resp:
             features = _json.loads(resp.read()).get('features', [])
 
-        temps, winds, humidities, descs = [], [], [], []
+        # Compute sunset time so we can pick the closest observation
+        try:
+            from astral import LocationInfo as _LI
+            from astral.sun import sun as _sun
+            _loc = _LI('Newport, OR', 'Oregon', 'America/Los_Angeles', 44.6368, -124.0535)
+            sunset_dt = _sun(_loc.observer, date=day, tzinfo=tz)['sunset']
+        except Exception:
+            sunset_dt = _dt(day.year, day.month, day.day, 18, 0, tzinfo=tz)
+
+        temps, winds, humidities = [], [], []
         precip_total = 0.0
+        timed_obs = []   # (timestamp dt, desc, cloud_pct | None)
         for f in features:
             p = f.get('properties', {})
             t = p.get('temperature', {}).get('value')
@@ -1702,13 +1727,31 @@ def _open_meteo_weather(date_str):
             if prec is not None:
                 precip_total += prec / 25.4                   # mm → inches
             desc = p.get('textDescription', '').strip()
-            if desc:
-                descs.append(desc)
+            layers = p.get('cloudLayers') or []
+            pcts = [_COV[l['amount']] for l in layers if l.get('amount') in _COV]
+            cloud_pct = max(pcts) if pcts else None
+            ts_str = p.get('timestamp', '')
+            if ts_str:
+                try:
+                    timed_obs.append((_dt.fromisoformat(ts_str), desc, cloud_pct))
+                except Exception:
+                    pass
 
         if temps:
+            # Pick the observation closest to sunset for description + cloud cover
+            best_desc, best_cloud = None, None
+            if timed_obs:
+                timed_obs.sort(key=lambda x: abs((x[0] - sunset_dt).total_seconds()))
+                for _, desc, cloud_pct in timed_obs:
+                    if best_desc is None and desc:
+                        best_desc = desc
+                    if best_cloud is None and cloud_pct is not None:
+                        best_cloud = cloud_pct
+                    if best_desc and best_cloud is not None:
+                        break
             result = {
                 'source':       'nws',
-                'weather_desc': descs[len(descs) // 2] if descs else None,
+                'weather_desc': best_desc,
                 'temp_max':     f'{max(temps):.0f}',
                 'temp_min':     f'{min(temps):.0f}',
                 'precip':       f'{precip_total:.2f}',
@@ -1716,6 +1759,8 @@ def _open_meteo_weather(date_str):
                 'wind_avg':     f'{sum(winds)/len(winds):.0f}'         if winds      else None,
                 'humidity':     f'{sum(humidities)/len(humidities):.0f}' if humidities else None,
             }
+            if best_cloud is not None:
+                result['cloud'] = str(best_cloud)   # observed; ERA5 won't overwrite
     except Exception:
         pass  # network error or date outside NWS retention → fall through
 
@@ -1895,17 +1940,20 @@ def _current_conditions():
     except Exception:
         pass
 
-    # Cloud cover from Open-Meteo current forecast; wind as fallback
+    # Cloud cover, weather code, and wind from Open-Meteo current forecast
     try:
         url = ('https://api.open-meteo.com/v1/forecast'
                '?latitude=44.6368&longitude=-124.0535'
-               '&current=cloud_cover,wind_speed_10m'
+               '&current=cloud_cover,wind_speed_10m,weather_code'
                '&wind_speed_unit=mph&timezone=America%2FLos_Angeles')
         with _ureq.urlopen(url, timeout=8) as resp:
             cur = _json.loads(resp.read()).get('current', {})
         cc = cur.get('cloud_cover')
         if cc is not None:
             result['cloud'] = str(int(round(cc)))
+        wc = cur.get('weather_code')
+        if wc is not None:
+            result['weather_desc'] = _WMO.get(int(wc), f'Code {int(wc)}')
         ws = cur.get('wind_speed_10m')
         if ws is not None and 'wind' not in result:
             result['wind']       = f'{ws:.0f}'
@@ -1980,6 +2028,175 @@ def timelapse_snapshot(date_str):
         return Response('No snapshot for this date.', status=404)
     return send_file(path, mimetype='image/jpeg',
                      max_age=365 * 24 * 3600)   # immutable once written
+
+
+@app.route('/timelapse/<date_str>/frame-view-client')
+def timelapse_frame_view_client(date_str):
+    """Static frame viewer for Cloudflare visitors.
+
+    The timelapse JS stores the extracted canvas frame in localStorage under
+    'tl_frame_YYYY-MM-DD', then opens this page.  The page reads the image
+    entirely client-side — no image data is ever sent to the Pi, so there is
+    no upload DoS vector.  Cloudflare can cache this template freely.
+    """
+    import re as _re
+    if not _re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_str):
+        return Response('Invalid date', status=400)
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Frame &mdash; {date_str}</title>
+  <style>
+    * {{ box-sizing: border-box; }}
+    body {{ font-family: monospace; background: #1a1a1a; color: #e0e0e0; margin: 0; padding: 16px; }}
+    h2 {{ color: #fff; margin: 0 0 12px; font-size: 1.1em; font-weight: normal; }}
+    .frame-wrap {{ margin: 0 auto; }}
+    .frame-wrap img {{ width: 100%; height: auto; display: block; border-radius: 4px; }}
+    .actions {{ display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }}
+    .btn {{ background: #2a2a2a; color: #4CAF50; border: 1px solid #444;
+            padding: 6px 16px; border-radius: 4px; text-decoration: none;
+            font-family: monospace; font-size: .95em; cursor: pointer; }}
+    .btn:hover {{ background: #333; color: #fff; }}
+    #msg {{ color: #888; font-style: italic; margin: 8px 0; }}
+  </style>
+</head>
+<body>
+  <h2>Timelapse Frame &mdash; {date_str}</h2>
+  <p id="msg">Loading&hellip;</p>
+  <div class="frame-wrap"><img id="frame-img" alt="Frame" style="display:none"></div>
+  <div class="actions" id="actions" style="display:none">
+    <a class="btn" href="/timelapse/{date_str}">&#9654; Timelapse</a>
+    <a id="dl-link" class="btn" href="#">&#8681; Download</a>
+  </div>
+  <script>
+  (function() {{
+    var key = 'tl_frame_{date_str}';
+    var dataUrl;
+    try {{ dataUrl = localStorage.getItem(key); }} catch(e) {{}}
+    if (!dataUrl) {{
+      document.getElementById('msg').textContent =
+        'No frame found \u2014 go back and click Snapshot again.';
+      return;
+    }}
+    try {{ localStorage.removeItem(key); }} catch(e) {{}}
+    var img = document.getElementById('frame-img');
+    img.src = dataUrl;
+    img.style.display = '';
+    document.getElementById('msg').style.display = 'none';
+    var dl = document.getElementById('dl-link');
+    dl.href = dataUrl;
+    dl.setAttribute('download', 'frame-{date_str}.jpg');
+    document.getElementById('actions').style.display = 'flex';
+  }})();
+  </script>
+</body>
+</html>"""
+    return Response(html, status=200, mimetype='text/html',
+                    headers={{'Cache-Control': 'public, max-age=3600'}})
+
+
+@app.route('/timelapse/<date_str>/frame-view', methods=['POST'])
+def timelapse_frame_view(date_str):
+    """Display a POSTed JPEG frame in a styled page (no weather panel)."""
+    import re as _re, base64 as _b64
+    if not _re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_str):
+        return Response('Invalid date', status=400)
+    b64_data = request.form.get('image', '')
+    if not b64_data:
+        return Response('No image data', status=400)
+    try:
+        jpeg_bytes = _b64.b64decode(b64_data)
+    except Exception as e:
+        return Response(f'Invalid image data: {e}', status=400)
+    img_b64 = _b64.b64encode(jpeg_bytes).decode()
+
+    is_direct = 'onblackberryhill.com' not in request.host.lower()
+    dash_btn = '<a class="btn" href="/">Dashboard</a>' if is_direct else ''
+    set_key_btn = (
+        '<button id="set-key-btn" class="btn" onclick="setKeySnapshot()">Set key snapshot</button>'
+        if is_direct else ''
+    )
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Frame &mdash; {date_str}</title>
+  <style>
+    * {{ box-sizing: border-box; }}
+    body {{ font-family: monospace; background: #1a1a1a; color: #e0e0e0; margin: 0; padding: 16px; }}
+    h2 {{ color: #fff; margin: 0 0 12px; font-size: 1.1em; font-weight: normal; }}
+    .frame-wrap {{ margin: 0 auto; }}
+    .frame-wrap img {{ width: 100%; height: auto; display: block; border-radius: 4px; }}
+    .actions {{ display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }}
+    .btn {{ background: #2a2a2a; color: #4CAF50; border: 1px solid #444;
+            padding: 6px 16px; border-radius: 4px; text-decoration: none;
+            font-family: monospace; font-size: .95em; cursor: pointer; }}
+    .btn:hover {{ background: #333; color: #fff; }}
+    .btn:disabled {{ opacity: .5; cursor: default; }}
+  </style>
+</head>
+<body>
+  <h2>Timelapse Frame &mdash; {date_str}</h2>
+  <div class="frame-wrap">
+    <img id="frame-img" src="data:image/jpeg;base64,{img_b64}" alt="Frame">
+  </div>
+  <div class="actions">
+    <a class="btn" href="/timelapse/{date_str}">&#9654; Timelapse</a>
+    {dash_btn}
+    <a class="btn" href="data:image/jpeg;base64,{img_b64}" download="frame-{date_str}.jpg">&#8681; Download</a>
+    {set_key_btn}
+  </div>
+  <script>
+  function setKeySnapshot() {{
+    var btn = document.getElementById('set-key-btn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    var b64 = document.getElementById('frame-img').src.split(',')[1];
+    fetch('/timelapse/{date_str}/set-snapshot', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{image: b64}})
+    }}).then(function(r) {{ return r.json(); }}).then(function(d) {{
+      btn.textContent = d.ok ? 'Saved!' : ('Error: ' + (d.error || '?'));
+    }}).catch(function() {{ btn.textContent = 'Failed'; }});
+  }}
+  </script>
+</body>
+</html>"""
+    return Response(html, status=200, mimetype='text/html')
+
+
+@app.route('/timelapse/<date_str>/set-snapshot', methods=['POST'])
+def timelapse_set_snapshot(date_str):
+    """Save a POSTed base64 JPEG as the key snapshot for the given date.
+    Only available via direct (non-Cloudflare) access."""
+    import re as _re, base64 as _b64, json as _json
+    if not _re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_str):
+        return Response(_json.dumps({'ok': False, 'error': 'Invalid date'}),
+                        status=400, mimetype='application/json')
+    if 'onblackberryhill.com' in request.host.lower():
+        return Response(_json.dumps({'ok': False, 'error': 'Not available via CDN'}),
+                        mimetype='application/json')
+    try:
+        data = request.get_json(force=True)
+        b64_data = (data or {}).get('image', '')
+        if not b64_data:
+            raise ValueError('No image data provided')
+        jpeg_bytes = _b64.b64decode(b64_data)
+    except Exception as e:
+        return Response(_json.dumps({'ok': False, 'error': str(e)}),
+                        mimetype='application/json')
+    path = os.path.join(SNAPSHOT_DIR, f'{date_str}.jpg')
+    os.makedirs(SNAPSHOT_DIR, exist_ok=True)
+    with open(path, 'wb') as f:
+        f.write(jpeg_bytes)
+    return Response(_json.dumps({'ok': True, 'message': f'Snapshot saved for {date_str}'}),
+                    mimetype='application/json')
 
 
 @app.route('/api/ratings/<date_str>')
@@ -2170,6 +2387,8 @@ def timelapse_view(date_or_file):
     is_direct_js = 'true' if is_direct else 'false'
     now_btn      = '<a href="/snapshot" class="speed-btn dl-btn">Now</a>' if is_direct else ''
     dash_btn     = '<a href="/" class="speed-btn dl-btn">Dashboard</a>' if is_direct else ''
+    public_link  = (f'&middot; (<a href="https://onblackberryhill.com/timelapse/{date_str}">public site</a>)'
+                    if is_direct else '')
 
     video_html = (
         f'<video id="vid" src="/timelapse/{mp4_name}" controls autoplay muted loop playsinline></video>'
@@ -2382,6 +2601,7 @@ def timelapse_view(date_or_file):
       <a href="https://www.meredithlodging.com/listings/1830" target="_blank" rel="noopener">Meredith</a>
       &middot; <a href="https://www.airbnb.com/rooms/894278114876445404" target="_blank" rel="noopener">Airbnb</a>
       &middot; <a href="https://www.vrbo.com/9829179ha" target="_blank" rel="noopener">Vrbo</a>
+      {public_link}
     </span>
   </header>
   <div class="nav">
@@ -2455,22 +2675,35 @@ def timelapse_view(date_or_file):
         vid.addEventListener('canplay', () => setPause(true), {{ once: true }});
       }}
     }}
-    // Snapshot button: open JPEG page on touch devices; download frame on desktop
+    // Snapshot button:
+    //   Direct Pi access → POST frame to server (full viewer + Set key snapshot)
+    //   Cloudflare       → store frame in localStorage, open static client-side viewer
+    //                      (zero data sent to Pi; no DoS vector)
     const dlBtn = document.getElementById('dl-btn');
     if (dlBtn && vid) {{
       dlBtn.addEventListener('click', () => {{
-        if (navigator.maxTouchPoints > 0) {{
-          window.open('/timelapse/{date_str}/snapshot', '_blank');
-          return;
-        }}
         const canvas = document.createElement('canvas');
         canvas.width  = vid.videoWidth;
         canvas.height = vid.videoHeight;
         canvas.getContext('2d').drawImage(vid, 0, 0);
-        const a = document.createElement('a');
-        a.download = 'sunset-{date_str}.jpg';
-        a.href = canvas.toDataURL('image/jpeg', 0.92);
-        a.click();
+        if ({is_direct_js}) {{
+          const b64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
+          const form = document.createElement('form');
+          form.method = 'POST';
+          form.action = '/timelapse/{date_str}/frame-view';
+          form.target = '_blank';
+          const inp = document.createElement('input');
+          inp.type = 'hidden';
+          inp.name = 'image';
+          inp.value = b64;
+          form.appendChild(inp);
+          document.body.appendChild(form);
+          form.submit();
+          document.body.removeChild(form);
+        }} else {{
+          try {{ localStorage.setItem('tl_frame_{date_str}', canvas.toDataURL('image/jpeg', 0.92)); }} catch(e) {{}}
+          window.open('/timelapse/{date_str}/frame-view-client', '_blank');
+        }}
       }});
     }}
     // Keyboard navigation

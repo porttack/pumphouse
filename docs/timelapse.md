@@ -13,7 +13,10 @@ Daily sunset timelapses captured from the pumphouse Amcrest camera at Newport, O
 | `/timelapse/YYYY-MM-DD` | Viewer page for a specific date |
 | `/timelapse/latest.mp4` | Redirects to the most recent MP4 file |
 | `/timelapse/latest.jpg` | Redirects to the most recent snapshot JPEG |
-| `/timelapse/YYYY-MM-DD/snapshot` | Snapshot JPEG (~35 min after sunset) |
+| `/timelapse/YYYY-MM-DD/snapshot` | Snapshot JPEG (~35 min after sunset) used as list thumbnail |
+| `/timelapse/YYYY-MM-DD/set-snapshot` | `POST` — save a JPEG as the key snapshot for that date (direct access only) |
+| `/timelapse/YYYY-MM-DD/frame-view` | `POST` — display a POSTed frame JPEG in a full viewer page (direct access only) |
+| `/timelapse/YYYY-MM-DD/frame-view-client` | `GET` — static frame viewer that reads image from `localStorage` (Cloudflare-safe) |
 | `/api/ratings/YYYY-MM-DD` | JSON aggregate rating `{count, avg}` (served by Cloudflare Worker) |
 | `/snapshot` | Live camera frame with weather panel and date; `?info=0` for raw JPEG |
 | `/frame` | Alias for `/snapshot` (backwards compat) |
@@ -116,14 +119,57 @@ Preview assemblies (10-min interval, ~12/night) add ~40 MB/day during capture. T
 
 ---
 
+## Snapshot Button (Viewer Page)
+
+The **Snapshot** button in the video controls extracts whatever frame is currently showing in the player and displays it in a new page at full resolution (scaled by HTML). The page has **Timelapse** and **Download** buttons; it does not show the weather panel.
+
+### Two paths depending on access method
+
+| Access | Mechanism | Data sent to Pi |
+|--------|-----------|-----------------|
+| Direct Pi (`192.168.x.x`, `tplinkdns`, etc.) | `POST` image to `/timelapse/DATE/frame-view` | Full JPEG (LAN only, fine) |
+| Cloudflare (`onblackberryhill.com`) | Store in `localStorage`, open `/timelapse/DATE/frame-view-client` | **Zero** — fully client-side |
+
+The Cloudflare path avoids a DoS vector: without it, every public Snapshot click would bypass the CDN and POST a large JPEG directly to the Pi.
+
+### Set key snapshot (direct access only)
+
+On direct access, the frame-view page also shows a **Set key snapshot** button that `POST`s the displayed frame to `/timelapse/DATE/set-snapshot`, saving it as `timelapses/snapshots/YYYY-MM-DD.jpg`. This replaces whatever image the timelapse daemon saved automatically and updates the thumbnail in the "All timelapses" list.
+
+### Download button
+
+Both the frame-view page and the `/snapshot` live-camera page include a **⬇ Download** button that uses the HTML5 `download` attribute on an `<a>` pointing at the embedded data URL — works on desktop and mobile without a round-trip to the server.
+
+---
+
+## Live Snapshot Page (`/snapshot`)
+
+Shows the most recent camera image with current weather (wind, cloud %, humidity, weather description).
+
+**Frame source priority:**
+1. Most recent frame from `/tmp/timelapse-frames/YYYY-MM-DD/` if a timelapse is currently recording (avoids competing RTSP connections with the daemon)
+2. Live RTSP grab via ffmpeg otherwise
+
+**Weather description** comes from Open-Meteo's real-time `weather_code` (mapped via WMO codes) so it matches the current cloud % shown next to it. The daily NWS description is used only as a fallback if the real-time call fails.
+
+---
+
+## Viewer Page Header (Direct Access)
+
+When visiting the timelapse viewer directly (not via Cloudflare), the site header shows a **(public site)** link that navigates to the same date on `https://onblackberryhill.com/timelapse/YYYY-MM-DD`. This makes it easy to check what the public/cached version looks like. The link is hidden on Cloudflare.
+
+---
+
 ## Weather Data
 
 Weather is shown per day using two sources:
 
-1. **NWS KONP** (Newport Municipal Airport) — actual observations: temperature hi/lo, precipitation, wind avg/max, humidity, conditions
-2. **Open-Meteo ERA5** — cloud cover and solar radiation; used as full fallback for older dates
+1. **NWS KONP** (Newport Municipal Airport) — actual station observations: temperature hi/lo, precipitation, wind avg/max, humidity, conditions text, and cloud cover derived from `cloudLayers` (CLR/FEW/SCT/BKN/OVC → 0/13/38/63/100 %)
+2. **Open-Meteo ERA5** — solar radiation and sunrise/sunset times; used as full fallback for older dates. ERA5 `cloud_cover_mean` is only used when NWS `cloudLayers` data is absent — ERA5 models high-altitude cloud layers that can show 100 % on days the ground observer reports "Clear".
 
-Weather is cached in `timelapses/weather/YYYY-MM-DD.json` and never re-fetched once a day's data is complete.
+**Observation timing:** Both the weather description and NWS-derived cloud cover are taken from the observation **closest to sunset time** (computed via `astral`), so they reflect timelapse conditions rather than midday.
+
+**Cache policy:** Past days' data is cached permanently in `timelapses/weather/YYYY-MM-DD.json`. Today's data is re-fetched if the cache is older than 30 minutes, so conditions stay current while the timelapse is recording.
 
 ---
 
