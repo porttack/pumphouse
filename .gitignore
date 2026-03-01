@@ -34,8 +34,11 @@ secrets.conf
 *.secret
 .env
 
-# SSL certificates (managed by certbot deploy hook)
+# SSL certificates — never commit private keys
 certs/
+cert.pem
+key.pem
+*.pem
 
 # Runtime output
 nohup.out
