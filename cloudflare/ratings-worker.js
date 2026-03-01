@@ -85,8 +85,11 @@ async function handleSnapshot(request, url) {
     },
   });
 
-  // Propagate 5-min Cache-Control to browsers for their own local cache
+  // Propagate 5-min Cache-Control to browsers for their own local cache.
+  // X-Snapshot-Worker lets you confirm in DevTools that this Worker code is
+  // actually running (vs the old Worker that just did return fetch(request)).
   const headers = new Headers(piResp.headers);
+  headers.set('X-Snapshot-Worker', 'v2');
   if (piResp.ok) {
     headers.set('Cache-Control', 'public, max-age=300');
   }
