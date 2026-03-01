@@ -57,8 +57,8 @@ def log_event(filepath, event_type, pressure_state, float_state, tank_gallons,
             f'{tank_depth:.2f}' if tank_depth else '',
             f'{tank_percentage:.1f}' if tank_percentage else '',
             f'{estimated_gallons:.2f}' if estimated_gallons is not None else '',
-            relay_status.get('bypass', ''),
-            relay_status.get('supply_override', ''),
+            relay_status.get('bypass', '') if relay_status else '',
+            relay_status.get('supply_override', '') if relay_status else '',
             notes
         ])
 
@@ -91,8 +91,8 @@ def log_snapshot(filepath, duration, tank_gallons, tank_gallons_delta, tank_data
             f'{pressure_high_percent:.1f}',
             f'{estimated_gallons:+.2f}',  # Always includes sign
             purge_count,
-            relay_status.get('bypass', ''),
-            relay_status.get('supply_override', ''),
+            relay_status.get('bypass', '') if relay_status else '',
+            relay_status.get('supply_override', '') if relay_status else '',
             occupied or '',
             f'{outdoor_temp:.1f}' if outdoor_temp is not None else '',
             f'{indoor_temp:.1f}' if indoor_temp is not None else '',

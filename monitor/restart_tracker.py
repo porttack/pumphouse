@@ -4,6 +4,7 @@ Sends at most one email per day if restarts exceed threshold.
 """
 import json
 import os
+import time
 from datetime import datetime, timedelta
 
 from monitor.config import DASHBOARD_URL
@@ -77,6 +78,11 @@ def check_and_record_restart(events_file, tracker_file=DEFAULT_TRACKER_FILE, deb
                 can_alert = False
         except ValueError:
             pass
+
+    if restart_count > RESTART_THRESHOLD:
+        # Slow down crash loops before doing anything else
+        print(f"Crash loop detected ({restart_count} restarts in 24h), sleeping 20s...")
+        time.sleep(20)
 
     if restart_count > RESTART_THRESHOLD and can_alert:
         # Log the event
