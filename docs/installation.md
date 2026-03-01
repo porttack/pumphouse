@@ -51,7 +51,7 @@ sudo systemctl restart pumphouse-monitor pumphouse-web pumphouse-timelapse
 
 **If you modify `.service` files:**
 ```bash
-sudo cp pumphouse-*.service /etc/systemd/system/
+bin/install-services.sh   # copies from terraform/services/ to /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl restart pumphouse-monitor pumphouse-web
 ```
@@ -74,7 +74,7 @@ nohup python -m monitor > output.txt 2>&1 &
 ps aux | grep monitor
 
 # View logs
-tail -f events.csv
+tail -f ~/.local/share/pumphouse/events.csv
 tail -f snapshots.csv
 
 # Stop
@@ -89,8 +89,8 @@ pkill -f "python -m monitor"
 python -m monitor [OPTIONS]
 
 Options:
-  --events FILE           Events CSV file (default: events.csv)
-  --snapshots FILE        Snapshots CSV file (default: snapshots.csv)
+  --events FILE           Events CSV file (default: ~/.local/share/pumphouse/events.csv)
+  --snapshots FILE        Snapshots CSV file (default: snapshots.csv in project dir)
   --debug                 Enable console output
   --poll-interval N       Pressure sensor poll interval in seconds (default: 5)
   --tank-interval N       Tank check interval in minutes (default: 1)
@@ -200,7 +200,7 @@ The system estimates gallons pumped from pump cycle duration.
 
 **To recalibrate:**
 1. Record actual gallons from tank level change
-2. Note `duration_seconds` from events.csv
+2. Note `duration_seconds` from `~/.local/share/pumphouse/events.csv`
 3. Calculate: `SECONDS_PER_GALLON = (duration - 30) / actual_gallons`
 4. Update in `~/.config/pumphouse/monitor.conf` or `monitor/config.py`
 

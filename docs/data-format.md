@@ -2,6 +2,18 @@
 
 CSV file formats, event types, and snapshot fields produced by `pumphouse-monitor`.
 
+## File Locations
+
+| File | Location |
+|------|----------|
+| `events.csv` | `~/.local/share/pumphouse/events.csv` |
+| `reservations.csv` | `~/.local/share/pumphouse/reservations.csv` |
+| `reservations_snapshot.csv` | `~/.local/share/pumphouse/reservations_snapshot.csv` |
+| `snapshots.csv` | project root (migration pending) |
+| `gph_cache.csv` | project root (migration pending) |
+
+Paths are defined in `monitor/config.py` as `EVENTS_FILE`, `RESERVATIONS_FILE`, etc.
+
 ---
 
 ## Events CSV (`events.csv`)
