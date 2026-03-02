@@ -310,6 +310,7 @@ def send_notification_canceled(reservation, debug=False):
         nights = reservation.get('Nights', '?')
         res_type = reservation.get('Type', 'Unknown')
         income = reservation.get('Income', '0')
+        booked_date = reservation.get('Booked Date', 'Unknown')
 
         title = f"Reservation Canceled - {guest}"
         message = (
@@ -317,7 +318,8 @@ def send_notification_canceled(reservation, debug=False):
             f"Check-out: {checkout}\n"
             f"Nights: {nights}\n"
             f"Type: {res_type}\n"
-            f"Income: ${income}"
+            f"Income: ${income}\n"
+            f"Booked: {booked_date}"
         )
 
         try:
@@ -331,11 +333,13 @@ def send_notification_canceled(reservation, debug=False):
         # Send email notification
         try:
             email_message = (
+                f"Guest: {guest}<br>"
                 f"Check-in: {checkin}<br>"
                 f"Check-out: {checkout}<br>"
                 f"Nights: {nights}<br>"
                 f"Type: {res_type}<br>"
-                f"Income: ${income}"
+                f"Income: ${income}<br>"
+                f"Booked: {booked_date}"
             )
             send_email_notification(
                 subject=f"Reservation Canceled — {guest} ({checkin})",
@@ -411,8 +415,23 @@ def send_notification_changed(current_res, old_res, changed_fields, debug=False)
                 f"<br>&nbsp;&nbsp;{field}: {old_val} → {new_val}"
                 for field, old_val, new_val in changed_fields
             )
+            old_checkin  = old_res.get('Check-In', 'Unknown')
+            old_checkout = old_res.get('Checkout', 'Unknown')
+            old_nights   = old_res.get('Nights', '?')
+            old_type     = old_res.get('Type', 'Unknown')
+            old_income   = old_res.get('Income', '0')
+            old_booked   = old_res.get('Booked Date', 'Unknown')
             email_message = (
-                f"Changes:{change_lines_html}<br><br>"
+                f"<strong>Changes:</strong>{change_lines_html}<br><br>"
+                f"<strong>Original reservation:</strong><br>"
+                f"Guest: {guest}<br>"
+                f"Check-in: {old_checkin}<br>"
+                f"Check-out: {old_checkout}<br>"
+                f"Nights: {old_nights}<br>"
+                f"Type: {old_type}<br>"
+                f"Income: ${old_income}<br>"
+                f"Booked: {old_booked}<br><br>"
+                f"<strong>Updated reservation:</strong><br>"
                 f"Check-in: {checkin}<br>"
                 f"Check-out: {checkout}<br>"
                 f"Nights: {nights}<br>"
