@@ -17,7 +17,6 @@ sudo apt install -y vim git curl
 ### Configure WiFi Networks
 
 ```bash
-
 # Rename the default "preconfigured" connection to something meaningful
 sudo nmcli connection modify "preconfigured" connection.id "OnBlackberryHill"
 ```
