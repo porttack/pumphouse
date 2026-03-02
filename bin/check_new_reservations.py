@@ -224,8 +224,9 @@ def send_notification(reservation, debug=False):
     """
     try:
         # Import notification modules
-        from monitor.config import ENABLE_NOTIFICATIONS
+        from monitor.config import ENABLE_NOTIFICATIONS, DASHBOARD_URL
         from monitor.ntfy import send_notification as ntfy_send
+        from monitor.email_notifier import send_email_notification
 
         if not ENABLE_NOTIFICATIONS:
             if debug:
@@ -259,6 +260,29 @@ def send_notification(reservation, debug=False):
             if debug:
                 print(f"ntfy notification failed: {e}")
 
+        # Send email notification
+        try:
+            email_message = (
+                f"Check-in: {checkin}<br>"
+                f"Check-out: {checkout}<br>"
+                f"Nights: {nights}<br>"
+                f"Type: {res_type}<br>"
+                f"Income: ${income}<br>"
+                f"Booked: {booked_date}"
+            )
+            send_email_notification(
+                subject=f"New Reservation — {guest} ({checkin})",
+                message=email_message,
+                priority='default',
+                dashboard_url=DASHBOARD_URL,
+                debug=debug
+            )
+            if debug:
+                print(f"✓ Sent email notification")
+        except Exception as e:
+            if debug:
+                print(f"Email notification failed: {e}")
+
     except Exception as e:
         print(f"ERROR sending notification: {e}")
 
@@ -271,8 +295,9 @@ def send_notification_canceled(reservation, debug=False):
         debug: Print debug info
     """
     try:
-        from monitor.config import ENABLE_NOTIFICATIONS
+        from monitor.config import ENABLE_NOTIFICATIONS, DASHBOARD_URL
         from monitor.ntfy import send_notification as ntfy_send
+        from monitor.email_notifier import send_email_notification
 
         if not ENABLE_NOTIFICATIONS:
             if debug:
@@ -303,6 +328,28 @@ def send_notification_canceled(reservation, debug=False):
             if debug:
                 print(f"ntfy notification failed: {e}")
 
+        # Send email notification
+        try:
+            email_message = (
+                f"Check-in: {checkin}<br>"
+                f"Check-out: {checkout}<br>"
+                f"Nights: {nights}<br>"
+                f"Type: {res_type}<br>"
+                f"Income: ${income}"
+            )
+            send_email_notification(
+                subject=f"Reservation Canceled — {guest} ({checkin})",
+                message=email_message,
+                priority='high',
+                dashboard_url=DASHBOARD_URL,
+                debug=debug
+            )
+            if debug:
+                print(f"✓ Sent canceled email notification")
+        except Exception as e:
+            if debug:
+                print(f"Email notification failed: {e}")
+
     except Exception as e:
         print(f"ERROR sending canceled notification: {e}")
 
@@ -318,8 +365,9 @@ def send_notification_changed(current_res, old_res, changed_fields, debug=False)
         debug: Print debug info
     """
     try:
-        from monitor.config import ENABLE_NOTIFICATIONS
+        from monitor.config import ENABLE_NOTIFICATIONS, DASHBOARD_URL
         from monitor.ntfy import send_notification as ntfy_send
+        from monitor.email_notifier import send_email_notification
 
         if not ENABLE_NOTIFICATIONS:
             if debug:
@@ -356,6 +404,33 @@ def send_notification_changed(current_res, old_res, changed_fields, debug=False)
         except Exception as e:
             if debug:
                 print(f"ntfy notification failed: {e}")
+
+        # Send email notification
+        try:
+            change_lines_html = ''.join(
+                f"<br>&nbsp;&nbsp;{field}: {old_val} → {new_val}"
+                for field, old_val, new_val in changed_fields
+            )
+            email_message = (
+                f"Changes:{change_lines_html}<br><br>"
+                f"Check-in: {checkin}<br>"
+                f"Check-out: {checkout}<br>"
+                f"Nights: {nights}<br>"
+                f"Type: {res_type}<br>"
+                f"Income: ${income}"
+            )
+            send_email_notification(
+                subject=f"Reservation Changed — {guest} ({checkin})",
+                message=email_message,
+                priority='default',
+                dashboard_url=DASHBOARD_URL,
+                debug=debug
+            )
+            if debug:
+                print(f"✓ Sent changed email notification")
+        except Exception as e:
+            if debug:
+                print(f"Email notification failed: {e}")
 
     except Exception as e:
         print(f"ERROR sending changed notification: {e}")
