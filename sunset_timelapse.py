@@ -46,8 +46,12 @@ CROP_BOTTOM      = 120   # pixels to remove from the bottom of each frame at cap
                          # (source/video pixels, not display pixels; 0 = no crop)
                          # Camera is 1080p (1920×1080); 120px ≈ 11% of frame height.
                          # Removes the fire circle area for privacy.
-SNAPSHOT_OFFSET_MINUTES = 35   # minutes after sunset to grab the snapshot JPEG
+SNAPSHOT_MINUTES_BEFORE_SUNSET = 25   # minutes before sunset to grab the snapshot JPEG
 SNAPSHOT_DIR     = TIMELAPSE_DIR / 'snapshots'
+
+# Zoom crop: bottom half of frame, horizontal 35%–85%
+# Source frame after CROP_BOTTOM removal: 1920×960
+ZOOM_CROP        = 'crop=960:480:672:480'   # w:h:x:y  (50% width × 50% height)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -137,6 +141,31 @@ def assemble_timelapse(frames_dir, output_path, fps=OUTPUT_FPS):
     return True
 
 
+def _generate_zoom(source: Path) -> None:
+    """Generate a zoomed crop variant of a finished timelapse MP4.
+    Output is source_stem + '_zoom.mp4', e.g. 2026-03-04_1808_zoom.mp4.
+    Skips silently if the zoom file already exists."""
+    zoom_path = source.with_name(source.stem + '_zoom.mp4')
+    if zoom_path.exists():
+        return
+    tmp = zoom_path.with_suffix('.tmp.mp4')
+    cmd = [
+        'ffmpeg', '-y', '-i', str(source),
+        '-vf', ZOOM_CROP,
+        '-c:v', 'libx264', '-crf', str(OUTPUT_CRF), '-preset', 'fast',
+        '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
+        str(tmp),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        log.error(f"Zoom generation failed for {source.name}: {result.stderr[-200:]}")
+        tmp.unlink(missing_ok=True)
+        return
+    tmp.rename(zoom_path)
+    mb = zoom_path.stat().st_size / 1024 / 1024
+    log.info(f"Zoom: {zoom_path.name} ({mb:.1f} MB)")
+
+
 def cleanup_old(retention_days=RETENTION_DAYS, weekly_years=WEEKLY_YEARS):
     """
     Tiered retention:
@@ -189,21 +218,39 @@ def cleanup_old(retention_days=RETENTION_DAYS, weekly_years=WEEKLY_YEARS):
             log.info(f"Removed (weekly dedup): {f.name}")
 
 
-def run_todays_timelapse():
+def run_todays_timelapse(start_dt=None, end_dt=None, frames_root=None):
     """
-    Capture frames via RTSP for the sunset window, assembling a preview
-    MP4 every PREVIEW_INTERVAL seconds (in a background thread so frame
-    capture is never paused). Final assembly runs after ffmpeg exits.
+    Capture frames via RTSP for the sunset window (or a custom window when
+    start_dt/end_dt are provided), assembling a preview MP4 every
+    PREVIEW_INTERVAL seconds (in a background thread so frame capture is
+    never paused). Final assembly runs after ffmpeg exits.
+
+    start_dt / end_dt : timezone-aware datetimes for a custom window (e.g.
+                        moonset / eclipse). When omitted the window is computed
+                        from today's sunset as usual.
+    frames_root       : override the parent directory for captured frames.
+                        Defaults to /tmp/timelapse-frames (tmpfs, no SD wear).
+                        Pass TIMELAPSE_DIR / 'frames' for long captures that
+                        would exceed the 1.9 GB tmpfs limit.
     """
     tz = ZoneInfo(LOCATION_TZ)
     now = datetime.now(tz)
-    sunset = get_sunset(now.date())
-    start_time = sunset - timedelta(minutes=WINDOW_BEFORE)
-    end_time   = sunset + timedelta(minutes=WINDOW_AFTER)
-    duration   = int((end_time - start_time).total_seconds())
+    custom = start_dt is not None and end_dt is not None
 
-    log.info(f"Sunset: {sunset.strftime('%H:%M %Z')}  "
-             f"Window: {start_time.strftime('%H:%M')}–{end_time.strftime('%H:%M')}")
+    if custom:
+        start_time = start_dt
+        end_time   = end_dt
+        label_hhmm = start_dt.strftime('%H%M')
+        log.info(f"Custom window: {start_time.strftime('%H:%M')}–{end_time.strftime('%H:%M %Z')}")
+    else:
+        sunset     = get_sunset(now.date())
+        start_time = sunset - timedelta(minutes=WINDOW_BEFORE)
+        end_time   = sunset + timedelta(minutes=WINDOW_AFTER)
+        label_hhmm = sunset.strftime('%H%M')
+        log.info(f"Sunset: {sunset.strftime('%H:%M %Z')}  "
+                 f"Window: {start_time.strftime('%H:%M')}–{end_time.strftime('%H:%M')}")
+
+    duration = int((end_time - start_time).total_seconds())
 
     # Sleep until the window opens
     wait = (start_time - datetime.now(tz)).total_seconds()
@@ -217,10 +264,10 @@ def run_todays_timelapse():
         f"/cam/realmonitor?channel=1&subtype=0"
     )
 
-    date_str   = now.strftime('%Y-%m-%d')
-    sunset_hhmm = sunset.strftime('%H%M')
-    frames_dir = Path('/tmp') / 'timelapse-frames' / date_str  # tmpfs → no SD wear
-    output     = TIMELAPSE_DIR / f'{date_str}_{sunset_hhmm}.mp4'
+    date_str   = start_time.strftime('%Y-%m-%d')
+    _frames_root = Path(frames_root) if frames_root else Path('/tmp') / 'timelapse-frames'
+    frames_dir = _frames_root / f'{date_str}_{label_hhmm}'  # unique per run; tmpfs or disk
+    output     = TIMELAPSE_DIR / f'{date_str}_{label_hhmm}.mp4'
     frames_dir.mkdir(parents=True, exist_ok=True)
 
     effective_interval = max(1, FRAME_INTERVAL // SLOWDOWN_FACTOR)
@@ -276,19 +323,26 @@ def run_todays_timelapse():
             t.join(timeout=120)
         log.info("Final assembly …")
         assemble_timelapse(frames_dir, output)
+        _generate_zoom(output)
 
-        # Save a snapshot JPEG from the frame closest to sunset + SNAPSHOT_OFFSET_MINUTES.
-        # Done here (after assembly, before frame cleanup) so frames are still available.
+        # Save a snapshot JPEG from the assembled frames.
+        # Custom windows (e.g. moonset): midpoint of window; never overwrite an
+        # existing snapshot so a later sunset run can always claim the date image.
+        # Standard sunset run: always write, overwriting any earlier custom snapshot.
         SNAPSHOT_DIR.mkdir(exist_ok=True)
         snapshot_path = SNAPSHOT_DIR / f'{date_str}.jpg'
-        if not snapshot_path.exists() and frames:
-            offset_secs = WINDOW_BEFORE * 60 + SNAPSHOT_OFFSET_MINUTES * 60
-            frame_idx   = max(0, min(int(offset_secs / effective_interval), len(frames) - 2))
+        if frames and (not custom or not snapshot_path.exists()):
+            if custom:
+                offset_secs = duration // 2
+            else:
+                offset_secs = (WINDOW_BEFORE - SNAPSHOT_MINUTES_BEFORE_SUNSET) * 60
+            frame_idx = max(0, min(int(offset_secs / effective_interval), len(frames) - 2))
             shutil.copy2(str(frames[frame_idx]), str(snapshot_path))
             log.info(f"Saved snapshot: frame {frame_idx} → {snapshot_path.name}")
 
         cleanup_old(RETENTION_DAYS)
-        _send_timelapse_email(snapshot_path, date_str)
+        if not custom:
+            _send_timelapse_email(snapshot_path, date_str)
         _purge_timelapse_cache()
 
     finally:
@@ -442,4 +496,32 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description='Pumphouse timelapse daemon / one-shot capture')
+    parser.add_argument('--once', action='store_true',
+                        help='Run a single one-shot capture then exit (daemon mode otherwise)')
+    parser.add_argument('--start', metavar='HH:MM',
+                        help='Start time for --once mode in local time, e.g. 05:00')
+    parser.add_argument('--end', metavar='HH:MM',
+                        help='End time for --once mode in local time, e.g. 07:00')
+    parser.add_argument('--disk', action='store_true',
+                        help='Write frames to disk instead of tmpfs (required for captures > ~4 hrs)')
+    args = parser.parse_args()
+
+    if args.once:
+        if not args.start or not args.end:
+            parser.error('--once requires --start and --end')
+        tz = ZoneInfo(LOCATION_TZ)
+        today = datetime.now(tz).date()
+        def _hhmm(s):
+            h, m = map(int, s.split(':'))
+            return datetime(today.year, today.month, today.day, h, m, tzinfo=tz)
+        start_dt = _hhmm(args.start)
+        end_dt   = _hhmm(args.end)
+        frames_root = TIMELAPSE_DIR / 'frames' if args.disk else None
+        log.info(f"One-shot timelapse: {start_dt.strftime('%H:%M')}–{end_dt.strftime('%H:%M %Z')}"
+                 f"  frames={'disk' if args.disk else 'tmpfs'}")
+        TIMELAPSE_DIR.mkdir(parents=True, exist_ok=True)
+        run_todays_timelapse(start_dt=start_dt, end_dt=end_dt, frames_root=frames_root)
+    else:
+        main()

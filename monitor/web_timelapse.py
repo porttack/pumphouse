@@ -543,12 +543,16 @@ def _timelapse_dates():
 
 
 def _mp4_for_date(date_str):
-    """Return the MP4 filename (basename) for a given YYYY-MM-DD date, or None."""
+    """Return the MP4 filename (basename) for a given YYYY-MM-DD date, or None.
+    When multiple files exist for the same date (e.g. a moonset at 0500 and a
+    sunset at 1804), the one with the latest embedded time is returned so the
+    sunset is always the primary view; earlier files remain accessible by direct
+    URL (e.g. /timelapse/2026-03-03_0500.mp4)."""
     import glob as _glob
-    # Prefer new-style name with sunset time embedded
-    files = _glob.glob(os.path.join(TIMELAPSE_DIR, f'{date_str}_????.mp4'))
+    # Prefer new-style name with time embedded; sort so latest time wins
+    files = sorted(_glob.glob(os.path.join(TIMELAPSE_DIR, f'{date_str}_????.mp4')))
     if files:
-        return os.path.basename(files[0])
+        return os.path.basename(files[-1])
     # Fall back to legacy name
     legacy = os.path.join(TIMELAPSE_DIR, f'{date_str}.mp4')
     return os.path.basename(legacy) if os.path.exists(legacy) else None
@@ -739,7 +743,7 @@ def timelapse_snapshot(date_str):
     if not os.path.exists(path):
         return Response('No snapshot for this date.', status=404)
     return send_file(path, mimetype='image/jpeg',
-                     max_age=365 * 24 * 3600)   # immutable once written
+                     max_age=3600, conditional=True)  # 1hr CDN TTL; ETag allows revalidation after set-snapshot
 
 
 @timelapse_bp.route('/timelapse/<date_str>/frame-view-client')
@@ -1000,7 +1004,7 @@ def timelapse_view(date_or_file):
     """
     import re
     # Raw MP4 request (new-style or legacy)
-    if re.fullmatch(r'\d{4}-\d{2}-\d{2}(_\d{4})?\.mp4', date_or_file):
+    if re.fullmatch(r'\d{4}-\d{2}-\d{2}(_[\w]+)?\.mp4', date_or_file):
         path = os.path.join(TIMELAPSE_DIR, date_or_file)
         if not os.path.exists(path):
             return Response(f'Not found: {date_or_file}', status=404)
@@ -1097,6 +1101,12 @@ def timelapse_view(date_or_file):
 
     is_direct    = 'onblackberryhill.com' not in request.host.lower()
     is_direct_js = 'true' if is_direct else 'false'
+    # Zoom version: same base name with _zoom suffix
+    _zoom_name = (mp4_name[:-4] + '_zoom.mp4') if mp4_name else None
+    _zoom_path = os.path.join(TIMELAPSE_DIR, _zoom_name) if _zoom_name else None
+    zoom_name  = _zoom_name if (_zoom_path and os.path.exists(_zoom_path)) else None
+    zoom_btn   = ('<button id="zoom-btn" class="speed-btn dl-btn">&#128269; Zoom</button>'
+                  if zoom_name else '')
     now_btn      = '<a href="/snapshot" class="speed-btn dl-btn">Now</a>'
     dash_btn     = '<a href="/" class="speed-btn dl-btn">Dashboard</a>' if is_direct else ''
     public_link  = (f'&middot; (<a href="https://onblackberryhill.com/timelapse/{date_str}">public site</a>)'
@@ -1110,13 +1120,14 @@ def timelapse_view(date_or_file):
         f'<button class="speed-btn" data-rate="0.25">&#188;x</button>'
         f'<button class="speed-btn" data-rate="0.5">&#189;x</button>'
         f'<button class="speed-btn" data-rate="1">1x</button>'
-        f'<button class="speed-btn active" data-rate="2">2x</button>'
-        f'<button class="speed-btn" data-rate="4">4x</button>'
+        f'<button class="speed-btn" data-rate="2">2x</button>'
+        f'<button class="speed-btn active" data-rate="4">4x</button>'
         f'<button class="speed-btn" data-rate="8">8x</button>'
         f'</div>'
         f'<div class="ctrl-btns">'
         f'<button id="pause-btn" class="speed-btn pause-btn">&#9646;&#9646; Pause</button>'
         f'<button id="dl-btn" class="speed-btn dl-btn">&#8681; Snapshot</button>'
+        f'{zoom_btn}'
         f'{now_btn}'
         f'{dash_btn}'
         f'</div>'
@@ -1345,7 +1356,7 @@ def timelapse_view(date_or_file):
     &middot; <a href="https://aquarium.org/live-cameras/seabird-cam/" target="_blank" rel="noopener">Seabird Cam</a>
     &middot; <a href="https://www.surfline.com/surf-report/agate-beach/584204214e65fad6a7709d27" target="_blank" rel="noopener">Beach Cam</a>
   </div>
-  <details>
+  <details open>
     <summary>All timelapses ({len(dates)})</summary>
     <ul>{list_items}</ul>
   </details>
@@ -1362,7 +1373,7 @@ def timelapse_view(date_or_file):
       try {{ localStorage.setItem('tl_speed', rate); }} catch(e) {{}}
     }}
     (function() {{
-      const s = parseFloat(localStorage.getItem('tl_speed') || '2');
+      const s = parseFloat(localStorage.getItem('tl_speed') || '4');
       if (vid && !isNaN(s)) setSpeed(s);
     }})();
     document.querySelectorAll('.speed-btn[data-rate]').forEach(btn =>
@@ -1426,6 +1437,7 @@ def timelapse_view(date_or_file):
     // Enter       : navigate to kbd-focused list item
     // Space       : pause / play video
     // 1 2 4 8     : set playback speed (1x 2x 4x 8x)
+    // z           : toggle zoom view (persists across days)
     // Shift+X     : reset all ratings for this date (direct Pi access only)
     (function() {{
       const prev          = {prev_js};
@@ -1491,6 +1503,9 @@ def timelapse_view(date_or_file):
         }}
         if (['1','2','4','8'].includes(e.key) && e.target.tagName !== 'INPUT') {{
           setSpeed(parseFloat(e.key));
+        }}
+        if (e.key === 'z' && !e.ctrlKey && !e.metaKey && e.target.tagName !== 'INPUT') {{
+          if (typeof window.toggleZoom === 'function') window.toggleZoom();
         }}
         if (e.key === 'X' && e.shiftKey && !e.ctrlKey && !e.metaKey && isDirectAccess) {{
           e.preventDefault();
@@ -1644,6 +1659,41 @@ def timelapse_view(date_or_file):
           }});
         }});
       }}
+    }})();
+    // Zoom toggle — swaps between full-frame and cropped version.
+    // State persisted in localStorage so it survives day navigation.
+    // Exposed as window.toggleZoom for the keyboard handler.
+    (function() {{
+      const zoomBtn = document.getElementById('zoom-btn');
+      const vid     = document.getElementById('vid');
+      if (!zoomBtn || !vid) return;
+      const origSrc = '/timelapse/{mp4_name}';
+      const zoomSrc = '/timelapse/{zoom_name}';
+      let zoomed = localStorage.getItem('tl_zoom') === 'true';
+
+      function applyZoom() {{
+        // Read rate from localStorage as fallback — vid.playbackRate may not yet
+        // reflect the saved speed if called during initial page load.
+        const rate = vid.playbackRate || parseFloat(localStorage.getItem('tl_speed') || '4');
+        vid.src = zoomed ? zoomSrc : origSrc;
+        vid.load();
+        // Wait for canplay before playing — calling play() immediately after load()
+        // races against buffering and fails silently, which causes autoplay to fall
+        // back to the original src attribute from the HTML.
+        vid.addEventListener('canplay', function() {{
+          vid.playbackRate = rate;
+          vid.play().catch(function() {{}});
+        }}, {{ once: true }});
+        zoomBtn.classList.toggle('active', zoomed);
+        zoomBtn.innerHTML = zoomed ? '&#128269; Full' : '&#128269; Zoom';
+        try {{ localStorage.setItem('tl_zoom', zoomed ? 'true' : 'false'); }} catch(e) {{}}
+      }}
+
+      // Restore preference on page load
+      if (zoomed) applyZoom();
+
+      window.toggleZoom = function() {{ zoomed = !zoomed; applyZoom(); }};
+      zoomBtn.addEventListener('click', window.toggleZoom);
     }})();
   </script>
 </body>
