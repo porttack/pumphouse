@@ -8,11 +8,9 @@ PROJECT=/home/pi/src/pumphouse
 VENV=$PROJECT/venv/bin/python3
 
 # --- Reservation scraper ---
-# Scrape TrackHS reservations 3× daily and notify on new/changed bookings.
+# Scrape TrackHS reservations 5× daily and notify on new/changed bookings.
 # Data is written to ~/.local/share/pumphouse/ by the scripts in bin/.
-0  5 * * * $PROJECT/bin/update_reservations.sh >> $PROJECT/reservation_updates.log 2>&1
-0 16 * * * $PROJECT/bin/update_reservations.sh >> $PROJECT/reservation_updates.log 2>&1
-0 22 * * * $PROJECT/bin/update_reservations.sh >> $PROJECT/reservation_updates.log 2>&1
+0 5,12,16,20,23 * * * $PROJECT/bin/update_reservations.sh >> $PROJECT/reservation_updates.log 2>&1
 
 # --- System health monitor ---
 # Log CPU temp, throttling, disk, memory every 5 minutes.
