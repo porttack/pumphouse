@@ -18,6 +18,7 @@ from monitor.config import (
     EPAPER_CONSERVE_WATER_THRESHOLD, EPAPER_OWNER_STAY_TYPES,
     EPAPER_DEFAULT_HOURS_TENANT, EPAPER_DEFAULT_HOURS_OTHER,
     EPAPER_LOW_WATER_HOURS_THRESHOLD, EPAPER_LOW_WATER_HOURS,
+    EPAPER_FORECAST_DAYS,
     DASHBOARD_HIDE_EVENT_TYPES,
     DASHBOARD_MAX_EVENTS, DASHBOARD_DEFAULT_HOURS, DASHBOARD_SNAPSHOT_COUNT,
     SECRET_OVERRIDE_ON_TOKEN, SECRET_OVERRIDE_OFF_TOKEN,
@@ -574,6 +575,8 @@ def epaper_bmp():
     """
     from PIL import Image, ImageDraw, ImageFont, ImageChops
     from monitor.occupancy import load_reservations, is_occupied, get_next_reservation, get_checkin_datetime
+    from monitor.weather_api import forecast_weather_codes
+    from monitor.weather_icons import draw_weather_icon as _draw_wx_icon
 
     hours_explicit = request.args.get('hours', type=int)  # None if not provided
     tenant_override = request.args.get('tenant')    # "yes" or "no"
@@ -860,6 +863,26 @@ def epaper_bmp():
 
             for i in range(len(points) - 1):
                 draw.line([points[i], points[i + 1]], fill=1, width=2 * scale)
+
+    # Forecast icons: top-right of graph (XOR — inverts over whatever is behind)
+    forecast_codes = forecast_weather_codes(EPAPER_FORECAST_DAYS) if EPAPER_FORECAST_DAYS else []
+    if forecast_codes:
+        icon_sz  = s(13)
+        icon_gap = s(2)
+        n        = len(forecast_codes)
+        strip_w  = n * icon_sz + (n - 1) * icon_gap
+        strip_h  = icon_sz
+        strip_img  = Image.new('1', (strip_w, strip_h), 0)  # black bg, white icons
+        strip_draw = ImageDraw.Draw(strip_img)
+        for i, code in enumerate(forecast_codes):
+            cx = i * (icon_sz + icon_gap) + icon_sz // 2
+            cy = icon_sz // 2
+            _draw_wx_icon(strip_draw, code, cx, cy, icon_sz, 1)
+        ix = graph_right - strip_w - s(2)
+        iy = graph_top + s(2)
+        region = img.crop((ix, iy, ix + strip_w, iy + strip_h))
+        region = ImageChops.logical_xor(region, strip_img)
+        img.paste(region, (ix, iy))
 
     # Outside temperature + current weather description (inverted) at top-left of graph
     outdoor_temp_f = None

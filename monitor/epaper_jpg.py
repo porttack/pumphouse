@@ -38,6 +38,7 @@ from monitor.config import (
     EPAPER_CONSERVE_WATER_THRESHOLD,
     EPAPER_DEFAULT_HOURS_OTHER,
     EPAPER_DEFAULT_HOURS_TENANT,
+    EPAPER_FORECAST_DAYS,
     EPAPER_LOW_WATER_HOURS,
     EPAPER_LOW_WATER_HOURS_THRESHOLD,
     EPAPER_OWNER_STAY_TYPES,
@@ -52,7 +53,8 @@ from monitor.occupancy import (
     load_reservations,
 )
 from monitor.tank import get_tank_data
-from monitor.weather_api import current_weather_desc
+from monitor.weather_api import current_weather_desc, forecast_weather_codes
+from monitor.weather_icons import draw_weather_icon_color
 
 # ── Camera / timelapse paths ───────────────────────────────────────────────
 _FRAME_BASE    = pathlib.Path('/tmp/timelapse-frames')
@@ -447,6 +449,20 @@ def render_epaper_jpg(
         wb = draw.textbbox((0, 0), weather_desc, font=font_small)
         draw.text((graph_left + pad - wb[0], py - wb[1]), weather_desc, font=font_small, fill=WHITE)
         py += (wb[3] - wb[1]) + s(3)
+
+    # ── Forecast icons: top-right of graph (full colour, no backing needed) ─
+    forecast_codes = forecast_weather_codes(EPAPER_FORECAST_DAYS) if EPAPER_FORECAST_DAYS else []
+    if forecast_codes:
+        icon_sz  = s(14)
+        icon_gap = s(3)
+        n        = len(forecast_codes)
+        strip_w  = n * icon_sz + (n - 1) * icon_gap
+        ix       = graph_right - strip_w - s(3)
+        iy       = graph_top   + s(3)
+        for i, code in enumerate(forecast_codes):
+            cx = ix + i * (icon_sz + icon_gap) + icon_sz // 2
+            cy = iy + icon_sz // 2
+            draw_weather_icon_color(draw, code, cx, cy, icon_sz)
 
     # "Override ON" label when tenant=no is explicit and supply override is active
     if tenant_override == 'no':

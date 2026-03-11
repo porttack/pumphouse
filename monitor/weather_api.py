@@ -39,6 +39,38 @@ except Exception:
     pass
 
 _weather_desc_cache: dict = {'desc': None, 'ts': 0.0}
+_forecast_cache: dict = {'codes': None, 'ts': 0.0}
+
+
+def forecast_weather_codes(days: int = 5) -> list:
+    """Return a list of WMO weather codes for today + next (days-1) days.
+
+    Fetches from the Open-Meteo daily forecast endpoint (same lat/lon already
+    used by current_weather_desc).  Cached for 30 minutes.  Returns an empty
+    list on failure.
+    """
+    now = _time.time()
+    if _forecast_cache['codes'] is not None and now - _forecast_cache['ts'] < 1800:
+        return _forecast_cache['codes'][:days]
+
+    codes: list = []
+    try:
+        url = (
+            'https://api.open-meteo.com/v1/forecast'
+            '?latitude=44.6368&longitude=-124.0535'
+            f'&daily=weather_code&forecast_days={days}'
+            '&timezone=America%2FLos_Angeles'
+        )
+        with _ureq.urlopen(url, timeout=10) as resp:
+            data = _json.loads(resp.read())
+        codes = [int(c) for c in data.get('daily', {}).get('weather_code', [])]
+    except Exception:
+        pass
+
+    if codes:
+        _forecast_cache['codes'] = codes
+        _forecast_cache['ts'] = now
+    return codes[:days]
 
 
 def current_weather_desc():
