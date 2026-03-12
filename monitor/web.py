@@ -1035,7 +1035,7 @@ def water_status():
         img_html = f'<img src="/api/epaper.jpg?{img_param}" alt="Water tank level graph">'
         extra_links = ''
     else:
-        img_html = f'<a href="{dashboard_url}" target="_blank" style="display:block;"><img src="/api/epaper.jpg?{img_param}" alt="Water tank level graph"></a>'
+        img_html = f'<a href="{dashboard_url}" style="display:block;"><img src="/api/epaper.jpg?{img_param}" alt="Water tank level graph"></a>'
         extra_links = (
             '\n    <span>&bull;</span>'
             '\n    <a href="/">Dashboard</a>'
