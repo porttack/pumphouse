@@ -231,8 +231,9 @@
             </div>
             {% endif %}
             <div style="display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap;">
-                <img src="/api/epaper.jpg?tenant=no" alt="E-paper display"
-                     style="width:100%; max-width:500px; border-radius:3px; flex-shrink:0;">
+                <a href="https://onblackberryhill2.tplinkdns.com:6443/?hours=120&totals=income" target="_blank" style="flex-shrink:0; width:100%; max-width:500px; display:block;">
+                <img src="/api/epaper.jpg?tenant=no&hours={{ hours }}" alt="E-paper display"
+                     style="width:100%; border-radius:3px; display:block;"></a>
                 <img src="/timelapse/latest.jpg" alt="Most recent sunset"
                      style="display:none; border-radius:3px;"
                      id="sunset-snap"

@@ -39,6 +39,7 @@ from monitor.config import (
     EPAPER_DEFAULT_HOURS_OTHER,
     EPAPER_DEFAULT_HOURS_TENANT,
     EPAPER_FORECAST_DAYS,
+    EPAPER_MIN_GRAPH_RANGE_PCT,
     EPAPER_LOW_WATER_HOURS,
     EPAPER_LOW_WATER_HOURS_THRESHOLD,
     EPAPER_OWNER_STAY_TYPES,
@@ -164,6 +165,7 @@ def render_epaper_jpg(
     tenant_override: str | None = None,   # "yes" | "no" | None
     occupied_override: str | None = None, # "yes" | "no" | None
     threshold_override: int | None = None,
+    public_mode: bool = False,  # strip checkin/checkout info (for public /water page)
     scale: int = 4,
     snapshots_csv: str = 'snapshots.csv',
     reservations_csv = None,
@@ -365,7 +367,7 @@ def render_epaper_jpg(
     # ── Y-axis range ─────────────────────────────────────────────────────
     g_min_raw = min(graph_gallons) if len(graph_gallons) >= 2 else 0.0
     g_max_raw = max(graph_gallons) if len(graph_gallons) >= 2 else 0.0
-    min_range = TANK_CAPACITY_GALLONS * 0.05
+    min_range = TANK_CAPACITY_GALLONS * (EPAPER_MIN_GRAPH_RANGE_PCT / 100)
     if g_max_raw - g_min_raw < min_range:
         mid       = (g_min_raw + g_max_raw) / 2
         g_min_raw = mid - min_range / 2
@@ -472,8 +474,8 @@ def render_epaper_jpg(
         except Exception:
             pass
 
-    # Occupancy text centred near graph bottom (owner/unoccupied mode only)
-    if not is_tenant:
+    # Occupancy text centred near graph bottom (owner/unoccupied mode only, not public)
+    if not is_tenant and not public_mode:
         def _day_suffix(dt: datetime) -> str:
             today = datetime.now().date()
             if dt.date() == today:
@@ -504,8 +506,8 @@ def render_epaper_jpg(
             occ_text, font=font_small, fill=WHITE,
         )
 
-    # ── "Save Water" overlay (white text, owner/non-tenant low-water) ────
-    if tank_is_low and not is_tenant:
+    # ── "Save Water" overlay (white text; shown to owner, non-tenant, and public) ────
+    if tank_is_low and (not is_tenant or public_mode):
         warn_text = 'Save Water'
         wb = draw.textbbox((0, 0), warn_text, font=font_large)
         ww, wh = wb[2] - wb[0], wb[3] - wb[1]

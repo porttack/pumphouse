@@ -139,6 +139,7 @@ EPAPER_DEFAULT_HOURS_OTHER = 72  # Default graph hours for owner or unoccupied
 EPAPER_LOW_WATER_HOURS_THRESHOLD = 75  # Tank % at or below which switches to extended graph (None to disable)
 EPAPER_LOW_WATER_HOURS = 168  # Graph hours when tank is below threshold (168 = 7 days)
 EPAPER_FORECAST_DAYS = 7      # Days of forecast icons to show (0 = disabled)
+EPAPER_MIN_GRAPH_RANGE_PCT = 12  # Minimum Y-axis span as % of tank capacity (prevents compressed graphs)
 
 # Data directory (XDG Base Directory: ~/.local/share/pumphouse)
 DATA_DIR = Path.home() / '.local' / 'share' / 'pumphouse'

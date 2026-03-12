@@ -18,7 +18,7 @@ from monitor.config import (
     EPAPER_CONSERVE_WATER_THRESHOLD, EPAPER_OWNER_STAY_TYPES,
     EPAPER_DEFAULT_HOURS_TENANT, EPAPER_DEFAULT_HOURS_OTHER,
     EPAPER_LOW_WATER_HOURS_THRESHOLD, EPAPER_LOW_WATER_HOURS,
-    EPAPER_FORECAST_DAYS,
+    EPAPER_FORECAST_DAYS, EPAPER_MIN_GRAPH_RANGE_PCT,
     DASHBOARD_HIDE_EVENT_TYPES,
     DASHBOARD_MAX_EVENTS, DASHBOARD_DEFAULT_HOURS, DASHBOARD_SNAPSHOT_COUNT,
     SECRET_OVERRIDE_ON_TOKEN, SECRET_OVERRIDE_OFF_TOKEN,
@@ -795,8 +795,8 @@ def epaper_bmp():
     g_max_raw = max(graph_gallons) if len(graph_gallons) >= 2 else 0
     g_range_raw = g_max_raw - g_min_raw
 
-    # Enforce minimum 5% of tank capacity between top and bottom
-    min_range = TANK_CAPACITY_GALLONS * 0.05
+    # Enforce minimum range as % of tank capacity between top and bottom
+    min_range = TANK_CAPACITY_GALLONS * (EPAPER_MIN_GRAPH_RANGE_PCT / 100)
     if g_range_raw < min_range:
         mid = (g_min_raw + g_max_raw) / 2
         g_min_raw = mid - min_range / 2
@@ -1011,9 +1011,110 @@ def epaper_jpg():
         tenant_override=request.args.get('tenant'),
         occupied_override=request.args.get('occupied'),
         threshold_override=request.args.get('threshold', type=int),
+        public_mode=(request.args.get('public') == 'yes'),
         scale=max(1, min(8, request.args.get('scale', 4, type=int))),
     )
     return send_file(buf, mimetype='image/jpeg', download_name='epaper.jpg')
+
+
+@app.route('/water')
+def water_status():
+    """
+    Public-facing water tank status page for tenants and guests.
+    Shows current tank level and recent history with no occupancy information.
+    Auto-refreshes every 10 minutes.
+
+    Via Cloudflare (CF-Ray header present): public=yes mode, no dashboard link.
+    Direct Pi access (no CF-Ray): tenant=no mode, dashboard link shown.
+    """
+    via_cloudflare = bool(request.headers.get('CF-Ray'))
+    img_param = 'public=yes' if via_cloudflare else 'tenant=no'
+    dashboard_url = 'https://onblackberryhill2.tplinkdns.com:6443/?hours=120&totals=income'
+
+    if via_cloudflare:
+        img_html = f'<img src="/api/epaper.jpg?{img_param}" alt="Water tank level graph">'
+        extra_links = ''
+    else:
+        img_html = f'<a href="{dashboard_url}" target="_blank" style="display:block;"><img src="/api/epaper.jpg?{img_param}" alt="Water tank level graph"></a>'
+        extra_links = (
+            '\n    <span>&bull;</span>'
+            '\n    <a href="/">Dashboard</a>'
+            '\n    <span>&bull;</span>'
+            '\n    <a href="https://onblackberryhill.com/water" target="_blank">Public view</a>'
+            '\n    <span>&bull;</span>'
+            f'\n    <a href="{AMBIENT_WEATHER_DASHBOARD_URL}" target="_blank">Weather</a>'
+        )
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="600">
+  <title>Water Status &mdash; onblackberryhill.com</title>
+  <style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      background: #1a2440;
+      color: #cdd8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 24px 16px;
+      gap: 20px;
+    }}
+    h1 {{
+      font-size: 1.2rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: #8fb3e8;
+      text-transform: uppercase;
+    }}
+    .card {{
+      background: #243060;
+      border-radius: 12px;
+      padding: 12px;
+      max-width: 640px;
+      width: 100%;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    }}
+    .card img {{
+      width: 100%;
+      height: auto;
+      border-radius: 6px;
+      display: block;
+    }}
+    .links {{
+      font-size: 0.82rem;
+      color: #6a82b0;
+      text-align: center;
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }}
+    .links a {{ color: #7aa4d8; text-decoration: none; }}
+    .links a:hover {{ text-decoration: underline; }}
+  </style>
+</head>
+<body>
+  <h1>Water Tank &mdash; onblackberryhill.com</h1>
+  <div class="card">
+    {img_html}
+  </div>
+  <div class="links">
+    <span>Updates every 10 minutes</span>
+    <span>&bull;</span>
+    <a href="/timelapse">Timelapse</a>
+    <span>&bull;</span>
+    <a href="/api/epaper.jpg?{img_param}">Image only</a>{extra_links}
+  </div>
+</body>
+</html>"""
+    from flask import Response
+    return Response(html, mimetype='text/html')
 
 
 @app.route('/')
