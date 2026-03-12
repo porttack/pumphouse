@@ -95,7 +95,8 @@ def snapshot():
             return Response(f'Error: {e}', status=503)
 
     if info == 0:
-        return Response(jpeg_bytes, status=200, mimetype='image/jpeg')
+        return Response(jpeg_bytes, status=200, mimetype='image/jpeg',
+                        headers={'Content-Length': str(len(jpeg_bytes))})
 
     # --- HTML page with weather panel ---
     try:
