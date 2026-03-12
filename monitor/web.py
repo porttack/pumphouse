@@ -18,7 +18,7 @@ from monitor.config import (
     EPAPER_CONSERVE_WATER_THRESHOLD, EPAPER_OWNER_STAY_TYPES,
     EPAPER_DEFAULT_HOURS_TENANT, EPAPER_DEFAULT_HOURS_OTHER,
     EPAPER_LOW_WATER_HOURS_THRESHOLD, EPAPER_LOW_WATER_HOURS,
-    EPAPER_FORECAST_DAYS, EPAPER_MIN_GRAPH_RANGE_PCT,
+    EPAPER_FORECAST_DAYS, EPAPER_MIN_GRAPH_RANGE_PCT, EPAPER_MAX_GRAPH_PCT,
     DASHBOARD_HIDE_EVENT_TYPES,
     DASHBOARD_MAX_EVENTS, DASHBOARD_DEFAULT_HOURS, DASHBOARD_SNAPSHOT_COUNT,
     SECRET_OVERRIDE_ON_TOKEN, SECRET_OVERRIDE_OFF_TOKEN,
@@ -796,7 +796,8 @@ def epaper_bmp():
     g_range_raw = g_max_raw - g_min_raw
 
     # Enforce minimum range as % of tank capacity between top and bottom
-    min_range = TANK_CAPACITY_GALLONS * (EPAPER_MIN_GRAPH_RANGE_PCT / 100)
+    min_range  = TANK_CAPACITY_GALLONS * (EPAPER_MIN_GRAPH_RANGE_PCT / 100)
+    max_gallon = TANK_CAPACITY_GALLONS * (EPAPER_MAX_GRAPH_PCT / 100)
     if g_range_raw < min_range:
         mid = (g_min_raw + g_max_raw) / 2
         g_min_raw = mid - min_range / 2
@@ -804,7 +805,9 @@ def epaper_bmp():
         g_range_raw = min_range
 
     g_min = g_min_raw - g_range_raw * 0.05
-    g_max = g_max_raw + g_range_raw * 0.05
+    g_max = min(g_max_raw + g_range_raw * 0.05, max_gallon)
+    if g_max - g_min < min_range:   # top was capped — push bottom down
+        g_min = g_max - min_range
     g_range = g_max - g_min
 
     # Y-axis labels (percent)

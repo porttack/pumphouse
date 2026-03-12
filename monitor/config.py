@@ -140,6 +140,7 @@ EPAPER_LOW_WATER_HOURS_THRESHOLD = 75  # Tank % at or below which switches to ex
 EPAPER_LOW_WATER_HOURS = 168  # Graph hours when tank is below threshold (168 = 7 days)
 EPAPER_FORECAST_DAYS = 7      # Days of forecast icons to show (0 = disabled)
 EPAPER_MIN_GRAPH_RANGE_PCT = 12  # Minimum Y-axis span as % of tank capacity (prevents compressed graphs)
+EPAPER_MAX_GRAPH_PCT = 102       # Hard cap for Y-axis maximum as % of tank capacity
 
 # Data directory (XDG Base Directory: ~/.local/share/pumphouse)
 DATA_DIR = Path.home() / '.local' / 'share' / 'pumphouse'

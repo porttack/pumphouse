@@ -40,6 +40,7 @@ from monitor.config import (
     EPAPER_DEFAULT_HOURS_TENANT,
     EPAPER_FORECAST_DAYS,
     EPAPER_MIN_GRAPH_RANGE_PCT,
+    EPAPER_MAX_GRAPH_PCT,
     EPAPER_LOW_WATER_HOURS,
     EPAPER_LOW_WATER_HOURS_THRESHOLD,
     EPAPER_OWNER_STAY_TYPES,
@@ -365,15 +366,18 @@ def render_epaper_jpg(
         pass
 
     # ── Y-axis range ─────────────────────────────────────────────────────
-    g_min_raw = min(graph_gallons) if len(graph_gallons) >= 2 else 0.0
-    g_max_raw = max(graph_gallons) if len(graph_gallons) >= 2 else 0.0
-    min_range = TANK_CAPACITY_GALLONS * (EPAPER_MIN_GRAPH_RANGE_PCT / 100)
+    g_min_raw  = min(graph_gallons) if len(graph_gallons) >= 2 else 0.0
+    g_max_raw  = max(graph_gallons) if len(graph_gallons) >= 2 else 0.0
+    min_range  = TANK_CAPACITY_GALLONS * (EPAPER_MIN_GRAPH_RANGE_PCT / 100)
+    max_gallon = TANK_CAPACITY_GALLONS * (EPAPER_MAX_GRAPH_PCT / 100)
     if g_max_raw - g_min_raw < min_range:
         mid       = (g_min_raw + g_max_raw) / 2
         g_min_raw = mid - min_range / 2
         g_max_raw = mid + min_range / 2
     g_min  = g_min_raw - (g_max_raw - g_min_raw) * 0.05
-    g_max  = g_max_raw + (g_max_raw - g_min_raw) * 0.05
+    g_max  = min(g_max_raw + (g_max_raw - g_min_raw) * 0.05, max_gallon)
+    if g_max - g_min < min_range:   # top was capped — push bottom down
+        g_min = g_max - min_range
     g_range = g_max - g_min
 
     # ── Y-axis labels ────────────────────────────────────────────────────
