@@ -1121,8 +1121,11 @@ def water_status():
 # @requires_auth
 def index():
     """Main status page"""
-    # Get hours parameter for filtering events by time
-    hours = request.args.get('hours', DASHBOARD_DEFAULT_HOURS, type=int)
+    # Get hours parameter for filtering events by time; days=n is an alias
+    hours = request.args.get('hours', type=int)
+    days  = request.args.get('days',  type=int)
+    if hours is None:
+        hours = days * 24 if days is not None else DASHBOARD_DEFAULT_HOURS
 
     # Get sensor data
     sensor_data = get_sensor_data()
