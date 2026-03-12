@@ -1057,6 +1057,7 @@ def water_status():
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="refresh" content="600">
   <title>Water Status &mdash; onblackberryhill.com</title>
+  <link rel="icon" type="image/svg+xml" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M16 2C16 2 6 14 6 21a10 10 0 0 0 20 0C26 14 16 2 16 2z" fill="%231e90ff"/><path d="M11 20c0-3 2-5 4-7" stroke="white" stroke-width="1.5" fill="none" stroke-linecap="round" opacity="0.5"/></svg>'>
   <style>
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{
