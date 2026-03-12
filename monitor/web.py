@@ -1038,9 +1038,11 @@ def water_status():
         img_html = f'<a href="{dashboard_url}" style="display:block;"><img src="/api/epaper.jpg?{img_param}" alt="Water tank level graph"></a>'
         extra_links = (
             '\n    <span>&bull;</span>'
+            f'\n    <a href="/api/epaper.jpg?{img_param}">Image only</a>'
+            '\n    <span>&bull;</span>'
             '\n    <a href="/">Dashboard</a>'
             '\n    <span>&bull;</span>'
-            '\n    <a href="https://onblackberryhill.com/water" target="_blank">Public view</a>'
+            '\n    <a href="https://onblackberryhill.com/water">Public view</a>'
             '\n    <span>&bull;</span>'
             f'\n    <a href="{AMBIENT_WEATHER_DASHBOARD_URL}" target="_blank">Weather</a>'
         )
@@ -1107,9 +1109,7 @@ def water_status():
   <div class="links">
     <span>Updates every 10 minutes</span>
     <span>&bull;</span>
-    <a href="/timelapse">Timelapse</a>
-    <span>&bull;</span>
-    <a href="/api/epaper.jpg?{img_param}">Image only</a>{extra_links}
+    <a href="/timelapse">Timelapse</a>{extra_links}
   </div>
 </body>
 </html>"""
