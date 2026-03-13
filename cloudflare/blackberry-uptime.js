@@ -1,16 +1,41 @@
 // internet-uptime-worker.js
 // Cloudflare Worker — Blackberry Hill Internet Uptime Monitor
 //
-// Polls the Cloudflare Tunnel status every minute via cron trigger,
+// Polls the Cloudflare Tunnel status on a cron schedule,
 // stores results in KV, and serves a visual dashboard at /internet.
 //
 // Required KV bindings:  UPTIME_LOG, UPTIME_CURRENT
 // Required secrets:      CF_API_TOKEN, CF_ACCOUNT_ID, CF_TUNNEL_ID
+//
+// Cron trigger: set in Workers dashboard under Triggers
+//   Every 2 min: */2 * * * *
+//   Every 4 min: */4 * * * *  (recommended — 360 writes/day, well within free tier)
+
+// ─── Configuration ────────────────────────────────────────────────────────────
 
 const TZ = 'America/Los_Angeles';
 
+// Set this to match your cron interval. A gap slightly larger than this
+// will be treated as "no data" (genuine outage with no records) rather
+// than just a missing poll. Recommend: cron interval + 1 minute of headroom.
+//
+// Examples:
+//   Cron every 1 min  → POLL_INTERVAL_MS = 1 * 60 * 1000
+//   Cron every 2 min  → POLL_INTERVAL_MS = 2 * 60 * 1000
+//   Cron every 4 min  → POLL_INTERVAL_MS = 4 * 60 * 1000
+const POLL_INTERVAL_MS = 6 * 60 * 1000;
+
+// Gaps up to this size are filled with the last known state rather than
+// shown as grey "no data". Set to poll interval + 1 minute headroom.
+const GAP_THRESHOLD_MS = POLL_INTERVAL_MS + 60 * 1000;
+
+// KV TTL — how long to keep entries (7 days)
+const KV_TTL_SECONDS = 60 * 60 * 24 * 7;
+
+// ─── Entry Point ─────────────────────────────────────────────────────────────
+
 export default {
-  // Cron trigger: fires every minute (* * * * *)
+  // Cron trigger — fires on schedule set in Workers dashboard
   async scheduled(event, env, ctx) {
     ctx.waitUntil(recordStatus(env));
   },
@@ -32,7 +57,7 @@ export default {
   }
 };
 
-// ─── Data Recording ──────────────────────────────────────────────────────────
+// ─── Data Recording ───────────────────────────────────────────────────────────
 
 async function recordStatus(env) {
   const res = await fetch(
@@ -45,15 +70,16 @@ async function recordStatus(env) {
   const ts = new Date().toISOString();
   const entry = JSON.stringify({ ts, up, status });
 
-  // Key uses ISO timestamp so KV list order is chronological
+  // ISO timestamp as key — sorts lexicographically = chronological order in KV list
   const key = `log:${ts}`;
-  await env.UPTIME_LOG.put(key, entry, { expirationTtl: 60 * 60 * 24 * 7 }); // 7-day TTL
+  await env.UPTIME_LOG.put(key, entry, { expirationTtl: KV_TTL_SECONDS });
   await env.UPTIME_CURRENT.put('latest', entry);
 }
 
-// ─── KV Helpers ──────────────────────────────────────────────────────────────
+// ─── KV Helpers ───────────────────────────────────────────────────────────────
 
-// KV list() has a hard limit of 1000 keys — paginate to get all 7 days (10,080 entries)
+// KV list() has a hard limit of 1000 keys per call.
+// At 4-min intervals, 7 days = 2,520 entries — requires pagination.
 async function listAllKeys(env, prefix) {
   let keys = [];
   let cursor = undefined;
@@ -67,7 +93,7 @@ async function listAllKeys(env, prefix) {
   return keys;
 }
 
-// ─── JSON Endpoint ───────────────────────────────────────────────────────────
+// ─── JSON Endpoint ────────────────────────────────────────────────────────────
 
 async function serveJSON(env) {
   const keys = await listAllKeys(env, 'log:');
@@ -100,24 +126,31 @@ function formatDowntime(minutes) {
   return `${h}h ${m.toString().padStart(2, '0')}m down`;
 }
 
-// ─── Dashboard Rendering ──────────────────────────────────────────────────────
+// ─── Dashboard Components ─────────────────────────────────────────────────────
 
 function statLine(arr) {
   if (arr.length === 0) return '<span style="color:#555">— no data</span>';
   const upCount = arr.filter(e => e.up).length;
   const p = (upCount / arr.length) * 100;
-  const downMins = arr.filter(e => !e.up).length;
+  // Downtime in minutes — each entry represents one poll interval
+  const downMins = arr.filter(e => !e.up).length * (POLL_INTERVAL_MS / 60000);
   const pctStr = p.toFixed(1) + '%';
-  const downStr = downMins > 0 ? ' — ' + formatDowntime(downMins) : '';
+  const downStr = downMins > 0 ? ' — ' + formatDowntime(Math.round(downMins)) : '';
   const color = p >= 99 ? '#22c55e' : '#ef4444';
   return `<span style="color:${color}">${pctStr} uptime${downStr}</span>`;
 }
 
+// Renders a horizontal timeline bar.
+// Buckets smaller than GAP_THRESHOLD_MS that have no data inherit the last
+// known state, avoiding spurious grey gaps from the poll interval.
+// Buckets wider than GAP_THRESHOLD_MS that have no data show as grey,
+// indicating a genuine period with no records (e.g. Pi was fully offline).
 function makeTimeline(data, buckets, totalMs, now) {
   if (data.length === 0) return '<div style="color:#555;font-size:0.85rem">No data yet</div>';
 
   const bucketMs = totalMs / buckets;
   const bars = [];
+  let lastKnownState = 'nodata';
 
   for (let i = 0; i < buckets; i++) {
     const bucketStart = now - totalMs + i * bucketMs;
@@ -129,16 +162,19 @@ function makeTimeline(data, buckets, totalMs, now) {
 
     let state;
     if (inBucket.length === 0) {
-      state = 'nodata';
+      // Small gap (expected between polls) — carry forward last known state
+      // Large gap (genuine outage or no data) — show as no-data grey
+      state = bucketMs <= GAP_THRESHOLD_MS ? lastKnownState : 'nodata';
     } else {
       const ratio = inBucket.filter(e => e.up).length / inBucket.length;
       state = ratio >= 0.9 ? 'up' : ratio >= 0.5 ? 'degraded' : 'down';
+      lastKnownState = state;
     }
 
-    const color = state === 'up' ? '#22c55e'
-      : state === 'down' ? '#ef4444'
-      : state === 'degraded' ? '#f59e0b'
-      : '#333';
+    const color = state === 'up'       ? '#22c55e'
+                : state === 'down'     ? '#ef4444'
+                : state === 'degraded' ? '#f59e0b'
+                : '#333';
 
     const pctLeft  = (i / buckets * 100).toFixed(3);
     const pctWidth = (1 / buckets * 100).toFixed(3);
@@ -177,6 +213,8 @@ function dayLabels(now, hour) {
   return `<div style="display:flex;justify-content:space-between;font-size:0.7rem;color:#555;margin-top:2px">${labels.join('')}</div>`;
 }
 
+// ─── Dashboard ────────────────────────────────────────────────────────────────
+
 async function serveDashboard(env) {
   const keys = await listAllKeys(env, 'log:');
   const entries = await Promise.all(
@@ -186,8 +224,8 @@ async function serveDashboard(env) {
   const now = Date.now();
   const hour = 60 * 60 * 1000;
 
-  const last4h  = entries.filter(e => now - new Date(e.ts).getTime() <= 4  * hour);
-  const last24h = entries.filter(e => now - new Date(e.ts).getTime() <= 24 * hour);
+  const last4h  = entries.filter(e => now - new Date(e.ts).getTime() <= 4      * hour);
+  const last24h = entries.filter(e => now - new Date(e.ts).getTime() <= 24     * hour);
   const last7d  = entries.filter(e => now - new Date(e.ts).getTime() <= 7 * 24 * hour);
 
   const latest = entries[entries.length - 1];
@@ -196,12 +234,14 @@ async function serveDashboard(env) {
     timeZone: TZ, dateStyle: 'short', timeStyle: 'short'
   });
 
+  const pollMins = Math.round(POLL_INTERVAL_MS / 60000);
+
   const html = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <title>Blackberry Hill — Internet</title>
-  <meta http-equiv="refresh" content="60">
+  <!-- <meta http-equiv="refresh" content="60"> -->
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     * { box-sizing: border-box; }
@@ -250,7 +290,7 @@ async function serveDashboard(env) {
 </head>
 <body>
   <h1>🌊 Blackberry Hill</h1>
-  <div class="subtitle">Internet connectivity · ${nowPST} PT · refreshes every 60s</div>
+  <div class="subtitle">Internet connectivity <!-- · ${nowPST} PT · checks every ${pollMins} min · page refreshes every 60s--></div>
 
   <div class="current ${latest?.up ? 'up' : 'down'}">
     ${latest?.up ? '● Online' : '● Offline'}
