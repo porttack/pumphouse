@@ -1,0 +1,308 @@
+// internet-uptime-worker.js
+// Cloudflare Worker — Blackberry Hill Internet Uptime Monitor
+//
+// Polls the Cloudflare Tunnel status every minute via cron trigger,
+// stores results in KV, and serves a visual dashboard at /internet.
+//
+// Required KV bindings:  UPTIME_LOG, UPTIME_CURRENT
+// Required secrets:      CF_API_TOKEN, CF_ACCOUNT_ID, CF_TUNNEL_ID
+
+const TZ = 'America/Los_Angeles';
+
+export default {
+  // Cron trigger: fires every minute (* * * * *)
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(recordStatus(env));
+  },
+
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    if (url.pathname === '/internet') {
+      return serveDashboard(env);
+    }
+    if (url.pathname === '/internet.json') {
+      return serveJSON(env);
+    }
+    if (url.pathname === '/internet/trigger') {
+      // Manual trigger for testing — visit this URL to seed initial data
+      await recordStatus(env);
+      return new Response('OK - status recorded', { status: 200 });
+    }
+    return new Response('Not found', { status: 404 });
+  }
+};
+
+// ─── Data Recording ──────────────────────────────────────────────────────────
+
+async function recordStatus(env) {
+  const res = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/cfd_tunnel/${env.CF_TUNNEL_ID}`,
+    { headers: { 'Authorization': `Bearer ${env.CF_API_TOKEN}` } }
+  );
+  const data = await res.json();
+  const status = data.result?.status ?? 'unknown'; // healthy | degraded | down | inactive
+  const up = status === 'healthy';
+  const ts = new Date().toISOString();
+  const entry = JSON.stringify({ ts, up, status });
+
+  // Key uses ISO timestamp so KV list order is chronological
+  const key = `log:${ts}`;
+  await env.UPTIME_LOG.put(key, entry, { expirationTtl: 60 * 60 * 24 * 7 }); // 7-day TTL
+  await env.UPTIME_CURRENT.put('latest', entry);
+}
+
+// ─── KV Helpers ──────────────────────────────────────────────────────────────
+
+// KV list() has a hard limit of 1000 keys — paginate to get all 7 days (10,080 entries)
+async function listAllKeys(env, prefix) {
+  let keys = [];
+  let cursor = undefined;
+  do {
+    const opts = { prefix, limit: 1000 };
+    if (cursor) opts.cursor = cursor;
+    const result = await env.UPTIME_LOG.list(opts);
+    keys = keys.concat(result.keys);
+    cursor = result.list_complete ? undefined : result.cursor;
+  } while (cursor);
+  return keys;
+}
+
+// ─── JSON Endpoint ───────────────────────────────────────────────────────────
+
+async function serveJSON(env) {
+  const keys = await listAllKeys(env, 'log:');
+  const entries = await Promise.all(
+    keys.map(k => env.UPTIME_LOG.get(k.name).then(JSON.parse))
+  );
+  return new Response(JSON.stringify(entries), {
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+
+// ─── Formatting Helpers ───────────────────────────────────────────────────────
+
+function formatTime(ts) {
+  return new Date(ts).toLocaleTimeString('en-US', {
+    hour: 'numeric', minute: '2-digit', hour12: true, timeZone: TZ
+  });
+}
+
+function formatDay(ts) {
+  return new Date(ts).toLocaleDateString('en-US', {
+    weekday: 'short', month: 'numeric', day: 'numeric', timeZone: TZ
+  });
+}
+
+function formatDowntime(minutes) {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m}m down`;
+  return `${h}h ${m.toString().padStart(2, '0')}m down`;
+}
+
+// ─── Dashboard Rendering ──────────────────────────────────────────────────────
+
+function statLine(arr) {
+  if (arr.length === 0) return '<span style="color:#555">— no data</span>';
+  const upCount = arr.filter(e => e.up).length;
+  const p = (upCount / arr.length) * 100;
+  const downMins = arr.filter(e => !e.up).length;
+  const pctStr = p.toFixed(1) + '%';
+  const downStr = downMins > 0 ? ' — ' + formatDowntime(downMins) : '';
+  const color = p >= 99 ? '#22c55e' : '#ef4444';
+  return `<span style="color:${color}">${pctStr} uptime${downStr}</span>`;
+}
+
+function makeTimeline(data, buckets, totalMs, now) {
+  if (data.length === 0) return '<div style="color:#555;font-size:0.85rem">No data yet</div>';
+
+  const bucketMs = totalMs / buckets;
+  const bars = [];
+
+  for (let i = 0; i < buckets; i++) {
+    const bucketStart = now - totalMs + i * bucketMs;
+    const bucketEnd   = bucketStart + bucketMs;
+    const inBucket = data.filter(e => {
+      const t = new Date(e.ts).getTime();
+      return t >= bucketStart && t < bucketEnd;
+    });
+
+    let state;
+    if (inBucket.length === 0) {
+      state = 'nodata';
+    } else {
+      const ratio = inBucket.filter(e => e.up).length / inBucket.length;
+      state = ratio >= 0.9 ? 'up' : ratio >= 0.5 ? 'degraded' : 'down';
+    }
+
+    const color = state === 'up' ? '#22c55e'
+      : state === 'down' ? '#ef4444'
+      : state === 'degraded' ? '#f59e0b'
+      : '#333';
+
+    const pctLeft  = (i / buckets * 100).toFixed(3);
+    const pctWidth = (1 / buckets * 100).toFixed(3);
+
+    let tooltip = '';
+    if (state === 'down' || state === 'degraded') {
+      const label = `${formatTime(bucketStart)} – ${formatTime(bucketEnd)}`;
+      tooltip = `data-tip="${label}"`;
+    }
+
+    bars.push(
+      `<div class="bar ${state === 'down' || state === 'degraded' ? 'has-tip' : ''}" `
+      + `style="position:absolute;left:${pctLeft}%;width:${pctWidth}%;height:100%;background:${color}" `
+      + `${tooltip}></div>`
+    );
+  }
+
+  return `<div style="position:relative;width:100%;height:32px;background:#222;border-radius:4px;overflow:visible">${bars.join('')}</div>`;
+}
+
+function timeLabels(totalMs, count, now) {
+  const labels = [];
+  for (let i = 0; i <= count; i++) {
+    const t = now - totalMs + i * (totalMs / count);
+    labels.push(`<span>${formatTime(t)}</span>`);
+  }
+  return `<div style="display:flex;justify-content:space-between;font-size:0.7rem;color:#555;margin-top:2px">${labels.join('')}</div>`;
+}
+
+function dayLabels(now, hour) {
+  const labels = [];
+  for (let i = 7; i >= 0; i--) {
+    const t = now - i * 24 * hour;
+    labels.push(`<span>${formatDay(t)}</span>`);
+  }
+  return `<div style="display:flex;justify-content:space-between;font-size:0.7rem;color:#555;margin-top:2px">${labels.join('')}</div>`;
+}
+
+async function serveDashboard(env) {
+  const keys = await listAllKeys(env, 'log:');
+  const entries = await Promise.all(
+    keys.map(k => env.UPTIME_LOG.get(k.name).then(v => JSON.parse(v)))
+  );
+
+  const now = Date.now();
+  const hour = 60 * 60 * 1000;
+
+  const last4h  = entries.filter(e => now - new Date(e.ts).getTime() <= 4  * hour);
+  const last24h = entries.filter(e => now - new Date(e.ts).getTime() <= 24 * hour);
+  const last7d  = entries.filter(e => now - new Date(e.ts).getTime() <= 7 * 24 * hour);
+
+  const latest = entries[entries.length - 1];
+
+  const nowPST = new Date().toLocaleString('en-US', {
+    timeZone: TZ, dateStyle: 'short', timeStyle: 'short'
+  });
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Blackberry Hill — Internet</title>
+  <meta http-equiv="refresh" content="60">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, sans-serif; background: #0f0f0f; color: #e2e8f0; padding: 1.5rem; max-width: 860px; margin: auto; }
+    h1 { color: #60a5fa; margin-bottom: 0.25rem; }
+    .subtitle { color: #64748b; font-size: 0.85rem; margin-bottom: 2rem; }
+    .current { font-size: 1.4rem; font-weight: bold; margin-bottom: 2rem; }
+    .up   { color: #22c55e; }
+    .down { color: #ef4444; }
+    .card { background: #1e1e1e; border-radius: 8px; padding: 1.25rem; margin-bottom: 1.25rem; }
+    .card h2 { font-size: 0.9rem; color: #94a3b8; margin: 0 0 0.25rem 0; text-transform: uppercase; letter-spacing: 0.05em; }
+    .card .pct { font-size: 1.3rem; font-weight: bold; margin-bottom: 0.75rem; }
+    .legend { display: flex; gap: 1rem; margin-top: 0.75rem; font-size: 0.75rem; color: #64748b; }
+    .legend span { display: flex; align-items: center; gap: 0.3rem; }
+    .dot { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+    /* Hover tooltips — pure CSS, no JavaScript */
+    .bar.has-tip { cursor: crosshair; }
+    .bar.has-tip:hover::after {
+      content: attr(data-tip);
+      position: absolute;
+      bottom: 38px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1e293b;
+      color: #f1f5f9;
+      font-size: 0.75rem;
+      white-space: nowrap;
+      padding: 4px 8px;
+      border-radius: 4px;
+      border: 1px solid #334155;
+      pointer-events: none;
+      z-index: 10;
+    }
+    .bar.has-tip:hover::before {
+      content: '';
+      position: absolute;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 5px solid transparent;
+      border-top-color: #334155;
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+  <h1>🌊 Blackberry Hill</h1>
+  <div class="subtitle">Internet connectivity · ${nowPST} PT · refreshes every 60s</div>
+
+  <div class="current ${latest?.up ? 'up' : 'down'}">
+    ${latest?.up ? '● Online' : '● Offline'}
+    <span style="font-size:0.9rem;color:#64748b;font-weight:normal">
+      — last checked ${latest ? formatTime(latest.ts) : 'never'} PT
+    </span>
+  </div>
+
+  <div class="card">
+    <h2>Past 4 Hours</h2>
+    <div class="pct">${statLine(last4h)}</div>
+    ${makeTimeline(last4h, 240, 4 * hour, now)}
+    ${timeLabels(4 * hour, 4, now)}
+    <div class="legend">
+      <span><i class="dot" style="background:#22c55e"></i> Up</span>
+      <span><i class="dot" style="background:#f59e0b"></i> Degraded</span>
+      <span><i class="dot" style="background:#ef4444"></i> Down</span>
+      <span><i class="dot" style="background:#333"></i> No data</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Past 24 Hours</h2>
+    <div class="pct">${statLine(last24h)}</div>
+    ${makeTimeline(last24h, 288, 24 * hour, now)}
+    ${timeLabels(24 * hour, 6, now)}
+    <div class="legend">
+      <span><i class="dot" style="background:#22c55e"></i> Up</span>
+      <span><i class="dot" style="background:#f59e0b"></i> Degraded</span>
+      <span><i class="dot" style="background:#ef4444"></i> Down</span>
+      <span><i class="dot" style="background:#333"></i> No data</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Past 7 Days</h2>
+    <div class="pct">${statLine(last7d)}</div>
+    ${makeTimeline(last7d, 336, 7 * 24 * hour, now)}
+    ${dayLabels(now, hour)}
+    <div class="legend">
+      <span><i class="dot" style="background:#22c55e"></i> Up</span>
+      <span><i class="dot" style="background:#f59e0b"></i> Degraded</span>
+      <span><i class="dot" style="background:#ef4444"></i> Down</span>
+      <span><i class="dot" style="background:#333"></i> No data</span>
+    </div>
+  </div>
+
+  <div style="font-size:0.75rem;color:#334155;margin-top:1rem">
+    <a href="/internet.json" style="color:#334155">JSON</a>
+  </div>
+</body>
+</html>`;
+
+  return new Response(html, { headers: { 'Content-Type': 'text/html' } });
+}
