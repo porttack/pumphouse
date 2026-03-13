@@ -127,16 +127,57 @@ function formatDowntime(minutes) {
   return `${h}h ${m.toString().padStart(2, '0')}m down`;
 }
 
+function formatDateTime(ts) {
+  return new Date(ts).toLocaleString('en-US', {
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: TZ
+  });
+}
+
+// Estimate actual poll interval from the median gap between recent entries.
+function estimatePollInterval(entries) {
+  const recent = entries.slice(-10);
+  if (recent.length < 2) return null;
+  const gaps = [];
+  for (let i = 1; i < recent.length; i++) {
+    gaps.push(new Date(recent[i].ts).getTime() - new Date(recent[i - 1].ts).getTime());
+  }
+  gaps.sort((a, b) => a - b);
+  return gaps[Math.floor(gaps.length / 2)];
+}
+
+// Returns outage intervals from a sorted entry array as {start, end} ms timestamps.
+// end is null if the outage is ongoing (last entry is still down).
+function downtimeIntervals(entries) {
+  const intervals = [];
+  let downStart = null;
+  for (const e of entries) {
+    const t = new Date(e.ts).getTime();
+    if (!e.up && downStart === null) {
+      downStart = t;
+    } else if (e.up && downStart !== null) {
+      intervals.push({ start: downStart, end: t });
+      downStart = null;
+    }
+  }
+  if (downStart !== null) {
+    intervals.push({ start: downStart, end: null });
+  }
+  return intervals;
+}
+
 // ─── Dashboard Components ─────────────────────────────────────────────────────
 
-function statLine(arr) {
+// Uses timestamp-based accounting so downtime matches the outage list exactly,
+// regardless of whether the poll interval has changed over time.
+function statLine(arr, now) {
   if (arr.length === 0) return '<span style="color:#555">— no data</span>';
-  const upCount = arr.filter(e => e.up).length;
-  const p = (upCount / arr.length) * 100;
-  // Downtime in minutes — each entry represents one poll interval
-  const downMins = arr.filter(e => !e.up).length * (POLL_INTERVAL_MS / 60000);
+  const intervals = downtimeIntervals(arr);
+  const downMs = intervals.reduce((sum, o) => sum + ((o.end ?? now) - o.start), 0);
+  const downMins = Math.round(downMs / 60000);
+  const windowMs = now - new Date(arr[0].ts).getTime();
+  const p = windowMs > 0 ? ((windowMs - downMs) / windowMs) * 100 : 100;
   const pctStr = p.toFixed(1) + '%';
-  const downStr = downMins > 0 ? ' — ' + formatDowntime(Math.round(downMins)) : '';
+  const downStr = downMins > 0 ? ' — ' + formatDowntime(downMins) : '';
   const color = p >= 99 ? '#22c55e' : '#ef4444';
   return `<span style="color:${color}">${pctStr} uptime${downStr}</span>`;
 }
@@ -230,11 +271,10 @@ async function serveDashboard(env) {
 
   const latest = entries[entries.length - 1];
 
-  const nowPST = new Date().toLocaleString('en-US', {
-    timeZone: TZ, dateStyle: 'short', timeStyle: 'short'
-  });
+  const estimatedMs = estimatePollInterval(entries);
+  const pollMins = estimatedMs ? Math.round(estimatedMs / 60000) : Math.round(POLL_INTERVAL_MS / 60000);
 
-  const pollMins = Math.round(POLL_INTERVAL_MS / 60000);
+  const outages = downtimeIntervals(last7d);
 
   const html = `<!DOCTYPE html>
 <html>
@@ -290,7 +330,7 @@ async function serveDashboard(env) {
 </head>
 <body>
   <h1>🌊 Blackberry Hill</h1>
-  <div class="subtitle">Internet connectivity <!-- · ${nowPST} PT · checks every ${pollMins} min · page refreshes every 60s--></div>
+  <div class="subtitle">Internet connectivity · checks every ~${pollMins} min</div>
 
   <div class="current ${latest?.up ? 'up' : 'down'}">
     ${latest?.up ? '● Online' : '● Offline'}
@@ -301,7 +341,7 @@ async function serveDashboard(env) {
 
   <div class="card">
     <h2>Past 4 Hours</h2>
-    <div class="pct">${statLine(last4h)}</div>
+    <div class="pct">${statLine(last4h, now)}</div>
     ${makeTimeline(last4h, 240, 4 * hour, now)}
     ${timeLabels(4 * hour, 4, now)}
     <div class="legend">
@@ -313,7 +353,7 @@ async function serveDashboard(env) {
 
   <div class="card">
     <h2>Past 24 Hours</h2>
-    <div class="pct">${statLine(last24h)}</div>
+    <div class="pct">${statLine(last24h, now)}</div>
     ${makeTimeline(last24h, 288, 24 * hour, now)}
     ${timeLabels(24 * hour, 6, now)}
     <div class="legend">
@@ -325,7 +365,7 @@ async function serveDashboard(env) {
 
   <div class="card">
     <h2>Past 7 Days</h2>
-    <div class="pct">${statLine(last7d)}</div>
+    <div class="pct">${statLine(last7d, now)}</div>
     ${makeTimeline(last7d, 336, 7 * 24 * hour, now)}
     ${dayLabels(now, hour)}
     <div class="legend">
@@ -333,6 +373,33 @@ async function serveDashboard(env) {
       <span><i class="dot" style="background:#ef4444"></i> Down</span>
       <span><i class="dot" style="background:#333"></i> No data</span>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>Outages — Past 7 Days</h2>
+    ${outages.length === 0
+      ? '<div style="color:#22c55e;font-size:0.9rem">No outages recorded</div>'
+      : `<table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+          <thead>
+            <tr style="color:#64748b;text-align:left">
+              <th style="padding:0.3rem 0.6rem 0.3rem 0;font-weight:normal">Start</th>
+              <th style="padding:0.3rem 0.6rem;font-weight:normal">End</th>
+              <th style="padding:0.3rem 0 0.3rem 0.6rem;font-weight:normal;text-align:right">Duration</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${[...outages].reverse().map(o => {
+              const durMins = Math.round(((o.end ?? now) - o.start) / 60000);
+              const endLabel = o.end ? formatDateTime(o.end) : '<span style="color:#ef4444">ongoing</span>';
+              return `<tr style="border-top:1px solid #2d2d2d">
+                <td style="padding:0.4rem 0.6rem 0.4rem 0">${formatDateTime(o.start)}</td>
+                <td style="padding:0.4rem 0.6rem">${endLabel}</td>
+                <td style="padding:0.4rem 0 0.4rem 0.6rem;text-align:right;color:#94a3b8">${formatDowntime(durMins)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`
+    }
   </div>
 
   <div style="font-size:0.75rem;color:#334155;margin-top:1rem">
