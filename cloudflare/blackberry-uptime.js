@@ -28,8 +28,8 @@ const POLL_INTERVAL_MS = 6 * 60 * 1000;
 // shown as grey "no data". Set to poll interval + 1 minute headroom.
 const GAP_THRESHOLD_MS = POLL_INTERVAL_MS + 60 * 1000;
 
-// KV TTL — how long to keep entries (7 days)
-const KV_TTL_SECONDS = 60 * 60 * 24 * 7;
+// KV TTL — how long to keep entries (28 days)
+const KV_TTL_SECONDS = 60 * 60 * 24 * 28;
 
 // ─── Entry Point ─────────────────────────────────────────────────────────────
 
@@ -245,9 +245,9 @@ function timeLabels(totalMs, count, now) {
   return `<div style="display:flex;justify-content:space-between;font-size:0.7rem;color:#555;margin-top:2px">${labels.join('')}</div>`;
 }
 
-function dayLabels(now, hour) {
+function dayLabels(totalDays, stepDays, now, hour) {
   const labels = [];
-  for (let i = 7; i >= 0; i--) {
+  for (let i = totalDays; i >= 0; i -= stepDays) {
     const t = now - i * 24 * hour;
     labels.push(`<span>${formatDay(t)}</span>`);
   }
@@ -265,16 +265,16 @@ async function serveDashboard(env) {
   const now = Date.now();
   const hour = 60 * 60 * 1000;
 
-  const last4h  = entries.filter(e => now - new Date(e.ts).getTime() <= 4      * hour);
-  const last24h = entries.filter(e => now - new Date(e.ts).getTime() <= 24     * hour);
-  const last7d  = entries.filter(e => now - new Date(e.ts).getTime() <= 7 * 24 * hour);
+  const last4h   = entries.filter(e => now - new Date(e.ts).getTime() <=  4      * hour);
+  const last24h  = entries.filter(e => now - new Date(e.ts).getTime() <= 24      * hour);
+  const last28d  = entries.filter(e => now - new Date(e.ts).getTime() <= 28 * 24 * hour);
 
   const latest = entries[entries.length - 1];
 
   const estimatedMs = estimatePollInterval(entries);
   const pollMins = estimatedMs ? Math.round(estimatedMs / 60000) : Math.round(POLL_INTERVAL_MS / 60000);
 
-  const outages = downtimeIntervals(last7d);
+  const outages = downtimeIntervals(last28d);
 
   const html = `<!DOCTYPE html>
 <html>
@@ -364,10 +364,10 @@ async function serveDashboard(env) {
   </div>
 
   <div class="card">
-    <h2>Past 7 Days</h2>
-    <div class="pct">${statLine(last7d, now)}</div>
-    ${makeTimeline(last7d, 336, 7 * 24 * hour, now)}
-    ${dayLabels(now, hour)}
+    <h2>Past 28 Days</h2>
+    <div class="pct">${statLine(last28d, now)}</div>
+    ${makeTimeline(last28d, 336, 28 * 24 * hour, now)}
+    ${dayLabels(28, 7, now, hour)}
     <div class="legend">
       <span><i class="dot" style="background:#22c55e"></i> Up</span>
       <span><i class="dot" style="background:#ef4444"></i> Down</span>
@@ -376,7 +376,7 @@ async function serveDashboard(env) {
   </div>
 
   <div class="card">
-    <h2>Outages — Past 7 Days</h2>
+    <h2>Outages — Past 28 Days</h2>
     ${outages.length === 0
       ? '<div style="color:#22c55e;font-size:0.9rem">No outages recorded</div>'
       : `<table style="width:100%;border-collapse:collapse;font-size:0.85rem">

@@ -139,7 +139,7 @@ Each entry is stored as:
 
 Key format: `log:2026-03-13T05:00:00.000Z` — ISO timestamps sort lexicographically, so KV list order is chronological.
 
-TTL is set to 7 days on every entry, so old data expires automatically. No cleanup needed.
+TTL is set to 28 days on every entry, so old data expires automatically. No cleanup needed.
 
 ### KV Pagination
 
@@ -172,7 +172,7 @@ Each graph divides its time window into fixed buckets:
 |---|---|---|
 | 4 hours | 240 | 1 minute |
 | 24 hours | 288 | 5 minutes |
-| 7 days | 336 | 30 minutes |
+| 28 days | 336 | 2 hours |
 
 Buckets with no entries inherit the last known state if the gap is small (expected between polls), or show as grey if the gap is large (genuine no-data period). A bucket with any failed probe is red; any bucket with at least one successful probe is green.
 
@@ -192,16 +192,16 @@ All displayed times use `America/Los_Angeles`, which automatically handles PST/P
 
 ## Cloudflare Free Tier Usage
 
-At `*/4 * * * *` (every 4 minutes):
+At `*/6 * * * *` (every 6 minutes), with 28-day history:
 
 | Resource | Usage | Free Limit |
 |---|---|---|
-| Worker requests | ~360/day (cron) + dashboard views | 100,000/day |
-| KV writes | ~360/day | 1,000/day |
-| KV reads | ~2,520 per dashboard load | 10,000,000/day |
-| KV storage | ~2,520 entries × ~80 bytes ≈ 200 KB | 1 GB |
+| Worker requests | ~240/day (cron) + dashboard views | 100,000/day |
+| KV writes | ~240/day | 1,000/day |
+| KV reads | ~6,720 per dashboard load | 10,000,000/day |
+| KV storage | ~6,720 entries × ~80 bytes ≈ 540 KB | 1 GB |
 
-At 4-minute intervals you stay comfortably within the free KV write limit of 1,000/day.
+At 6-minute intervals you stay well within the free KV write limit of 1,000/day, with comfortable headroom.
 
 ---
 
