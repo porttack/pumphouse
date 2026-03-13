@@ -1368,6 +1368,11 @@ def sunset():
 
 
 
+@app.route('/ping')
+def ping():
+    return 'ok', 200
+
+
 @app.route('/control/<token>')
 def control(token):
     """

@@ -1,11 +1,10 @@
 // internet-uptime-worker.js
 // Cloudflare Worker — Blackberry Hill Internet Uptime Monitor
 //
-// Polls the Cloudflare Tunnel status on a cron schedule,
+// Probes the Pi's /ping endpoint on a cron schedule,
 // stores results in KV, and serves a visual dashboard at /internet.
 //
 // Required KV bindings:  UPTIME_LOG, UPTIME_CURRENT
-// Required secrets:      CF_API_TOKEN, CF_ACCOUNT_ID, CF_TUNNEL_ID
 //
 // Cron trigger: set in Workers dashboard under Triggers
 //   Every 2 min: */2 * * * *
@@ -59,16 +58,18 @@ export default {
 
 // ─── Data Recording ───────────────────────────────────────────────────────────
 
+const PING_URL = 'https://onblackberryhill.com/ping';
+
 async function recordStatus(env) {
-  const res = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/cfd_tunnel/${env.CF_TUNNEL_ID}`,
-    { headers: { 'Authorization': `Bearer ${env.CF_API_TOKEN}` } }
-  );
-  const data = await res.json();
-  const status = data.result?.status ?? 'unknown'; // healthy | degraded | down | inactive
-  const up = status === 'healthy';
+  let up = false;
+  try {
+    const res = await fetch(PING_URL, { signal: AbortSignal.timeout(10000) });
+    up = res.ok;
+  } catch (e) {
+    up = false;
+  }
   const ts = new Date().toISOString();
-  const entry = JSON.stringify({ ts, up, status });
+  const entry = JSON.stringify({ ts, up });
 
   // ISO timestamp as key — sorts lexicographically = chronological order in KV list
   const key = `log:${ts}`;
@@ -167,26 +168,25 @@ function makeTimeline(data, buckets, totalMs, now) {
       state = bucketMs <= GAP_THRESHOLD_MS ? lastKnownState : 'nodata';
     } else {
       const ratio = inBucket.filter(e => e.up).length / inBucket.length;
-      state = ratio >= 0.9 ? 'up' : ratio >= 0.5 ? 'degraded' : 'down';
+      state = ratio > 0 ? 'up' : 'down';
       lastKnownState = state;
     }
 
-    const color = state === 'up'       ? '#22c55e'
-                : state === 'down'     ? '#ef4444'
-                : state === 'degraded' ? '#f59e0b'
+    const color = state === 'up'   ? '#22c55e'
+                : state === 'down' ? '#ef4444'
                 : '#333';
 
     const pctLeft  = (i / buckets * 100).toFixed(3);
     const pctWidth = (1 / buckets * 100).toFixed(3);
 
     let tooltip = '';
-    if (state === 'down' || state === 'degraded') {
+    if (state === 'down') {
       const label = `${formatTime(bucketStart)} – ${formatTime(bucketEnd)}`;
       tooltip = `data-tip="${label}"`;
     }
 
     bars.push(
-      `<div class="bar ${state === 'down' || state === 'degraded' ? 'has-tip' : ''}" `
+      `<div class="bar ${state === 'down' ? 'has-tip' : ''}" `
       + `style="position:absolute;left:${pctLeft}%;width:${pctWidth}%;height:100%;background:${color}" `
       + `${tooltip}></div>`
     );
@@ -306,7 +306,6 @@ async function serveDashboard(env) {
     ${timeLabels(4 * hour, 4, now)}
     <div class="legend">
       <span><i class="dot" style="background:#22c55e"></i> Up</span>
-      <span><i class="dot" style="background:#f59e0b"></i> Degraded</span>
       <span><i class="dot" style="background:#ef4444"></i> Down</span>
       <span><i class="dot" style="background:#333"></i> No data</span>
     </div>
@@ -319,7 +318,6 @@ async function serveDashboard(env) {
     ${timeLabels(24 * hour, 6, now)}
     <div class="legend">
       <span><i class="dot" style="background:#22c55e"></i> Up</span>
-      <span><i class="dot" style="background:#f59e0b"></i> Degraded</span>
       <span><i class="dot" style="background:#ef4444"></i> Down</span>
       <span><i class="dot" style="background:#333"></i> No data</span>
     </div>
@@ -332,7 +330,6 @@ async function serveDashboard(env) {
     ${dayLabels(now, hour)}
     <div class="legend">
       <span><i class="dot" style="background:#22c55e"></i> Up</span>
-      <span><i class="dot" style="background:#f59e0b"></i> Degraded</span>
       <span><i class="dot" style="background:#ef4444"></i> Down</span>
       <span><i class="dot" style="background:#333"></i> No data</span>
     </div>
