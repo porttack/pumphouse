@@ -30,7 +30,7 @@ export default {
   async fetch(request, env, _ctx) {
     const url = new URL(request.url);
     if (url.pathname === '/internet') {
-      return serveDashboard(env);
+      return serveDashboard(env, url.searchParams.has('show4h'));
     }
     if (url.pathname === '/internet.json') {
       return serveJSON(env);
@@ -194,7 +194,9 @@ function makeTimeline(data, buckets, totalMs, now) {
       const ratio = inBucket.filter(e => e.up).length / inBucket.length;
       // 'partial' (amber) = any down entry in bucket; 'down' = all down
       state = ratio >= 1 ? 'up' : ratio > 0 ? 'partial' : 'down';
-      lastKnownState = state;
+      // Carry forward the state of the last entry (up/down), not the display
+      // state, so 'partial' doesn't bleed into subsequent empty buckets.
+      lastKnownState = inBucket[inBucket.length - 1].up ? 'up' : 'down';
     }
 
     const color = state === 'up'      ? '#22c55e'
@@ -252,7 +254,7 @@ function windowEntries(entries, windowMs, now) {
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
-async function serveDashboard(env) {
+async function serveDashboard(env, show4h = false) {
   const keys = await listAllKeys(env, 'log:');
   const entries = await Promise.all(
     keys.map(k => env.UPTIME_LOG.get(k.name).then(v => JSON.parse(v)))
@@ -261,7 +263,7 @@ async function serveDashboard(env) {
   const now = Date.now();
   const hour = 60 * 60 * 1000;
 
-  const last4h   = windowEntries(entries,  4      * hour, now);
+  const last4h   = show4h ? windowEntries(entries,  4 * hour, now) : null;
   const last24h  = windowEntries(entries, 24      * hour, now);
   const last28d  = windowEntries(entries, 28 * 24 * hour, now);
 
@@ -332,7 +334,7 @@ async function serveDashboard(env) {
     </span>
   </div>
 
-  <div class="card">
+  ${show4h ? `<div class="card">
     <h2>Past 4 Hours</h2>
     <div class="pct">${statLine(last4h, now)}</div>
     ${makeTimeline(last4h, 240, 4 * hour, now)}
@@ -343,7 +345,7 @@ async function serveDashboard(env) {
       <span><i class="dot" style="background:#ef4444"></i> Down</span>
       <span><i class="dot" style="background:#333"></i> No data</span>
     </div>
-  </div>
+  </div>` : ''}
 
   <div class="card">
     <h2>Past 24 Hours</h2>
