@@ -392,11 +392,11 @@ def render_epaper_jpg(
     draw.text((graph_left + s(1), graph_bottom + s(1)), hours_label, font=font_small, fill=AXIS_COLOR)
     try:
         if live_reading_ts:
-            now_label = live_reading_ts.strftime('%-m/%d %H:%M')
+            now_label = live_reading_ts.strftime('%-m/%d %-I:%M %p')
         else:
             last_ts   = datetime.fromisoformat(rows[-1]['timestamp'])
             data_age  = float(rows[-1].get('tank_data_age_seconds', 0))
-            now_label = (last_ts - timedelta(seconds=data_age)).strftime('%-m/%d %H:%M')
+            now_label = (last_ts - timedelta(seconds=data_age)).strftime('%-m/%d %-I:%M %p')
     except Exception:
         now_label = 'now'
     nl_bbox = draw.textbbox((0, 0), now_label, font=font_small)

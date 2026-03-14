@@ -98,13 +98,6 @@ def snapshot():
         return Response(jpeg_bytes, status=200, mimetype='image/jpeg',
                         headers={'Content-Length': str(len(jpeg_bytes))})
 
-
-@timelapse_bp.route('/snapshot.jpg')
-def snapshot_jpg():
-    """Alias for /snapshot?info=0 — returns raw JPEG for clients that require a .jpg URL."""
-    from flask import redirect
-    return redirect('/snapshot?info=0')
-
     # --- HTML page with weather panel ---
     try:
         title_date = today.strftime('%A, %B %-d, %Y')
@@ -254,6 +247,13 @@ def snapshot_jpg():
 </html>"""
 
     return Response(html, status=200, mimetype='text/html')
+
+
+@timelapse_bp.route('/snapshot.jpg')
+def snapshot_jpg():
+    """Alias for /snapshot?info=0 — returns raw JPEG for clients that require a .jpg URL."""
+    from flask import redirect
+    return redirect('/snapshot?info=0')
 
 
 TIMELAPSE_DIR     = '/home/pi/timelapses'

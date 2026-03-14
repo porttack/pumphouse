@@ -304,6 +304,94 @@ def get_outdoor_weather():
         return None
 
 
+def get_internet_uptime():
+    """Fetch uptime stats from Cloudflare worker and compute 24h and 7d metrics."""
+    import urllib.request
+    import json
+    try:
+        url = 'https://onblackberryhill.com/internet.json'
+        req = urllib.request.Request(url, headers={'User-Agent': 'pumphouse-dashboard/1.0'})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            entries = json.loads(resp.read().decode())
+    except Exception:
+        return None
+
+    if not entries:
+        return None
+
+    now_ms = datetime.utcnow().timestamp() * 1000
+
+    def compute_window(window_ms):
+        cutoff_ms = now_ms - window_ms
+        # Sort by timestamp
+        sorted_entries = sorted(entries, key=lambda e: e['ts'])
+        # Seed: last entry before the window, clamped to window start
+        in_window = [e for e in sorted_entries if _ts_ms(e['ts']) >= cutoff_ms]
+        seed = next((e for e in reversed(sorted_entries) if _ts_ms(e['ts']) < cutoff_ms), None)
+        if seed:
+            seeded = [{'ts': datetime.utcfromtimestamp(cutoff_ms / 1000).strftime('%Y-%m-%dT%H:%M:%S.000Z'),
+                       'up': seed['up']}] + in_window
+        else:
+            seeded = in_window
+
+        if not seeded:
+            return None
+
+        down_ms = 0
+        down_start = None
+        for e in seeded:
+            t = _ts_ms(e['ts'])
+            if not e['up'] and down_start is None:
+                down_start = t
+            elif e['up'] and down_start is not None:
+                down_ms += t - down_start
+                down_start = None
+        if down_start is not None:
+            down_ms += now_ms - down_start
+
+        down_min = round(down_ms / 60000)
+        pct = ((window_ms - down_ms) / window_ms * 100) if window_ms > 0 else 100
+        return {'down_min': down_min, 'pct': round(pct, 2)}
+
+    def _ts_ms(ts_str):
+        # Parse ISO 8601 timestamps (with or without fractional seconds)
+        for fmt in ('%Y-%m-%dT%H:%M:%S.%fZ', '%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%M:%S.000Z'):
+            try:
+                return datetime.strptime(ts_str, fmt).timestamp() * 1000
+            except ValueError:
+                continue
+        return 0
+
+    hour_ms = 3600 * 1000
+    stats_24h = compute_window(24 * hour_ms)
+    stats_7d  = compute_window(7 * 24 * hour_ms)
+
+    # Current status from latest entry
+    sorted_entries = sorted(entries, key=lambda e: e['ts'])
+    latest = sorted_entries[-1] if sorted_entries else None
+
+    since = None
+    if latest:
+        try:
+            since_dt = datetime.utcfromtimestamp(_ts_ms(latest['ts']) / 1000)
+            # Convert UTC to Pacific time (naive, handles PDT/PST roughly)
+            import time as _time
+            is_dst = _time.daylight and _time.localtime().tm_isdst
+            offset_hours = -(_time.timezone // 3600) + (1 if is_dst else 0)
+            from datetime import timezone, timedelta as _td
+            local_dt = since_dt + _td(hours=offset_hours)
+            since = local_dt.strftime('%-I:%M %p %-m/%-d')
+        except Exception:
+            since = None
+
+    return {
+        'stats_24h': stats_24h,
+        'stats_7d': stats_7d,
+        'currently_up': latest['up'] if latest else None,
+        'since': since,
+    }
+
+
 def get_cached_ecobee_temp(max_age_hours=24):
     """Get cached Ecobee temperature data from CSV"""
     try:
@@ -1017,7 +1105,11 @@ def epaper_jpg():
         public_mode=(request.args.get('public') == 'yes'),
         scale=max(1, min(8, request.args.get('scale', 4, type=int))),
     )
-    return send_file(buf, mimetype='image/jpeg', download_name='epaper.jpg')
+    from flask import Response as _Resp
+    resp = _Resp(buf.read(), mimetype='image/jpeg')
+    resp.headers['Content-Disposition'] = 'inline; filename="epaper.jpg"'
+    resp.headers['Cache-Control'] = 'public, max-age=600, stale-if-error=3600'
+    return resp
 
 
 @app.route('/water')
@@ -1171,6 +1263,9 @@ def index():
     # Get GPH metrics (cached, recalculated daily)
     gph_metrics = get_cached_gph(max_age_hours=24)
 
+    # Get internet uptime stats from Cloudflare worker
+    internet_uptime = get_internet_uptime()
+
     # Get all reservations (for repeat guest detection across all reservations)
     reservations = load_reservations(reservations_csv)
 
@@ -1303,6 +1398,7 @@ def index():
                          default_hours=DASHBOARD_DEFAULT_HOURS,
                          ecobee_temp=ecobee_temp,
                          gph_metrics=gph_metrics,
+                         internet_uptime=internet_uptime,
                          FLOAT_STATE_FULL=FLOAT_STATE_FULL,
                          FLOAT_STATE_CALLING=FLOAT_STATE_CALLING,
                          snapshot_url=DASHBOARD_URL.rstrip('/') + '/snapshot' if DASHBOARD_URL else None)
