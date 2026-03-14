@@ -305,7 +305,7 @@ async function serveDashboard(env) {
 </head>
 <body>
   <h1>🌊 Blackberry Hill</h1>
-  <div class="subtitle">Internet connectivity · checks every 1 min · logs on state change only</div>
+  <div class="subtitle">Internet connectivity · checks every 1 min · <a href="/timelapse" style="color:#64748b">Timelapse</a></div>
 
   <div class="current ${latest?.up ? 'up' : 'down'}">
     ${latest?.up ? '● Online' : '● Offline'}
@@ -377,10 +377,6 @@ async function serveDashboard(env) {
     }
   </div>
 
-  <div style="font-size:0.75rem;color:#334155;margin-top:1rem;display:flex;gap:1.5rem">
-    <a href="/timelapse" style="color:#334155">Timelapse</a>
-    <a href="/internet.json" style="color:#334155">JSON</a>
-  </div>
 </body>
 </html>`;
 
