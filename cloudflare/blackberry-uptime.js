@@ -35,11 +35,11 @@ const KV_TTL_SECONDS = 60 * 60 * 24 * 28;
 
 export default {
   // Cron trigger — fires on schedule set in Workers dashboard
-  async scheduled(event, env, ctx) {
+  async scheduled(_event, env, ctx) {
     ctx.waitUntil(recordStatus(env));
   },
 
-  async fetch(request, env, ctx) {
+  async fetch(request, env, _ctx) {
     const url = new URL(request.url);
     if (url.pathname === '/internet') {
       return serveDashboard(env);
@@ -283,6 +283,7 @@ async function serveDashboard(env) {
   <title>Blackberry Hill — Internet</title>
   <!-- <meta http-equiv="refresh" content="60"> -->
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌊</text></svg>">
   <style>
     * { box-sizing: border-box; }
     body { font-family: -apple-system, sans-serif; background: #0f0f0f; color: #e2e8f0; padding: 1.5rem; max-width: 860px; margin: auto; }
@@ -402,7 +403,8 @@ async function serveDashboard(env) {
     }
   </div>
 
-  <div style="font-size:0.75rem;color:#334155;margin-top:1rem">
+  <div style="font-size:0.75rem;color:#334155;margin-top:1rem;display:flex;gap:1.5rem">
+    <a href="/timelapse" style="color:#334155">Timelapse</a>
     <a href="/internet.json" style="color:#334155">JSON</a>
   </div>
 </body>
