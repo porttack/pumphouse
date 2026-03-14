@@ -7,26 +7,14 @@
 // Required KV bindings:  UPTIME_LOG, UPTIME_CURRENT
 //
 // Cron trigger: set in Workers dashboard under Triggers
-//   Every 2 min: */2 * * * *
-//   Every 4 min: */4 * * * *  (recommended — 360 writes/day, well within free tier)
+//   Every 1 min: * * * * *
+//
+// Only writes to KV on state changes (up→down or down→up), so
+// writes are ~2–10/day rather than once per poll. Free tier = 1,000/day.
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
 const TZ = 'America/Los_Angeles';
-
-// Set this to match your cron interval. A gap slightly larger than this
-// will be treated as "no data" (genuine outage with no records) rather
-// than just a missing poll. Recommend: cron interval + 1 minute of headroom.
-//
-// Examples:
-//   Cron every 1 min  → POLL_INTERVAL_MS = 1 * 60 * 1000
-//   Cron every 2 min  → POLL_INTERVAL_MS = 2 * 60 * 1000
-//   Cron every 4 min  → POLL_INTERVAL_MS = 4 * 60 * 1000
-const POLL_INTERVAL_MS = 6 * 60 * 1000;
-
-// Gaps up to this size are filled with the last known state rather than
-// shown as grey "no data". Set to poll interval + 1 minute headroom.
-const GAP_THRESHOLD_MS = POLL_INTERVAL_MS + 60 * 1000;
 
 // KV TTL — how long to keep entries (28 days)
 const KV_TTL_SECONDS = 60 * 60 * 24 * 28;
@@ -69,18 +57,24 @@ async function recordStatus(env) {
     up = false;
   }
   const ts = new Date().toISOString();
-  const entry = JSON.stringify({ ts, up });
 
-  // ISO timestamp as key — sorts lexicographically = chronological order in KV list
-  const key = `log:${ts}`;
-  await env.UPTIME_LOG.put(key, entry, { expirationTtl: KV_TTL_SECONDS });
-  await env.UPTIME_CURRENT.put('latest', entry);
+  // Read last known state — cheap KV read, ~1,440/day, well within free tier.
+  // Only write to the log when state changes (up↔down), keeping writes ~2–10/day.
+  const lastJson = await env.UPTIME_CURRENT.get('latest');
+  const last = lastJson ? JSON.parse(lastJson) : null;
+
+  if (!last || last.up !== up) {
+    const entry = JSON.stringify({ ts, up });
+    const key = `log:${ts}`;
+    await env.UPTIME_LOG.put(key, entry, { expirationTtl: KV_TTL_SECONDS });
+    await env.UPTIME_CURRENT.put('latest', entry);
+  }
 }
 
 // ─── KV Helpers ───────────────────────────────────────────────────────────────
 
-// KV list() has a hard limit of 1000 keys per call.
-// At 4-min intervals, 7 days = 2,520 entries — requires pagination.
+// With state-change-only logging, entries are sparse (tens per month, not thousands).
+// Pagination is kept for safety in case of historical dense data or backfills.
 async function listAllKeys(env, prefix) {
   let keys = [];
   let cursor = undefined;
@@ -133,18 +127,6 @@ function formatDateTime(ts) {
   });
 }
 
-// Estimate actual poll interval from the median gap between recent entries.
-function estimatePollInterval(entries) {
-  const recent = entries.slice(-10);
-  if (recent.length < 2) return null;
-  const gaps = [];
-  for (let i = 1; i < recent.length; i++) {
-    gaps.push(new Date(recent[i].ts).getTime() - new Date(recent[i - 1].ts).getTime());
-  }
-  gaps.sort((a, b) => a - b);
-  return gaps[Math.floor(gaps.length / 2)];
-}
-
 // Returns outage intervals from a sorted entry array as {start, end} ms timestamps.
 // end is null if the outage is ongoing (last entry is still down).
 function downtimeIntervals(entries) {
@@ -167,8 +149,7 @@ function downtimeIntervals(entries) {
 
 // ─── Dashboard Components ─────────────────────────────────────────────────────
 
-// Uses timestamp-based accounting so downtime matches the outage list exactly,
-// regardless of whether the poll interval has changed over time.
+// Uses timestamp-based accounting so downtime matches the outage list exactly.
 function statLine(arr, now) {
   if (arr.length === 0) return '<span style="color:#555">— no data</span>';
   const intervals = downtimeIntervals(arr);
@@ -183,10 +164,8 @@ function statLine(arr, now) {
 }
 
 // Renders a horizontal timeline bar.
-// Buckets smaller than GAP_THRESHOLD_MS that have no data inherit the last
-// known state, avoiding spurious grey gaps from the poll interval.
-// Buckets wider than GAP_THRESHOLD_MS that have no data show as grey,
-// indicating a genuine period with no records (e.g. Pi was fully offline).
+// Entries are sparse (state-change-only), so empty buckets always carry forward
+// the last known state. Grey "no data" only appears before the first ever entry.
 function makeTimeline(data, buckets, totalMs, now) {
   if (data.length === 0) return '<div style="color:#555;font-size:0.85rem">No data yet</div>';
 
@@ -204,9 +183,8 @@ function makeTimeline(data, buckets, totalMs, now) {
 
     let state;
     if (inBucket.length === 0) {
-      // Small gap (expected between polls) — carry forward last known state
-      // Large gap (genuine outage or no data) — show as no-data grey
-      state = bucketMs <= GAP_THRESHOLD_MS ? lastKnownState : 'nodata';
+      // Carry forward — no entry means no state change, not missing data
+      state = lastKnownState;
     } else {
       const ratio = inBucket.filter(e => e.up).length / inBucket.length;
       state = ratio > 0 ? 'up' : 'down';
@@ -270,10 +248,6 @@ async function serveDashboard(env) {
   const last28d  = entries.filter(e => now - new Date(e.ts).getTime() <= 28 * 24 * hour);
 
   const latest = entries[entries.length - 1];
-
-  const estimatedMs = estimatePollInterval(entries);
-  const pollMins = estimatedMs ? Math.round(estimatedMs / 60000) : Math.round(POLL_INTERVAL_MS / 60000);
-
   const outages = downtimeIntervals(last28d);
 
   const html = `<!DOCTYPE html>
@@ -331,12 +305,12 @@ async function serveDashboard(env) {
 </head>
 <body>
   <h1>🌊 Blackberry Hill</h1>
-  <div class="subtitle">Internet connectivity · checks every ~${pollMins} min</div>
+  <div class="subtitle">Internet connectivity · checks every 1 min · logs on state change only</div>
 
   <div class="current ${latest?.up ? 'up' : 'down'}">
     ${latest?.up ? '● Online' : '● Offline'}
     <span style="font-size:0.9rem;color:#64748b;font-weight:normal">
-      — last checked ${latest ? formatTime(latest.ts) : 'never'} PT
+      — since ${latest ? formatDateTime(latest.ts) : 'unknown'} PT
     </span>
   </div>
 
