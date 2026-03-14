@@ -819,7 +819,7 @@ def timelapse_frame_view_client(date_str):
 </body>
 </html>"""
     return Response(html, status=200, mimetype='text/html',
-                    headers={'Cache-Control': 'public, max-age=3600'})
+                    headers={'Cache-Control': 'public, max-age=3600, stale-if-error=86400'})
 
 
 @timelapse_bp.route('/timelapse/<date_str>/frame-view', methods=['POST'])
@@ -1712,11 +1712,11 @@ def timelapse_view(date_or_file):
     if date_str >= _yesterday:
         # Today:     page changes during recording (new preview MP4, chevron grows)
         # Yesterday: "next" button must appear within minutes of today's first MP4
-        cache_hdr = 'public, max-age=300, must-revalidate'
+        cache_hdr = 'public, max-age=300, stale-if-error=86400'
     else:
         # Older pages: content is stable, but 1-hour TTL lets the "All Timelapses"
         # chevron slowly propagate to cached pages without meaningful DoS risk
         # (Cloudflare caches per-URL, so a single user browsing old pages primes
         # the cache for everyone else).
-        cache_hdr = 'public, max-age=3600'
+        cache_hdr = 'public, max-age=3600, stale-if-error=86400'
     return Response(html, mimetype='text/html', headers={'Cache-Control': cache_hdr})

@@ -91,7 +91,9 @@ async function handleSnapshot(request, url) {
   const headers = new Headers(piResp.headers);
   headers.set('X-Snapshot-Worker', 'v2');
   if (piResp.ok) {
-    headers.set('Cache-Control', 'public, max-age=300');
+    // stale-if-error=86400: serve the last cached snapshot for up to 24h if the
+    // Pi tunnel is down (internet outage) rather than showing a Cloudflare error page.
+    headers.set('Cache-Control', 'public, max-age=300, stale-if-error=86400');
   }
   return new Response(piResp.body, { status: piResp.status, headers });
 }

@@ -5,6 +5,19 @@
 # this).  Binary assets (MP4, JPEG) are cached automatically by file extension
 # and do not need a Cache Rule — they just need the right Cache-Control header
 # from the Pi, which the Flask code provides (max-age=31536000 for past files).
+#
+# Tunnel-down resilience
+# ----------------------
+# When the Cloudflare Tunnel (cloudflared) goes down — typically because the
+# Pi's internet connection is out — Cloudflare generates a 523/530 error and
+# would show an error page rather than a cached copy.  To serve stale cached
+# content instead, origin responses must include stale-if-error=N in their
+# Cache-Control header.  Flask sets this on all timelapse HTML responses and
+# the ratings Worker sets it on /snapshot responses.
+#
+# The serve_stale block below enables stale-while-revalidate at the edge,
+# which keeps expired entries alive for background revalidation.  The actual
+# stale-if-error window (24 h) is controlled by the origin header, not here.
 
 resource "cloudflare_ruleset" "cache" {
   zone_id     = var.cloudflare_zone_id
@@ -17,8 +30,8 @@ resource "cloudflare_ruleset" "cache" {
   # Path /timelapse/20* matches all date-keyed pages (2020s and beyond).
   # Edge TTL is left to the origin's Cache-Control so the Pi's tiered policy
   # is honoured:
-  #   today + yesterday → max-age=300  (5 min)
-  #   2+ days old       → max-age=3600 (1 hr)
+  #   today + yesterday → max-age=300,  stale-if-error=86400
+  #   2+ days old       → max-age=3600, stale-if-error=86400
   # MP4 and JPEG assets on these pages are already cached by extension.
   rules {
     description = "Cache timelapse HTML pages"
@@ -38,6 +51,14 @@ resource "cloudflare_ruleset" "cache" {
 
       browser_ttl {
         mode = "respect_origin"
+      }
+
+      serve_stale {
+        # Keep expired entries in the edge cache available for stale-if-error
+        # serving.  When the tunnel is down, Cloudflare returns the last cached
+        # copy rather than a 523 error, honouring the stale-if-error=86400 the
+        # Pi includes in its Cache-Control header.
+        disable_stale_while_revalidate = false
       }
     }
   }
