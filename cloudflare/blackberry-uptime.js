@@ -232,6 +232,17 @@ function dayLabels(totalDays, stepDays, now, hour) {
   return `<div style="display:flex;justify-content:space-between;font-size:0.7rem;color:#555;margin-top:2px">${labels.join('')}</div>`;
 }
 
+// Returns entries within the window, prepending the last entry before the window
+// (clamped to the window start) so that makeTimeline and statLine both see the
+// correct initial state even when no state change has occurred within the window.
+function windowEntries(entries, windowMs, now) {
+  const cutoff = now - windowMs;
+  const inWindow = entries.filter(e => new Date(e.ts).getTime() >= cutoff);
+  const seed = [...entries].reverse().find(e => new Date(e.ts).getTime() < cutoff);
+  if (seed) return [{ ...seed, ts: new Date(cutoff).toISOString() }, ...inWindow];
+  return inWindow;
+}
+
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 async function serveDashboard(env) {
@@ -243,9 +254,9 @@ async function serveDashboard(env) {
   const now = Date.now();
   const hour = 60 * 60 * 1000;
 
-  const last4h   = entries.filter(e => now - new Date(e.ts).getTime() <=  4      * hour);
-  const last24h  = entries.filter(e => now - new Date(e.ts).getTime() <= 24      * hour);
-  const last28d  = entries.filter(e => now - new Date(e.ts).getTime() <= 28 * 24 * hour);
+  const last4h   = windowEntries(entries,  4      * hour, now);
+  const last24h  = windowEntries(entries, 24      * hour, now);
+  const last28d  = windowEntries(entries, 28 * 24 * hour, now);
 
   const latest = entries[entries.length - 1];
   const outages = downtimeIntervals(last28d);
