@@ -40,6 +40,11 @@ export default {
       await recordStatus(env);
       return new Response('OK - status recorded', { status: 200 });
     }
+    // ── ONE-TIME SEED — remove this block once /internet/seed has been run ──
+    if (url.pathname === '/internet/seed') {
+      return seedData(env);
+    }
+    // ── END ONE-TIME SEED ────────────────────────────────────────────────────
     return new Response('Not found', { status: 404 });
   }
 };
@@ -187,25 +192,27 @@ function makeTimeline(data, buckets, totalMs, now) {
       state = lastKnownState;
     } else {
       const ratio = inBucket.filter(e => e.up).length / inBucket.length;
-      state = ratio > 0 ? 'up' : 'down';
+      // 'partial' (amber) = any down entry in bucket; 'down' = all down
+      state = ratio >= 1 ? 'up' : ratio > 0 ? 'partial' : 'down';
       lastKnownState = state;
     }
 
-    const color = state === 'up'   ? '#22c55e'
-                : state === 'down' ? '#ef4444'
+    const color = state === 'up'      ? '#22c55e'
+                : state === 'partial' ? '#f59e0b'
+                : state === 'down'    ? '#ef4444'
                 : '#333';
 
     const pctLeft  = (i / buckets * 100).toFixed(3);
     const pctWidth = (1 / buckets * 100).toFixed(3);
 
     let tooltip = '';
-    if (state === 'down') {
+    if (state === 'down' || state === 'partial') {
       const label = `${formatTime(bucketStart)} – ${formatTime(bucketEnd)}`;
       tooltip = `data-tip="${label}"`;
     }
 
     bars.push(
-      `<div class="bar ${state === 'down' ? 'has-tip' : ''}" `
+      `<div class="bar ${state === 'down' || state === 'partial' ? 'has-tip' : ''}" `
       + `style="position:absolute;left:${pctLeft}%;width:${pctWidth}%;height:100%;background:${color}" `
       + `${tooltip}></div>`
     );
@@ -332,6 +339,7 @@ async function serveDashboard(env) {
     ${timeLabels(4 * hour, 4, now)}
     <div class="legend">
       <span><i class="dot" style="background:#22c55e"></i> Up</span>
+      <span><i class="dot" style="background:#f59e0b"></i> Partial outage</span>
       <span><i class="dot" style="background:#ef4444"></i> Down</span>
       <span><i class="dot" style="background:#333"></i> No data</span>
     </div>
@@ -344,6 +352,7 @@ async function serveDashboard(env) {
     ${timeLabels(24 * hour, 6, now)}
     <div class="legend">
       <span><i class="dot" style="background:#22c55e"></i> Up</span>
+      <span><i class="dot" style="background:#f59e0b"></i> Partial outage</span>
       <span><i class="dot" style="background:#ef4444"></i> Down</span>
       <span><i class="dot" style="background:#333"></i> No data</span>
     </div>
@@ -356,6 +365,7 @@ async function serveDashboard(env) {
     ${dayLabels(28, 7, now, hour)}
     <div class="legend">
       <span><i class="dot" style="background:#22c55e"></i> Up</span>
+      <span><i class="dot" style="background:#f59e0b"></i> Partial outage</span>
       <span><i class="dot" style="background:#ef4444"></i> Down</span>
       <span><i class="dot" style="background:#333"></i> No data</span>
     </div>
@@ -393,3 +403,49 @@ async function serveDashboard(env) {
 
   return new Response(html, { headers: { 'Content-Type': 'text/html' } });
 }
+
+// ── ONE-TIME SEED — remove this function once /internet/seed has been run ────
+//
+// Visit /internet/seed once after deploying. It will:
+//   1. Delete all log entries before 2026-03-12 (old dirty tunnel-status data)
+//   2. Write a single baseline entry at 2026-02-14 (28-day window start) with up: true
+//
+// The baseline entry causes windowEntries() to seed the 28-day timeline as
+// green from Feb 14 onward, with real outage data taking over from Mar 12.
+// Check for the baseline key to guard against re-running.
+async function seedData(env) {
+  const BASELINE_TS  = '2026-02-14T00:00:00.000Z';
+  const BASELINE_KEY = `log:${BASELINE_TS}`;
+  const CUTOFF_TS    = '2026-03-12T00:00:00.000Z';
+
+  const existing = await env.UPTIME_LOG.get(BASELINE_KEY);
+  if (existing) {
+    return new Response('Already seeded — baseline entry exists, nothing to do.', { status: 200 });
+  }
+
+  // Delete all log entries before the cutoff (old dense / tunnel-status-era data)
+  let deleted = 0;
+  let cursor;
+  do {
+    const opts = { prefix: 'log:', limit: 1000 };
+    if (cursor) opts.cursor = cursor;
+    const result = await env.UPTIME_LOG.list(opts);
+    for (const k of result.keys) {
+      const ts = k.name.slice(4); // strip 'log:' prefix
+      if (ts >= CUTOFF_TS) break; // keys are sorted lexicographically
+      await env.UPTIME_LOG.delete(k.name);
+      deleted++;
+    }
+    cursor = result.list_complete ? undefined : result.cursor;
+  } while (cursor);
+
+  // Write baseline: "up" at the start of the 28-day window
+  const entry = JSON.stringify({ ts: BASELINE_TS, up: true });
+  await env.UPTIME_LOG.put(BASELINE_KEY, entry, { expirationTtl: KV_TTL_SECONDS });
+
+  return new Response(
+    `Seeded OK — deleted ${deleted} old entries, wrote baseline at ${BASELINE_TS}`,
+    { status: 200 }
+  );
+}
+// ── END ONE-TIME SEED ─────────────────────────────────────────────────────────
