@@ -19,6 +19,9 @@ const TZ = 'America/Los_Angeles';
 // KV TTL — how long to keep entries (28 days)
 const KV_TTL_SECONDS = 60 * 60 * 24 * 28;
 
+// Outages shorter than this are suppressed — likely web service restarts, not real outages
+const MIN_OUTAGE_MS = 2 * 60 * 1000;
+
 // ─── Entry Point ─────────────────────────────────────────────────────────────
 
 export default {
@@ -129,6 +132,7 @@ function formatDateTime(ts) {
 
 // Returns outage intervals from a sorted entry array as {start, end} ms timestamps.
 // end is null if the outage is ongoing (last entry is still down).
+// Completed outages shorter than MIN_OUTAGE_MS are suppressed (likely service restarts).
 function downtimeIntervals(entries) {
   const intervals = [];
   let downStart = null;
@@ -137,12 +141,14 @@ function downtimeIntervals(entries) {
     if (!e.up && downStart === null) {
       downStart = t;
     } else if (e.up && downStart !== null) {
-      intervals.push({ start: downStart, end: t });
+      if (t - downStart >= MIN_OUTAGE_MS) {
+        intervals.push({ start: downStart, end: t });
+      }
       downStart = null;
     }
   }
   if (downStart !== null) {
-    intervals.push({ start: downStart, end: null });
+    intervals.push({ start: downStart, end: null }); // ongoing — always show
   }
   return intervals;
 }
@@ -173,6 +179,10 @@ function makeTimeline(data, buckets, totalMs, now) {
   const bars = [];
   let lastKnownState = 'nodata';
 
+  // Use same qualifying outage intervals as statLine/outage table so short
+  // blips (< MIN_OUTAGE_MS) are suppressed consistently across all views.
+  const outageIntervals = downtimeIntervals(data);
+
   for (let i = 0; i < buckets; i++) {
     const bucketStart = now - totalMs + i * bucketMs;
     const bucketEnd   = bucketStart + bucketMs;
@@ -186,12 +196,25 @@ function makeTimeline(data, buckets, totalMs, now) {
       // Carry forward — no entry means no state change, not missing data
       state = lastKnownState;
     } else {
-      const ratio = inBucket.filter(e => e.up).length / inBucket.length;
-      // 'partial' (amber) = any down entry in bucket; 'down' = all down
-      state = ratio >= 1 ? 'up' : ratio > 0 ? 'partial' : 'down';
-      // Carry forward the state of the last entry (up/down), not the display
-      // state, so 'partial' doesn't bleed into subsequent empty buckets.
-      lastKnownState = inBucket[inBucket.length - 1].up ? 'up' : 'down';
+      const lastEntryUp = inBucket[inBucket.length - 1].up;
+      // Check if any qualifying (>= MIN_OUTAGE_MS) outage overlaps this bucket
+      const hasQualifyingOutage = outageIntervals.some(o => {
+        const oEnd = o.end ?? now;
+        return o.start < bucketEnd && oEnd > bucketStart;
+      });
+      if (!hasQualifyingOutage) {
+        // No real outage — suppress any blip and treat bucket as up
+        state = 'up';
+        lastKnownState = 'up';
+      } else if (lastEntryUp) {
+        // Qualifying outage overlapped but connection recovered within bucket
+        state = 'partial';
+        lastKnownState = 'up';
+      } else {
+        // Qualifying outage and still down at end of bucket
+        state = 'down';
+        lastKnownState = 'down';
+      }
     }
 
     const color = state === 'up'      ? '#22c55e'
@@ -265,6 +288,21 @@ async function serveDashboard(env, show4h = false) {
   const latest = entries[entries.length - 1];
   const outages = downtimeIntervals(last28d);
 
+  // "Since" time for the current-status line: use qualifying outage boundaries
+  // so short blips don't reset the "Online since" clock.
+  const allOutages = downtimeIntervals(entries);
+  let sinceTsMs;
+  if (!latest?.up) {
+    // Currently down — since the start of the ongoing qualifying outage
+    const ongoing = allOutages.find(o => o.end === null);
+    sinceTsMs = ongoing ? ongoing.start : new Date(latest.ts).getTime();
+  } else {
+    // Currently up — since the end of the last qualifying outage
+    const lastEnded = [...allOutages].reverse().find(o => o.end !== null);
+    sinceTsMs = lastEnded ? lastEnded.end : new Date(entries[0].ts).getTime();
+  }
+  const sinceLabel = formatDateTime(new Date(sinceTsMs).toISOString());
+
   const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -336,7 +374,7 @@ async function serveDashboard(env, show4h = false) {
   <div class="current ${latest?.up ? 'up' : 'down'}">
     ${latest?.up ? '● Online' : '● Offline'}
     <span style="font-size:0.9rem;color:#64748b;font-weight:normal">
-      — since ${latest ? formatDateTime(latest.ts) : 'unknown'} PT
+      — since ${latest ? sinceLabel : 'unknown'} PT
     </span>
   </div>
 
