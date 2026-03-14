@@ -408,11 +408,12 @@ async function serveDashboard(env) {
 //
 // Visit /internet/seed once after deploying. It will:
 //   1. Delete all log entries before 2026-03-12 (old dirty tunnel-status data)
-//   2. Write a single baseline entry at 2026-02-14 (28-day window start) with up: true
+//   2. Write baseline up:true at 2026-02-14 (28-day window start)
+//   3. Write 8 outage pairs (down + up) from March 12 derived from events.csv
+//      TANK_OUTAGE_RECOVERY entries (converted from PDT to UTC)
 //
-// The baseline entry causes windowEntries() to seed the 28-day timeline as
-// green from Feb 14 onward, with real outage data taking over from Mar 12.
-// Check for the baseline key to guard against re-running.
+// Outages 9-11 on March 12 (after 9:53 PM local) are already in KV from
+// the live worker and are not re-seeded here.
 async function seedData(env) {
   const BASELINE_TS  = '2026-02-14T00:00:00.000Z';
   const BASELINE_KEY = `log:${BASELINE_TS}`;
@@ -440,11 +441,30 @@ async function seedData(env) {
   } while (cursor);
 
   // Write baseline: "up" at the start of the 28-day window
-  const entry = JSON.stringify({ ts: BASELINE_TS, up: true });
-  await env.UPTIME_LOG.put(BASELINE_KEY, entry, { expirationTtl: KV_TTL_SECONDS });
+  await env.UPTIME_LOG.put(BASELINE_KEY,
+    JSON.stringify({ ts: BASELINE_TS, up: true }), { expirationTtl: KV_TTL_SECONDS });
+
+  // March 12 outages derived from events.csv TANK_OUTAGE_RECOVERY entries (PDT→UTC).
+  // Each pair: go down at .start, come back up at .end.
+  const outages = [
+    { start: '2026-03-12T10:32:03.000Z', end: '2026-03-12T11:12:45.000Z' }, // 40.7 min
+    { start: '2026-03-12T12:12:56.000Z', end: '2026-03-12T12:18:08.000Z' }, // 5.2 min
+    { start: '2026-03-12T12:30:27.000Z', end: '2026-03-12T18:54:27.000Z' }, // 6.4 hrs
+    { start: '2026-03-12T18:59:49.000Z', end: '2026-03-12T19:15:19.000Z' }, // 15.5 min
+    { start: '2026-03-12T19:25:09.000Z', end: '2026-03-12T19:40:33.000Z' }, // 15.4 min
+    { start: '2026-03-12T19:45:38.000Z', end: '2026-03-12T19:55:44.000Z' }, // 10.1 min
+    { start: '2026-03-12T19:58:05.000Z', end: '2026-03-12T21:22:05.000Z' }, // 1.4 hrs
+    { start: '2026-03-12T21:24:44.000Z', end: '2026-03-12T22:48:44.000Z' }, // 1.4 hrs
+  ];
+  for (const o of outages) {
+    await env.UPTIME_LOG.put(`log:${o.start}`,
+      JSON.stringify({ ts: o.start, up: false }), { expirationTtl: KV_TTL_SECONDS });
+    await env.UPTIME_LOG.put(`log:${o.end}`,
+      JSON.stringify({ ts: o.end, up: true }), { expirationTtl: KV_TTL_SECONDS });
+  }
 
   return new Response(
-    `Seeded OK — deleted ${deleted} old entries, wrote baseline at ${BASELINE_TS}`,
+    `Seeded OK — deleted ${deleted} old entries, wrote baseline + ${outages.length} outages`,
     { status: 200 }
   );
 }
