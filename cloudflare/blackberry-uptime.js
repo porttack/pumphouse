@@ -305,7 +305,7 @@ async function serveDashboard(env) {
 </head>
 <body>
   <h1>🌊 Blackberry Hill</h1>
-  <div class="subtitle">Internet connectivity · checks every 1 min · <a href="/timelapse" style="color:#64748b">Timelapse</a></div>
+  <div class="subtitle">Internet connectivity · checks every 1 min · <a href="/timelapse" style="color:#64748b">Timelapse</a> · <a href="https://forecast.weather.gov/MapClick.php?lat=44.64196&lon=-124.04110" style="color:#64748b">Weather</a></div>
 
   <div class="current ${latest?.up ? 'up' : 'down'}">
     ${latest?.up ? '● Online' : '● Offline'}
