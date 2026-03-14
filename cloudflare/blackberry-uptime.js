@@ -210,7 +210,7 @@ function makeTimeline(data, buckets, totalMs, now) {
 
     bars.push(
       `<div class="bar ${state === 'down' || state === 'partial' ? 'has-tip' : ''}" `
-      + `style="position:absolute;left:${pctLeft}%;width:${pctWidth}%;height:100%;background:${color}" `
+      + `style="position:absolute;left:${pctLeft}%;width:calc(${pctWidth}% + 0.6px);height:100%;background:${color}" `
       + `${tooltip}></div>`
     );
   }
@@ -320,7 +320,18 @@ async function serveDashboard(env, show4h = false) {
 </head>
 <body>
   <h1>🌊 Blackberry Hill</h1>
-  <div class="subtitle">Internet connectivity · checks every 1 min · <a href="/timelapse" style="color:#64748b">Timelapse</a> · <a href="https://forecast.weather.gov/MapClick.php?lat=44.64196&lon=-124.04110" style="color:#64748b">Weather</a></div>
+  <div class="subtitle">Internet connectivity · checks every 1 min · <a href="/snapshot" style="color:#64748b">Now</a> · <a href="/timelapse" style="color:#64748b">Timelapse</a> · <a href="https://forecast.weather.gov/MapClick.php?lat=44.64196&lon=-124.04110" style="color:#64748b">Weather</a></div>
+  <div id="refresh-line" style="font-size:0.75rem;color:#475569;margin-top:-1.5rem;margin-bottom:2rem"> </div>
+  <script>
+    const _loadedAt = Date.now();
+    function _tick() {
+      const elapsed = Math.floor((Date.now() - _loadedAt) / 1000);
+      const t = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: '${TZ}' });
+      const ago = elapsed < 60 ? elapsed + 's ago' : Math.floor(elapsed / 60) + 'm ago';
+      document.getElementById('refresh-line').textContent = t + ' PT · loaded ' + ago;
+    }
+    _tick(); setInterval(_tick, 1000);
+  </script>
 
   <div class="current ${latest?.up ? 'up' : 'down'}">
     ${latest?.up ? '● Online' : '● Offline'}
