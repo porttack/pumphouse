@@ -319,7 +319,8 @@ def get_internet_uptime():
     if not entries:
         return None
 
-    now_ms = datetime.utcnow().timestamp() * 1000
+    import time as _time_mod
+    now_ms = _time_mod.time() * 1000
 
     def compute_window(window_ms):
         cutoff_ms = now_ms - window_ms
@@ -354,10 +355,12 @@ def get_internet_uptime():
         return {'down_min': down_min, 'pct': round(pct, 2)}
 
     def _ts_ms(ts_str):
-        # Parse ISO 8601 timestamps (with or without fractional seconds)
-        for fmt in ('%Y-%m-%dT%H:%M:%S.%fZ', '%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%M:%S.000Z'):
+        # Parse ISO 8601 UTC timestamps — must attach utc timezone before
+        # calling .timestamp() so Python doesn't misinterpret as local time.
+        from datetime import timezone as _tz
+        for fmt in ('%Y-%m-%dT%H:%M:%S.%fZ', '%Y-%m-%dT%H:%M:%SZ'):
             try:
-                return datetime.strptime(ts_str, fmt).timestamp() * 1000
+                return datetime.strptime(ts_str, fmt).replace(tzinfo=_tz.utc).timestamp() * 1000
             except ValueError:
                 continue
         return 0
@@ -370,19 +373,39 @@ def get_internet_uptime():
     sorted_entries = sorted(entries, key=lambda e: e['ts'])
     latest = sorted_entries[-1] if sorted_entries else None
 
+    # Qualifying outages — matches Cloudflare worker: skip completed outages < 2 min
+    MIN_OUTAGE_MS = 2 * 60 * 1000
+    def qualifying_outages(ents):
+        intervals = []
+        down_start = None
+        for e in ents:
+            t = _ts_ms(e['ts'])
+            if not e['up'] and down_start is None:
+                down_start = t
+            elif e['up'] and down_start is not None:
+                if t - down_start >= MIN_OUTAGE_MS:
+                    intervals.append((down_start, t))
+                down_start = None
+        if down_start is not None:
+            intervals.append((down_start, None))  # ongoing
+        return intervals
+
+    all_outages = qualifying_outages(sorted_entries)
+
     since = None
-    if latest:
-        try:
-            since_dt = datetime.utcfromtimestamp(_ts_ms(latest['ts']) / 1000)
-            # Convert UTC to Pacific time (naive, handles PDT/PST roughly)
-            import time as _time
-            is_dst = _time.daylight and _time.localtime().tm_isdst
-            offset_hours = -(_time.timezone // 3600) + (1 if is_dst else 0)
-            from datetime import timezone, timedelta as _td
-            local_dt = since_dt + _td(hours=offset_hours)
-            since = local_dt.strftime('%-I:%M %p %-m/%-d')
-        except Exception:
-            since = None
+    try:
+        if latest and latest['up']:
+            ended = [o for o in all_outages if o[1] is not None]
+            since_ms = ended[-1][1] if ended else _ts_ms(sorted_entries[0]['ts'])
+        elif latest:
+            ongoing = next((o for o in all_outages if o[1] is None), None)
+            since_ms = ongoing[0] if ongoing else _ts_ms(latest['ts'])
+        else:
+            since_ms = None
+        if since_ms:
+            since = datetime.fromtimestamp(since_ms / 1000).strftime('%-I:%M %p %-m/%-d')
+    except Exception:
+        since = None
 
     return {
         'stats_24h': stats_24h,

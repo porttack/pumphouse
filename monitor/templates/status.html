@@ -3,7 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="refresh" content="300">
     <title>Pumphouse Monitor</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <style>
@@ -221,7 +220,14 @@
 <body>
     <div class="container">
         <h1>PUMPHOUSE SYSTEM STATUS <span style="font-size: 14px; color: #888; font-weight: normal;">v{{ version }}</span></h1>
-        <div class="timestamp">Last Updated: {{ now.strftime('%Y-%m-%d %H:%M:%S') }} (auto-refresh: 60s) &middot; <a href="/timelapse" style="color:#4CAF50; text-decoration:none;">Timelapses</a>{% if snapshot_url %} &middot; <a href="{{ snapshot_url }}" style="color:#4CAF50; text-decoration:none;">Now</a>{% endif %} &middot; <a href="https://onblackberryhill.com/internet" style="color:#4CAF50; text-decoration:none;">Uptime</a></div>
+        <div class="timestamp">Last Updated: {{ now.strftime('%Y-%m-%d %H:%M:%S') }} (<span id="age">just now</span>) &middot; <a href="/timelapse" style="color:#4CAF50; text-decoration:none;">Timelapses</a>{% if snapshot_url %} &middot; <a href="{{ snapshot_url }}" style="color:#4CAF50; text-decoration:none;">Now</a>{% endif %} &middot; <a href="https://onblackberryhill.com/internet" style="color:#4CAF50; text-decoration:none;">Uptime</a></div>
+        <script>
+            var _loaded = Date.now();
+            setInterval(function() {
+                var mins = Math.floor((Date.now() - _loaded) / 60000);
+                document.getElementById('age').textContent = mins === 0 ? 'just now' : mins + ' min ago';
+            }, 30000);
+        </script>
 
         <!-- E-paper display + most recent sunset snapshot -->
         <div class="section" style="padding: 12px;">
