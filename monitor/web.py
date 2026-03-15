@@ -1108,7 +1108,7 @@ def epaper_jpg():
     from flask import Response as _Resp
     resp = _Resp(buf.read(), mimetype='image/jpeg')
     resp.headers['Content-Disposition'] = 'inline; filename="epaper.jpg"'
-    resp.headers['Cache-Control'] = 'public, max-age=600, stale-if-error=3600'
+    resp.headers['Cache-Control'] = 'public, max-age=600, stale-if-error=172800'
     return resp
 
 
