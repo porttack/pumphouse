@@ -1233,7 +1233,9 @@ def water_status():
 </body>
 </html>"""
     from flask import Response
-    return Response(html, mimetype='text/html')
+    resp = Response(html, mimetype='text/html')
+    resp.headers['Cache-Control'] = 'public, max-age=600, stale-if-error=172800'
+    return resp
 
 
 @app.route('/')

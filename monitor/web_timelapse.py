@@ -750,8 +750,10 @@ def timelapse_snapshot(date_str):
     path = os.path.join(SNAPSHOT_DIR, f'{date_str}.jpg')
     if not os.path.exists(path):
         return Response('No snapshot for this date.', status=404)
-    return send_file(path, mimetype='image/jpeg',
+    resp = send_file(path, mimetype='image/jpeg',
                      max_age=3600, conditional=True)  # 1hr CDN TTL; ETag allows revalidation after set-snapshot
+    resp.headers['Cache-Control'] = 'public, max-age=3600, stale-if-error=172800'
+    return resp
 
 
 @timelapse_bp.route('/timelapse/<date_str>/frame-view-client')
