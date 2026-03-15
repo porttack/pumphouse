@@ -710,6 +710,13 @@ def timelapse_index():
     ratings = _read_ratings()
     for d in reversed(dates):
         r = ratings.get(d, {})
+        # If not in local file and KV is the backend, fall back to KV
+        if not r and _RATINGS_BACKEND == 'cloudflare_kv':
+            r = _kv_read_rating(d) or {}
+            if r.get('count', 0) > 0:
+                # Sync back into local file so future lookups don't need KV
+                ratings[d] = r
+                _write_ratings(ratings)
         if r.get('count', 0) > 0 and r['sum'] / r['count'] >= 4.5:
             return redirect(f'/timelapse/{d}')
     return redirect(f'/timelapse/{dates[-1]}')

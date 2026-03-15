@@ -240,10 +240,11 @@
                 <a href="https://onblackberryhill2.tplinkdns.com:6443/?hours=120&totals=income" style="flex-shrink:0; width:100%; max-width:500px; display:block;">
                 <img id="epaper-img" src="/api/epaper.jpg?tenant=no&hours={{ hours }}" alt="E-paper display"
                      style="width:100%; border-radius:3px; display:block;"></a>
+                <a href="/timelapse?today" style="flex-shrink:0; display:contents;">
                 <img src="/timelapse/latest.jpg" alt="Most recent sunset"
                      style="display:none; border-radius:3px;"
                      id="sunset-snap"
-                     onerror="this.style.display='none'">
+                     onerror="this.parentElement.style.display='none'"></a>
             </div>
         </div>
 
