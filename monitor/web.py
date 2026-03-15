@@ -27,7 +27,8 @@ from monitor.config import (
     AMBIENT_WEATHER_DASHBOARD_URL,
     CAMERA_USER, CAMERA_PASS,
     DASHBOARD_URL,
-    PRESSURE_LOW_WATCH_FILE
+    PRESSURE_LOW_WATCH_FILE,
+    OVERRIDE_MANUAL_OFF_FILE
 )
 from monitor.gpio_helpers import (
     read_pressure, read_float_sensor, init_gpio, cleanup_gpio,
@@ -1553,9 +1554,12 @@ def control(token):
 
     # Check which action to perform based on token
     if token == SECRET_OVERRIDE_ON_TOKEN and SECRET_OVERRIDE_ON_TOKEN:
+        OVERRIDE_MANUAL_OFF_FILE.unlink(missing_ok=True)
         success = set_supply_override('ON', debug=False)
         action_taken = "Supply Override turned ON"
     elif token == SECRET_OVERRIDE_OFF_TOKEN and SECRET_OVERRIDE_OFF_TOKEN:
+        OVERRIDE_MANUAL_OFF_FILE.parent.mkdir(parents=True, exist_ok=True)
+        OVERRIDE_MANUAL_OFF_FILE.touch()
         success = set_supply_override('OFF', debug=False)
         action_taken = "Supply Override turned OFF"
     elif token == SECRET_BYPASS_ON_TOKEN and SECRET_BYPASS_ON_TOKEN:

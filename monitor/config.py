@@ -163,6 +163,11 @@ CONFIG_FILE = Path.home() / '.config' / 'pumphouse' / 'monitor.conf'
 # regardless of NOTIFY_PRESSURE_LOW_ENABLED. Toggle via the dashboard.
 PRESSURE_LOW_WATCH_FILE = Path.home() / '.config' / 'pumphouse' / 'watch_pressure_low'
 
+# Manual override-off flag: when this file exists, the auto-on logic will NOT
+# re-enable override automatically. Set when user manually turns override OFF via
+# the dashboard. Cleared when override is manually turned ON or auto-shutoff fires.
+OVERRIDE_MANUAL_OFF_FILE = Path.home() / '.config' / 'pumphouse' / 'override_manual_off'
+
 def load_config_file():
     """
     Load configuration from file if it exists.

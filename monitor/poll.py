@@ -16,6 +16,7 @@ from monitor.config import (
     NOTIFY_WELL_RECOVERY_STAGNATION_HOURS,
     NOTIFY_HIGH_PRESSURE_ENABLED, NOTIFY_HIGH_PRESSURE_USE_EMAIL,
     NOTIFY_PRESSURE_LOW_ENABLED, PRESSURE_LOW_WATCH_FILE,
+    OVERRIDE_MANUAL_OFF_FILE,
     NOTIFY_TANK_OUTAGE_ENABLED, NOTIFY_TANK_OUTAGE_THRESHOLD_MINUTES,
     DASHBOARD_URL,
     ENABLE_DAILY_STATUS_EMAIL, DAILY_STATUS_EMAIL_TIME, DAILY_STATUS_EMAIL_CHART_HOURS,
@@ -827,7 +828,8 @@ class SimplifiedMonitor:
                                 relay_status = self.get_relay_status()
                                 if (relay_status['supply_override'] == 'OFF' and
                                     self.state.tank_gallons is not None and
-                                    self.state.tank_gallons < self.override_on_threshold):
+                                    self.state.tank_gallons < self.override_on_threshold and
+                                    not OVERRIDE_MANUAL_OFF_FILE.exists()):
 
                                     if self.debug:
                                         print(f"  → Tank at {self.state.tank_gallons} gal (< {self.override_on_threshold}), turning on override...")
@@ -864,6 +866,9 @@ class SimplifiedMonitor:
 
                                 from monitor.relay import set_supply_override
                                 if set_supply_override('OFF', debug=self.debug):
+                                    # Natural fill cycle completed — clear manual-off flag so
+                                    # auto-on resumes normally next time tank drops
+                                    OVERRIDE_MANUAL_OFF_FILE.unlink(missing_ok=True)
                                     self.log_state_event('OVERRIDE_SHUTOFF',
                                         f'Auto-shutoff: tank at {self.state.tank_gallons:.0f} gal (threshold: {self.override_shutoff_threshold})')
 
