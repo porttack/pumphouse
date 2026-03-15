@@ -26,7 +26,8 @@ from monitor.config import (
     SECRET_PURGE_TOKEN, MANAGEMENT_FEE_PERCENT,
     AMBIENT_WEATHER_DASHBOARD_URL,
     CAMERA_USER, CAMERA_PASS,
-    DASHBOARD_URL
+    DASHBOARD_URL,
+    PRESSURE_LOW_WATCH_FILE
 )
 from monitor.gpio_helpers import (
     read_pressure, read_float_sensor, init_gpio, cleanup_gpio,
@@ -1242,11 +1243,14 @@ def water_status():
 # @requires_auth
 def index():
     """Main status page"""
+    # ?owner mode: unlocks control buttons and sets sensible owner defaults
+    owner_mode = 'owner' in request.args
+
     # Get hours parameter for filtering events by time; days=n is an alias
     hours = request.args.get('hours', type=int)
     days  = request.args.get('days',  type=int)
     if hours is None:
-        hours = days * 24 if days is not None else DASHBOARD_DEFAULT_HOURS
+        hours = days * 24 if days is not None else (120 if owner_mode else DASHBOARD_DEFAULT_HOURS)
 
     # Get sensor data
     sensor_data = get_sensor_data()
@@ -1328,9 +1332,10 @@ def index():
     else:
         month_after_next = next_month_start.replace(month=next_month_start.month + 1)
 
-    # Check if totals parameter matches secret
+    # Check if totals parameter matches secret (?owner implicitly enables it)
     from monitor.config import SECRET_TOTALS_TOKEN
-    show_totals = request.args.get('totals') == SECRET_TOTALS_TOKEN if SECRET_TOTALS_TOKEN else False
+    totals_arg = request.args.get('totals') or (SECRET_TOTALS_TOKEN if owner_mode else None)
+    show_totals = totals_arg == SECRET_TOTALS_TOKEN if SECRET_TOTALS_TOKEN else False
 
     # Filter reservations - ONLY based on checkout month, using ALL reservations including checked out
     reservation_list = []
@@ -1426,7 +1431,14 @@ def index():
                          internet_uptime=internet_uptime,
                          FLOAT_STATE_FULL=FLOAT_STATE_FULL,
                          FLOAT_STATE_CALLING=FLOAT_STATE_CALLING,
-                         snapshot_url=DASHBOARD_URL.rstrip('/') + '/snapshot' if DASHBOARD_URL else None)
+                         snapshot_url=DASHBOARD_URL.rstrip('/') + '/snapshot' if DASHBOARD_URL else None,
+                         pressure_low_watch=PRESSURE_LOW_WATCH_FILE.exists(),
+                         owner_mode=owner_mode,
+                         token_override_on=SECRET_OVERRIDE_ON_TOKEN,
+                         token_override_off=SECRET_OVERRIDE_OFF_TOKEN,
+                         token_bypass_on=SECRET_BYPASS_ON_TOKEN,
+                         token_bypass_off=SECRET_BYPASS_OFF_TOKEN,
+                         token_purge=SECRET_PURGE_TOKEN)
 
 @app.route('/sunset')
 def sunset():
@@ -1494,12 +1506,48 @@ def ping():
     return 'ok', 200
 
 
+@app.route('/watch/pressure_low')
+def watch_pressure_low():
+    """Toggle the temporary pressure-LOW ntfy alert on or off."""
+    enable = request.args.get('enable', '1')
+    back = request.args.get('back', '/?owner')
+    if enable == '1':
+        PRESSURE_LOW_WATCH_FILE.parent.mkdir(parents=True, exist_ok=True)
+        PRESSURE_LOW_WATCH_FILE.touch()
+        action = "Pressure LOW watch: ON"
+    else:
+        PRESSURE_LOW_WATCH_FILE.unlink(missing_ok=True)
+        action = "Pressure LOW watch: OFF"
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Watch</title>
+        <meta http-equiv="refresh" content="2;url={back}" />
+        <style>
+            body {{ font-family: monospace; background: #1a1a1a; color: #4CAF50;
+                   display: flex; align-items: center; justify-content: center;
+                   height: 100vh; margin: 0; }}
+            .message {{ text-align: center; padding: 40px; background: #2a2a2a;
+                       border: 2px solid #4CAF50; border-radius: 8px; }}
+        </style>
+    </head>
+    <body>
+        <div class="message">
+            <h1>✓ {action}</h1>
+            <p>Redirecting to dashboard...</p>
+        </div>
+    </body>
+    </html>
+    """
+
 @app.route('/control/<token>')
 def control(token):
     """
     Unauthenticated control endpoint using secret tokens.
     Allows remote control via email links without authentication.
     """
+    back = request.args.get('back', '/?owner')
     action_taken = None
     success = False
 
@@ -1547,7 +1595,7 @@ def control(token):
         <html>
         <head>
             <title>Control Action</title>
-            <meta http-equiv="refresh" content="2;url=/" />
+            <meta http-equiv="refresh" content="2;url={back}" />
             <style>
                 body {{ font-family: monospace; background: #1a1a1a; color: #4CAF50;
                        display: flex; align-items: center; justify-content: center;

@@ -159,6 +159,10 @@ DEFAULT_SNAPSHOTS_FILE = 'snapshots.csv'  # snapshots stay in project dir for no
 # Config file path (optional)
 CONFIG_FILE = Path.home() / '.config' / 'pumphouse' / 'monitor.conf'
 
+# Temporary watch flag: when this file exists, pressure-LOW ntfy alerts are enabled
+# regardless of NOTIFY_PRESSURE_LOW_ENABLED. Toggle via the dashboard.
+PRESSURE_LOW_WATCH_FILE = Path.home() / '.config' / 'pumphouse' / 'watch_pressure_low'
+
 def load_config_file():
     """
     Load configuration from file if it exists.

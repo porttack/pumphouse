@@ -15,7 +15,7 @@ from monitor.config import (
     NOTIFY_OVERRIDE_SHUTOFF, NOTIFY_WELL_RECOVERY_THRESHOLD,
     NOTIFY_WELL_RECOVERY_STAGNATION_HOURS,
     NOTIFY_HIGH_PRESSURE_ENABLED, NOTIFY_HIGH_PRESSURE_USE_EMAIL,
-    NOTIFY_PRESSURE_LOW_ENABLED,
+    NOTIFY_PRESSURE_LOW_ENABLED, PRESSURE_LOW_WATCH_FILE,
     NOTIFY_TANK_OUTAGE_ENABLED, NOTIFY_TANK_OUTAGE_THRESHOLD_MINUTES,
     DASHBOARD_URL,
     ENABLE_DAILY_STATUS_EMAIL, DAILY_STATUS_EMAIL_TIME, DAILY_STATUS_EMAIL_CHART_HOURS,
@@ -531,7 +531,7 @@ class SimplifiedMonitor:
                                      f"(was HIGH for {duration:.1f}s, ~{estimated:.1f} gal)")
 
                             # Send pressure LOW alert with duration info
-                            if NOTIFY_PRESSURE_LOW_ENABLED and self.notification_manager.can_notify('pressure_low'):
+                            if (NOTIFY_PRESSURE_LOW_ENABLED or PRESSURE_LOW_WATCH_FILE.exists()) and self.notification_manager.can_notify('pressure_low'):
                                 current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
                                 duration_minutes = duration / 60
 

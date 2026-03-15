@@ -386,6 +386,27 @@
                 </div>
                 {% endif %}
             </div>
+            {% if owner_mode %}
+            <div style="margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+                {% if pressure_low_watch %}
+                <a href="/watch/pressure_low?enable=0&back=/?owner" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #f44336; background: #f44336; color: #fff;">● Pressure LOW alerts: ON</a>
+                {% else %}
+                <a href="/watch/pressure_low?enable=1&back=/?owner" class="time-btn" style="font-size: 12px; padding: 4px 10px;">○ Pressure LOW alerts: OFF</a>
+                {% endif %}
+                <span style="color: #555; font-size: 12px;">|</span>
+                {% if relay_status.supply_override == 'ON' %}
+                <a href="/control/{{ token_override_off }}" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #f44336; background: #f44336; color: #fff;">● Override ON</a>
+                {% else %}
+                <a href="/control/{{ token_override_on }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;">○ Override OFF</a>
+                {% endif %}
+                {% if relay_status.bypass == 'ON' %}
+                <a href="/control/{{ token_bypass_off }}" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #f44336; background: #f44336; color: #fff;">● Bypass ON</a>
+                {% else %}
+                <a href="/control/{{ token_bypass_on }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;">○ Bypass OFF</a>
+                {% endif %}
+                <a href="/control/{{ token_purge }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;" onclick="return confirm('Trigger a purge cycle?')">⚙ Purge</a>
+            </div>
+            {% endif %}
         </div>
         {% endif %}
 
@@ -500,12 +521,12 @@
         <div class="section" id="tank-chart-section">
             <h2>TANK LEVEL HISTORY</h2>
             <div style="margin-bottom: 16px;">
-                <button class="time-btn" onclick="loadChart(6)" data-hours="6">6h</button>
-                <button class="time-btn" onclick="loadChart(12)" data-hours="12">12h</button>
-                <button class="time-btn active" onclick="loadChart(24)" data-hours="24">24h</button>
-                <button class="time-btn" onclick="loadChart(72)" data-hours="72">3d</button>
-                <button class="time-btn" onclick="loadChart(168)" data-hours="168">7d</button>
-                <button class="time-btn" onclick="loadChart(336)" data-hours="336">14d</button>
+                <button class="time-btn" onclick="loadChart(6, true)" data-hours="6">6h</button>
+                <button class="time-btn" onclick="loadChart(12, true)" data-hours="12">12h</button>
+                <button class="time-btn active" onclick="loadChart(24, true)" data-hours="24">24h</button>
+                <button class="time-btn" onclick="loadChart(72, true)" data-hours="72">3d</button>
+                <button class="time-btn" onclick="loadChart(168, true)" data-hours="168">7d</button>
+                <button class="time-btn" onclick="loadChart(336, true)" data-hours="336">14d</button>
             </div>
             <div style="position: relative; height: 300px;">
                 <canvas id="tankChart"></canvas>
@@ -522,6 +543,7 @@
     <script>
         var _tankChart = null;
         var _currentHours = 24;
+        var _userSelected = false;
 
         // Read hours from URL parameter if present
         (function() {
@@ -532,7 +554,7 @@
             }
         })();
 
-        function loadChart(hours) {
+        function loadChart(hours, userClick) {
             _currentHours = hours;
 
             // Update active button
@@ -540,10 +562,12 @@
                 btn.classList.toggle('active', parseInt(btn.dataset.hours) === hours);
             });
 
-            // Update URL without reload
-            var params = new URLSearchParams(window.location.search);
-            params.set('hours', hours);
-            history.replaceState(null, '', '?' + params.toString());
+            // Only rewrite URL when the user explicitly clicks a duration button
+            if (userClick) {
+                var params = new URLSearchParams(window.location.search);
+                params.set('hours', hours);
+                history.replaceState(null, '', '?' + params.toString());
+            }
 
             fetch('/api/chart_data?hours=' + hours)
                 .then(function(r) { return r.json(); })
