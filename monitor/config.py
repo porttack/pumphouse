@@ -132,7 +132,7 @@ DASHBOARD_SNAPSHOT_COUNT = 97  # Number of snapshots to show (97 = 24 hours at 1
 MANAGEMENT_FEE_PERCENT = 36  # Percentage paid to management company (subtracted from displayed income)
 
 # E-Paper Display Configuration
-EPAPER_CONSERVE_WATER_THRESHOLD = 50  # Show "Save Water" when tank percent <= this value (None to disable)
+EPAPER_CONSERVE_WATER_THRESHOLD = 61  # Show "Save Water" when tank percent <= this value (None to disable)
 EPAPER_OWNER_STAY_TYPES = ['Owner Stay', 'Owner Stay, Full Clean']  # Reservation Type values that count as owner occupancy
 EPAPER_DEFAULT_HOURS_TENANT = 24  # Default graph hours when occupied by a tenant
 EPAPER_DEFAULT_HOURS_OTHER = 72  # Default graph hours for owner or unoccupied

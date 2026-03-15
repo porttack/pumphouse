@@ -496,12 +496,114 @@
         </div>
         {% endif %}
 
+        <!-- Tank Level History Chart -->
+        <div class="section" id="tank-chart-section">
+            <h2>TANK LEVEL HISTORY</h2>
+            <div style="margin-bottom: 16px;">
+                <button class="time-btn" onclick="loadChart(6)" data-hours="6">6h</button>
+                <button class="time-btn" onclick="loadChart(12)" data-hours="12">12h</button>
+                <button class="time-btn active" onclick="loadChart(24)" data-hours="24">24h</button>
+                <button class="time-btn" onclick="loadChart(72)" data-hours="72">3d</button>
+                <button class="time-btn" onclick="loadChart(168)" data-hours="168">7d</button>
+                <button class="time-btn" onclick="loadChart(336)" data-hours="336">14d</button>
+            </div>
+            <div style="position: relative; height: 300px;">
+                <canvas id="tankChart"></canvas>
+            </div>
+        </div>
+
         <!-- Footer with startup time -->
         <div style="text-align: center; padding: 20px 0 10px 0; color: #666; font-size: 12px; border-top: 1px solid #333; margin-top: 20px;">
             Web server started: {{ startup_time.strftime('%Y-%m-%d %H:%M:%S') }}
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script>
+        var _tankChart = null;
+        var _currentHours = 24;
+
+        // Read hours from URL parameter if present
+        (function() {
+            var params = new URLSearchParams(window.location.search);
+            var h = parseInt(params.get('hours'));
+            if (h && [6, 12, 24, 72, 168, 336].indexOf(h) !== -1) {
+                _currentHours = h;
+            }
+        })();
+
+        function loadChart(hours) {
+            _currentHours = hours;
+
+            // Update active button
+            document.querySelectorAll('.time-btn').forEach(function(btn) {
+                btn.classList.toggle('active', parseInt(btn.dataset.hours) === hours);
+            });
+
+            // Update URL without reload
+            var params = new URLSearchParams(window.location.search);
+            params.set('hours', hours);
+            history.replaceState(null, '', '?' + params.toString());
+
+            fetch('/api/chart_data?hours=' + hours)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var ctx = document.getElementById('tankChart').getContext('2d');
+                    if (_tankChart) {
+                        _tankChart.data.labels = data.timestamps;
+                        _tankChart.data.datasets[0].data = data.gallons;
+                        _tankChart.data.datasets[0].pointBackgroundColor = data.pointColors;
+                        _tankChart.data.datasets[0].pointBorderColor = data.pointColors;
+                        _tankChart.update();
+                    } else {
+                        _tankChart = new Chart(ctx, {
+                            type: 'line',
+                            data: {
+                                labels: data.timestamps,
+                                datasets: [{
+                                    label: 'Gallons',
+                                    data: data.gallons,
+                                    borderColor: '#4CAF50',
+                                    backgroundColor: 'rgba(76,175,80,0.1)',
+                                    pointBackgroundColor: data.pointColors,
+                                    pointBorderColor: data.pointColors,
+                                    pointRadius: 3,
+                                    tension: 0.2,
+                                    fill: true
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: { display: false },
+                                    tooltip: {
+                                        backgroundColor: '#333',
+                                        titleColor: '#4CAF50',
+                                        bodyColor: '#e0e0e0',
+                                        borderColor: '#555',
+                                        borderWidth: 1
+                                    }
+                                },
+                                scales: {
+                                    x: {
+                                        ticks: { color: '#888', maxTicksLimit: 10 },
+                                        grid: { color: '#333' }
+                                    },
+                                    y: {
+                                        ticks: { color: '#888' },
+                                        grid: { color: '#333' }
+                                    }
+                                }
+                            }
+                        });
+                    }
+                })
+                .catch(function(e) { console.error('Chart load failed:', e); });
+        }
+
+        document.addEventListener('DOMContentLoaded', function() { loadChart(_currentHours); });
+    </script>
     <script>
         // Match sunset snapshot height to epaper image height on desktop
         document.addEventListener('DOMContentLoaded', function() {
