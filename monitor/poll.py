@@ -552,20 +552,6 @@ class SimplifiedMonitor:
                                     debug=self.debug
                                 )
 
-                                # Send email notification with full details
-                                if NOTIFY_HIGH_PRESSURE_USE_EMAIL:
-                                    send_email_notification(
-                                        subject=f"{current_gal:.0f} gal - Water Usage Ended",
-                                        message=f"Water pressure returned to LOW (<10 PSI).\n\n"
-                                               f"Duration of HIGH pressure: {duration_str}\n"
-                                               f"Estimated water pumped: ~{estimated:.1f} gallons",
-                                        priority='default',
-                                        dashboard_url=DASHBOARD_URL,
-                                        chart_url=f"{DASHBOARD_URL}api/epaper.jpg?tenant=no",
-                                        debug=self.debug,
-                                        include_status=True
-                                    )
-
                             # Trigger purge if enabled AND enough time has passed
                             if self.enable_purge and self.relay_control_enabled and estimated > 0:
                                 time_since_last_purge = current_time - self.last_purge_time
