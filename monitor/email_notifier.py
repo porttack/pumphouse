@@ -25,7 +25,7 @@ def format_human_time(timestamp_str):
         return timestamp_str
 
 from monitor.config import (
-    EVENTS_FILE, RESERVATIONS_FILE,
+    EVENTS_FILE, RESERVATIONS_FILE, DEFAULT_SNAPSHOTS_FILE,
     ENABLE_EMAIL_NOTIFICATIONS,
     EMAIL_TO,
     EMAIL_FROM,
@@ -179,7 +179,7 @@ def send_email_notification(subject, message, priority='default', dashboard_url=
         return False
 
 
-def get_snapshots_stats(filepath='snapshots.csv'):
+def get_snapshots_stats(filepath=DEFAULT_SNAPSHOTS_FILE):
     """Calculate aggregate stats from snapshots.csv for 1hr and 24hr windows"""
     import os
     import csv
@@ -276,7 +276,7 @@ def get_snapshots_stats(filepath='snapshots.csv'):
         return None
 
 
-def get_outdoor_weather(filepath='snapshots.csv'):
+def get_outdoor_weather(filepath=DEFAULT_SNAPSHOTS_FILE):
     """Get outdoor weather data from latest snapshot"""
     import os
     import csv
@@ -418,7 +418,7 @@ def fetch_system_status(debug=False):
         # Get stats from snapshots
         stats = None
         try:
-            stats = get_snapshots_stats('snapshots.csv')
+            stats = get_snapshots_stats(DEFAULT_SNAPSHOTS_FILE)
         except Exception as e:
             if debug:
                 print(f"Warning: Could not get stats: {e}", file=sys.stderr)

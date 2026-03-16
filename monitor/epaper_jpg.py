@@ -32,7 +32,7 @@ from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
 from monitor.config import (
-    RESERVATIONS_FILE,
+    RESERVATIONS_FILE, DEFAULT_SNAPSHOTS_FILE,
     CAMERA_PASS,
     CAMERA_USER,
     EPAPER_CONSERVE_WATER_THRESHOLD,
@@ -168,7 +168,7 @@ def render_epaper_jpg(
     threshold_override: int | None = None,
     public_mode: bool = False,  # strip checkin/checkout info (for public /water page)
     scale: int = 4,
-    snapshots_csv: str = 'snapshots.csv',
+    snapshots_csv: str = DEFAULT_SNAPSHOTS_FILE,
     reservations_csv = None,
 ) -> io.BytesIO:
     """

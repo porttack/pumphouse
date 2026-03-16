@@ -6,7 +6,7 @@ Extracted from web.py as a Flask Blueprint.
 import os
 
 from flask import Blueprint, Response, request, redirect, send_file
-from monitor.config import CAMERA_USER, CAMERA_PASS
+from monitor.config import CAMERA_USER, CAMERA_PASS, DEFAULT_SNAPSHOTS_FILE
 from monitor.weather_api import _WMO, _QUIPS, current_weather_desc
 
 timelapse_bp = Blueprint('timelapse', __name__)
@@ -574,7 +574,7 @@ def _day_weather_summary(date_str):
     import csv as _csv
     from datetime import date as _date, datetime as _datetime
     from zoneinfo import ZoneInfo
-    path = 'snapshots.csv'
+    path = DEFAULT_SNAPSHOTS_FILE
     if not os.path.exists(path):
         return None
     try:
@@ -654,7 +654,7 @@ def _current_conditions():
 
     # Most recent local sensor wind reading
     try:
-        with open('snapshots.csv') as f:
+        with open(DEFAULT_SNAPSHOTS_FILE) as f:
             rows = list(_csv.DictReader(f))
         if rows:
             v = rows[-1].get('wind_gust_mph', '')

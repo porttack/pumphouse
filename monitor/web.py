@@ -13,7 +13,7 @@ from functools import wraps
 
 from monitor import __version__
 from monitor.config import (
-    EVENTS_FILE, RESERVATIONS_FILE,
+    EVENTS_FILE, RESERVATIONS_FILE, DEFAULT_SNAPSHOTS_FILE,
     TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS,
     EPAPER_CONSERVE_WATER_THRESHOLD, EPAPER_OWNER_STAY_TYPES,
     EPAPER_DEFAULT_HOURS_TENANT, EPAPER_DEFAULT_HOURS_OTHER,
@@ -169,7 +169,7 @@ def read_events_by_time(filepath, hours=72):
     except Exception as e:
         return [], []
 
-def get_snapshots_stats(filepath='snapshots.csv'):
+def get_snapshots_stats(filepath=DEFAULT_SNAPSHOTS_FILE):
     """Calculate aggregate stats from snapshots.csv for 1hr and 24hr windows"""
     if not os.path.exists(filepath):
         return None
@@ -290,7 +290,7 @@ def get_sensor_data():
 def get_outdoor_weather():
     """Get outdoor weather data from latest snapshot"""
     try:
-        headers, rows = read_csv_tail('snapshots.csv', max_rows=1)
+        headers, rows = read_csv_tail(DEFAULT_SNAPSHOTS_FILE, max_rows=1)
         if not headers or not rows:
             return None
 
@@ -482,7 +482,7 @@ def chart_data():
     hours = request.args.get('hours', 24, type=int)
 
     try:
-        with open('snapshots.csv', 'r') as f:
+        with open(DEFAULT_SNAPSHOTS_FILE, 'r') as f:
             reader = csv.DictReader(f)
             rows = list(reader)
 
@@ -586,7 +586,7 @@ def chart_image():
 
     try:
         # Get chart data
-        with open('snapshots.csv', 'r') as f:
+        with open(DEFAULT_SNAPSHOTS_FILE, 'r') as f:
             reader = csv.DictReader(f)
             rows = list(reader)
 
@@ -747,7 +747,7 @@ def epaper_bmp():
     # Read snapshot history
     rows = []
     try:
-        with open('snapshots.csv', 'r') as f:
+        with open(DEFAULT_SNAPSHOTS_FILE, 'r') as f:
             reader = csv.DictReader(f)
             rows = list(reader)
     except Exception:
@@ -1273,7 +1273,7 @@ def index():
         tank_age_minutes = int(age_seconds / 60)
 
     # Read CSV files
-    snapshot_headers, snapshot_rows = read_csv_tail('snapshots.csv', max_rows=DASHBOARD_SNAPSHOT_COUNT)
+    snapshot_headers, snapshot_rows = read_csv_tail(DEFAULT_SNAPSHOTS_FILE, max_rows=DASHBOARD_SNAPSHOT_COUNT)
     event_headers, event_rows = read_events_by_time(EVENTS_FILE, hours=hours)
 
     # Filter events based on DASHBOARD_HIDE_EVENT_TYPES
@@ -1282,7 +1282,7 @@ def index():
         event_rows = [row for row in event_rows if len(row) > event_type_idx and row[event_type_idx] not in DASHBOARD_HIDE_EVENT_TYPES]
 
     # Get aggregate stats from snapshots
-    stats = get_snapshots_stats('snapshots.csv')
+    stats = get_snapshots_stats(DEFAULT_SNAPSHOTS_FILE)
 
     # Get relay status
     relay_status = get_all_relay_status()
