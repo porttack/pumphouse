@@ -220,7 +220,7 @@
 <body>
     <div class="container">
         <h1>PUMPHOUSE SYSTEM STATUS <span style="font-size: 14px; color: #888; font-weight: normal;">v{{ version }}</span></h1>
-        <div class="timestamp">Last Updated: {{ now.strftime('%Y-%m-%d %H:%M:%S') }} (<span id="age">just now</span>) &middot; <a href="/timelapse" style="color:#4CAF50; text-decoration:none;">Timelapses</a>{% if snapshot_url %} &middot; <a href="{{ snapshot_url }}" style="color:#4CAF50; text-decoration:none;">Now</a>{% endif %} &middot; <a href="https://onblackberryhill.com/internet" style="color:#4CAF50; text-decoration:none;">Uptime</a></div>
+        <div class="timestamp">Last Updated: {{ now.strftime('%Y-%m-%d %H:%M:%S') }} (<span id="age">just now</span>) &middot; <a href="/timelapse" style="color:#4CAF50; text-decoration:none;">Timelapses</a>{% if snapshot_url %} &middot; <a href="{{ snapshot_url }}" style="color:#4CAF50; text-decoration:none;">Now</a>{% endif %} &middot; <a href="https://onblackberryhill.com/internet" style="color:#4CAF50; text-decoration:none;">Uptime</a> &middot; <a href="{{ national_weather_url }}" target="_blank" style="color:#4CAF50; text-decoration:none;">National Weather</a></div>
         <script>
             var _loaded = Date.now();
             setInterval(function() {
@@ -384,6 +384,23 @@
                     </div>
                     {% endif %}
 
+                </div>
+                {% endif %}
+                {% if wind_forecast %}
+                <div class="status-item" style="border-left-color: #9C27B0;">
+                    <div class="status-label"><a href="{{ national_weather_url }}" target="_blank" style="color:#888; text-decoration:none;">Wind Forecast ↗</a></div>
+                    {% if wind_forecast.tonight %}
+                    {% set w = wind_forecast.tonight %}
+                    <div class="status-value" style="font-size: 13px;">
+                        Tonight: {{ w.direction }} {{ w.speed_min }}–{{ w.speed_max }} mph{% if w.gust_max > w.speed_max %}, gusts {{ w.gust_max }}{% endif %}
+                    </div>
+                    {% endif %}
+                    {% if wind_forecast.tomorrow %}
+                    {% set w = wind_forecast.tomorrow %}
+                    <div class="status-value" style="font-size: 13px; margin-top: 4px;">
+                        Tomorrow: {{ w.direction }} {{ w.speed_min }}–{{ w.speed_max }} mph{% if w.gust_max > w.speed_max %}, gusts {{ w.gust_max }}{% endif %}
+                    </div>
+                    {% endif %}
                 </div>
                 {% endif %}
             </div>

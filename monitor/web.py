@@ -28,7 +28,8 @@ from monitor.config import (
     CAMERA_USER, CAMERA_PASS,
     DASHBOARD_URL,
     PRESSURE_LOW_WATCH_FILE,
-    OVERRIDE_MANUAL_OFF_FILE
+    OVERRIDE_MANUAL_OFF_FILE,
+    NATIONAL_WEATHER_URL
 )
 from monitor.gpio_helpers import (
     read_pressure, read_float_sensor, init_gpio, cleanup_gpio,
@@ -53,7 +54,7 @@ import matplotlib.dates as mdates
 app = Flask(__name__)
 
 from monitor.web_timelapse import timelapse_bp  # noqa: E402
-from monitor.weather_api import current_weather_desc  # noqa: E402
+from monitor.weather_api import current_weather_desc, get_wind_forecast  # noqa: E402
 app.register_blueprint(timelapse_bp)
 
 # Configuration
@@ -1296,6 +1297,9 @@ def index():
     # Get internet uptime stats from Cloudflare worker
     internet_uptime = get_internet_uptime()
 
+    # Get wind forecast for tonight and tomorrow
+    wind_forecast = get_wind_forecast()
+
     # Get all reservations (for repeat guest detection across all reservations)
     reservations = load_reservations(reservations_csv)
 
@@ -1430,6 +1434,8 @@ def index():
                          ecobee_temp=ecobee_temp,
                          gph_metrics=gph_metrics,
                          internet_uptime=internet_uptime,
+                         wind_forecast=wind_forecast,
+                         national_weather_url=NATIONAL_WEATHER_URL,
                          FLOAT_STATE_FULL=FLOAT_STATE_FULL,
                          FLOAT_STATE_CALLING=FLOAT_STATE_CALLING,
                          snapshot_url=DASHBOARD_URL.rstrip('/') + '/snapshot' if DASHBOARD_URL else None,

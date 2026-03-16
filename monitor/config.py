@@ -27,6 +27,9 @@ AMBIENT_WEATHER_APPLICATION_KEY = ""  # Application key - loaded from secrets fi
 AMBIENT_WEATHER_MAC_ADDRESS = "48:3F:DA:56:12:1E"  # Device MAC address
 AMBIENT_WEATHER_DASHBOARD_URL = "https://ambientweather.net/dashboard/ccccbdcb524d5a3735628aec0c03247f"  # Public dashboard link
 
+# National Weather Service forecast URL for the property location
+NATIONAL_WEATHER_URL = "https://forecast.weather.gov/MapClick.php?lat=44.64196&lon=-124.04110"
+
 # Water Volume Estimation Constants
 RESIDUAL_PRESSURE_SECONDS = 30  # Last N seconds are residual pressure (not pumping)
 SECONDS_PER_GALLON = 10 / 0.14   # 10 seconds = 0.14 gallons
