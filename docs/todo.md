@@ -56,7 +56,7 @@ Pending tasks, security items, ideas, and completed history.
 - [ ] Put sensor state changes on graph (override on/off, occupied, bypass)
 - [ ] Camera link in iOS should open the Amcrest app
 - [ ] Investigate gpiozero as alternative to RPi.GPIO (less contention, fewer false readings)
-- [ ] Roll and compress logs
+- [x] Roll and compress logs — `rotate_snapshots.py` archives snapshots.csv + events.csv monthly
 - [ ] Backup private config (secrets.conf, etc.) to a private GitHub repo
 - [ ] Put availability calendar on web dashboard (or more months of reservations)
 - [ ] Log all data to a Google Sheet
@@ -68,6 +68,22 @@ Pending tasks, security items, ideas, and completed history.
 ---
 
 ## Completed
+
+### 2026-03-15 — Version current
+- [x] Tank level history Chart.js graph restored to dashboard bottom with selectable time ranges
+- [x] `?owner` mode: unlocks control buttons, defaults to 120h/income, embeds secret tokens
+- [x] Dashboard control buttons: Override ON/OFF, Bypass ON/OFF, Purge (red when active)
+- [x] Pressure-LOW ntfy watch toggle button on dashboard (ntfy only, no email)
+- [x] Manual override-off flag (`override_manual_off`) prevents auto-on fighting user intent
+- [x] Fixed well recovery duplicate alerts — 12-hour mute after alert fires, persisted to state file
+- [x] Mobile load fix — flask-compress gzip (474KB → ~10KB), reduced DASHBOARD_MAX_EVENTS 500→200
+- [x] Wind forecast widget on dashboard (Open-Meteo, tonight/tomorrow speed/gust/direction)
+- [x] National Weather Service link in dashboard header
+- [x] Sunset snapshot on dashboard links to `/timelapse?today`
+- [x] Timelapse KV fallback: self-heals local ratings.json from Cloudflare KV on cache miss
+- [x] Moved snapshots.csv + events.csv to `~/.local/share/pumphouse/` (XDG data dir)
+- [x] Monthly CSV rotation with gzip: `rotate_snapshots.py` keeps 60 days live, cron on 1st at 3am
+- [x] `/water?hours=N` and `/water?days=N` — pass timespan through to embedded e-paper image
 
 ### 2026-02-15 — Version current
 - [x] Make a widget for iPhone and desktop (Scriptable iPhone widget + e-paper display)

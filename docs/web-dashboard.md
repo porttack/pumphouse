@@ -101,15 +101,66 @@ python -m monitor.web
 
 | Route | Description |
 |-------|-------------|
-| `GET /` | Web dashboard (requires auth) |
+| `GET /` | Web dashboard (requires auth); `?owner` enables control buttons + income totals |
+| `GET /?hours=N` | Dashboard filtered to last N hours of events (`?days=N` also accepted) |
+| `GET /water` | Public water tank status page (embedded e-paper image, auto-refreshes) |
+| `GET /water?hours=N` | Water status with explicit graph timespan (`?days=N` also accepted) |
+| `GET /watch/pressure_low` | Toggle pressure-LOW ntfy watch flag (owner mode) |
 | `GET /sunset` | Live camera JPEG from Amcrest via RTSP; `?enhance=1` for contrast boost |
 | `GET /snapshot` | Live camera frame with weather panel; `?info=0` for raw JPEG |
 | `GET /timelapse` | Redirects to most recent timelapse |
 | `GET /timelapse/YYYY-MM-DD` | Timelapse viewer for specific date |
 | `GET /timelapse/latest.mp4` | Redirect to most recent MP4 |
 | `GET /api/epaper.bmp` | 250×122 1-bit BMP for e-paper display / iPhone widget |
+| `GET /api/epaper.jpg` | Color JPEG at 4× resolution; `?hours=N`, `?public=yes`, `?tenant=no` |
 | `GET /api/ratings/YYYY-MM-DD` | JSON rating `{count, avg}` from Cloudflare KV |
 | `GET /control/<token>` | Remote relay action via secret URL (from email buttons) |
+
+---
+
+## Owner Mode (`?owner`)
+
+Append `?owner` to the dashboard URL to unlock owner-specific features:
+
+- **Control buttons**: Override ON/OFF, Bypass ON/OFF, Purge, Pressure-LOW watch toggle
+- **Default time range**: 120 hours (5 days) instead of 72 hours
+- **Income totals**: reservation income displayed without manual `?totals=income`
+- **Security**: secret tokens are only embedded in the HTML when `?owner` is present — plain visitors never see them
+
+Buttons turn red when the corresponding relay/flag is active. Clicking any button redirects back to `/?owner`.
+
+---
+
+## Water Status Page (`/water`)
+
+Public-facing page showing the current e-paper tank graph. No occupancy or income data.
+
+- `?hours=N` — show the last N hours on the graph (e.g. `/water?hours=48`)
+- `?days=N` — alias for hours (e.g. `/water?days=7`)
+- Via Cloudflare: serves `public=yes` image (no dashboard link)
+- Direct Pi access: image links to full dashboard; includes Image/Dashboard/Weather links
+- Cache: 10 minutes normally; 1 minute when a custom timespan is specified
+
+---
+
+## Data Files & Rotation
+
+Snapshots and events are stored in `~/.local/share/pumphouse/`:
+
+- `snapshots.csv` — one row per 15-minute snapshot
+- `events.csv` — one row per event (pump cycles, alerts, relay changes, etc.)
+
+`rotate_snapshots.py` archives rows older than 60 days to monthly gzip files:
+
+```
+~/.local/share/pumphouse/snapshots-YYYY-MM.csv.gz
+~/.local/share/pumphouse/events-YYYY-MM.csv.gz
+```
+
+Runs via cron on the 1st of each month at 3am:
+```
+0 3 1 * * /home/pi/src/pumphouse/venv/bin/python3 /home/pi/src/pumphouse/rotate_snapshots.py
+```
 
 ---
 

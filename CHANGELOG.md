@@ -2,6 +2,28 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.23.0] - 2026-03-15
+
+### Added — Owner Mode, Wind Forecast, Data Rotation, Mobile Fixes
+
+- **`?owner` dashboard mode**: control buttons (Override ON/OFF, Bypass ON/OFF, Purge, Pressure-LOW watch), 120h default range, income totals; secret tokens only embedded when `?owner` present
+- **Pressure-LOW ntfy watch toggle** (`/watch/pressure_low`): flag-file based, ntfy only (no email)
+- **Manual override-off flag** (`~/.config/pumphouse/override_manual_off`): prevents auto-on from fighting a manual override-off; cleared automatically on tank-full shutoff
+- **Wind forecast widget** on dashboard (Open-Meteo hourly; tonight/tomorrow speed/gust/direction, 30-min cache)
+- **National Weather Service link** in dashboard header timestamp row
+- **Sunset snapshot links to `/timelapse?today`** on dashboard
+- **`/water?hours=N` / `?days=N`** — pass explicit graph timespan to embedded e-paper image; cache drops to 1 min when custom timespan specified
+- **Monthly CSV rotation**: `rotate_snapshots.py` archives `snapshots.csv` + `events.csv` rows older than 60 days to per-month `.csv.gz` files; cron on 1st of month at 3am
+- **Moved data files to XDG dir**: `snapshots.csv` + `events.csv` now live in `~/.local/share/pumphouse/`
+
+### Fixed
+- **Well recovery duplicate alerts**: 12-hour `well_recovery_muted_until` mute after alert fires, persisted to `notification_state.json`
+- **Mobile load failure**: `flask-compress` gzip (474KB → ~10KB wire), `DASHBOARD_MAX_EVENTS` 500→200
+- **Purge 500 error**: `PURGE_DURATION` import fix in `purge.py`; added `trigger_purge()` function
+- **Timelapse KV sync**: self-heals local `ratings.json` from Cloudflare KV on cache miss
+- **Chart URL clobbering `?owner`**: `loadChart()` only rewrites URL on user click, not on initial load
+- **Button redirect losing `?owner`**: all control endpoints redirect to `back` param (default `/?owner`)
+
 ## [2.22.0] - 2026-03-01
 
 ### Added — Snapshot Caching via Cloudflare

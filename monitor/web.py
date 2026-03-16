@@ -1152,8 +1152,16 @@ def water_status():
     Direct Pi access (no CF-Ray): tenant=no mode, dashboard link shown.
     """
     via_cloudflare = bool(request.headers.get('CF-Ray'))
-    img_param = 'public=yes' if via_cloudflare else 'tenant=no'
     dashboard_url = 'https://onblackberryhill2.tplinkdns.com:6443/?hours=120&totals=income'
+
+    # Support ?hours=N or ?days=N to control the graph timespan
+    hours_arg = request.args.get('hours', type=int)
+    days_arg  = request.args.get('days',  type=int)
+    if hours_arg is None and days_arg is not None:
+        hours_arg = days_arg * 24
+
+    base_param = 'public=yes' if via_cloudflare else 'tenant=no'
+    img_param  = f'{base_param}&hours={hours_arg}' if hours_arg is not None else base_param
 
     if via_cloudflare:
         img_html = f'<img src="/api/epaper.jpg?{img_param}" alt="Water tank level graph">'
@@ -1240,7 +1248,10 @@ def water_status():
 </html>"""
     from flask import Response
     resp = Response(html, mimetype='text/html')
-    resp.headers['Cache-Control'] = 'public, max-age=600, stale-if-error=172800'
+    if hours_arg is not None:
+        resp.headers['Cache-Control'] = 'public, max-age=60'
+    else:
+        resp.headers['Cache-Control'] = 'public, max-age=600, stale-if-error=172800'
     return resp
 
 
