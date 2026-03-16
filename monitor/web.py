@@ -7,6 +7,8 @@ import os
 import csv
 import argparse
 import io
+import threading
+import time as _time
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, Response, jsonify, send_file
 from functools import wraps
@@ -29,6 +31,7 @@ from monitor.config import (
     DASHBOARD_URL,
     PRESSURE_LOW_WATCH_FILE,
     OVERRIDE_MANUAL_OFF_FILE,
+    BYPASS_TIMER_FILE,
     NATIONAL_WEATHER_URL
 )
 from monitor.gpio_helpers import (
@@ -64,6 +67,36 @@ app.register_blueprint(timelapse_bp)
 USERNAME = os.environ.get('PUMPHOUSE_USER', 'admin')
 PASSWORD = os.environ.get('PUMPHOUSE_PASS', 'pumphouse')
 STARTUP_TIME = datetime.now()  # Track when web server started
+
+# Tokens derived from bypass_on secret — no secrets.conf changes needed
+SECRET_BYPASS_TIMED_TOKEN        = (SECRET_BYPASS_ON_TOKEN + '-4h')      if SECRET_BYPASS_ON_TOKEN else ''
+SECRET_BYPASS_CANCEL_TIMER_TOKEN = (SECRET_BYPASS_ON_TOKEN + '-cancel')   if SECRET_BYPASS_ON_TOKEN else ''
+
+
+def get_bypass_timer_expiry():
+    """Return datetime when bypass auto-off fires, or None if no timer set."""
+    try:
+        if BYPASS_TIMER_FILE.exists():
+            return datetime.fromtimestamp(float(BYPASS_TIMER_FILE.read_text().strip()))
+    except Exception:
+        pass
+    return None
+
+
+def _bypass_timer_watchdog():
+    """Background thread: turn bypass OFF when the 4-hour timer expires."""
+    while True:
+        _time.sleep(30)
+        expiry = get_bypass_timer_expiry()
+        if expiry and datetime.now() >= expiry:
+            try:
+                BYPASS_TIMER_FILE.unlink(missing_ok=True)
+                set_bypass('OFF', debug=False)
+            except Exception as e:
+                print(f'bypass_timer_watchdog: {e}')
+
+
+threading.Thread(target=_bypass_timer_watchdog, daemon=True, name='bypass-timer').start()
 
 # Custom Jinja filter for human-friendly timestamp formatting
 @app.template_filter('human_time')
@@ -1459,6 +1492,9 @@ def index():
                          token_override_off=SECRET_OVERRIDE_OFF_TOKEN,
                          token_bypass_on=SECRET_BYPASS_ON_TOKEN,
                          token_bypass_off=SECRET_BYPASS_OFF_TOKEN,
+                         token_bypass_timed=SECRET_BYPASS_TIMED_TOKEN,
+                         token_bypass_cancel_timer=SECRET_BYPASS_CANCEL_TIMER_TOKEN,
+                         bypass_timer_expiry=get_bypass_timer_expiry(),
                          token_purge=SECRET_PURGE_TOKEN)
 
 @app.route('/sunset')
@@ -1583,11 +1619,23 @@ def control(token):
         success = set_supply_override('OFF', debug=False)
         action_taken = "Supply Override turned OFF"
     elif token == SECRET_BYPASS_ON_TOKEN and SECRET_BYPASS_ON_TOKEN:
+        BYPASS_TIMER_FILE.unlink(missing_ok=True)
         success = set_bypass('ON', debug=False)
         action_taken = "Bypass turned ON"
     elif token == SECRET_BYPASS_OFF_TOKEN and SECRET_BYPASS_OFF_TOKEN:
+        BYPASS_TIMER_FILE.unlink(missing_ok=True)
         success = set_bypass('OFF', debug=False)
         action_taken = "Bypass turned OFF"
+    elif token == SECRET_BYPASS_TIMED_TOKEN and SECRET_BYPASS_TIMED_TOKEN:
+        expiry = datetime.now() + timedelta(hours=4)
+        BYPASS_TIMER_FILE.parent.mkdir(parents=True, exist_ok=True)
+        BYPASS_TIMER_FILE.write_text(str(expiry.timestamp()))
+        success = set_bypass('ON', debug=False)
+        action_taken = f"Bypass ON until {expiry.strftime('%-I:%M %p')}"
+    elif token == SECRET_BYPASS_CANCEL_TIMER_TOKEN and SECRET_BYPASS_CANCEL_TIMER_TOKEN:
+        BYPASS_TIMER_FILE.unlink(missing_ok=True)
+        success = True
+        action_taken = "Bypass timer cancelled (bypass stays ON)"
     elif token == SECRET_PURGE_TOKEN and SECRET_PURGE_TOKEN:
         # Trigger one-time purge
         from monitor.purge import trigger_purge

@@ -172,6 +172,10 @@ PRESSURE_LOW_WATCH_FILE = Path.home() / '.config' / 'pumphouse' / 'watch_pressur
 # the dashboard. Cleared when override is manually turned ON or auto-shutoff fires.
 OVERRIDE_MANUAL_OFF_FILE = Path.home() / '.config' / 'pumphouse' / 'override_manual_off'
 
+# Timed bypass: when this file exists, it contains an epoch-timestamp float
+# indicating when bypass should automatically be turned off.
+BYPASS_TIMER_FILE = Path.home() / '.config' / 'pumphouse' / 'bypass_timer'
+
 def load_config_file():
     """
     Load configuration from file if it exists.

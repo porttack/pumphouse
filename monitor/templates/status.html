@@ -418,9 +418,16 @@
                 <a href="/control/{{ token_override_on }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;">○ Override OFF</a>
                 {% endif %}
                 {% if relay_status.bypass == 'ON' %}
+                  {% if bypass_timer_expiry %}
+                <a href="/control/{{ token_bypass_cancel_timer }}" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #f44336; background: #f44336; color: #fff;" title="Cancel timer, keep bypass ON permanently">● Bypass ON</a>
+                <a href="/control/{{ token_bypass_off }}" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #ff9800; background: #ff9800; color: #fff;" title="Turn bypass OFF and cancel timer">⏱ until {{ bypass_timer_expiry.strftime('%-I:%M %p') }}</a>
+                  {% else %}
                 <a href="/control/{{ token_bypass_off }}" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #f44336; background: #f44336; color: #fff;">● Bypass ON</a>
+                <a href="/control/{{ token_bypass_timed }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;">⏱ 4h</a>
+                  {% endif %}
                 {% else %}
                 <a href="/control/{{ token_bypass_on }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;">○ Bypass OFF</a>
+                <a href="/control/{{ token_bypass_timed }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;">⏱ 4h</a>
                 {% endif %}
                 <a href="/control/{{ token_purge }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;" onclick="return confirm('Trigger a purge cycle?')">⚙ Purge</a>
             </div>
