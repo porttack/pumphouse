@@ -220,7 +220,7 @@
 <body>
     <div class="container">
         <h1>PUMPHOUSE SYSTEM STATUS <span style="font-size: 14px; color: #888; font-weight: normal;">v{{ version }}</span></h1>
-        <div class="timestamp">Last Updated: {{ now.strftime('%Y-%m-%d %H:%M:%S') }} (<span id="age">just now</span>) &middot; <a href="/timelapse" style="color:#4CAF50; text-decoration:none;">Timelapses</a>{% if snapshot_url %} &middot; <a href="{{ snapshot_url }}" style="color:#4CAF50; text-decoration:none;">Now</a>{% endif %} &middot; <a href="https://onblackberryhill.com/internet" style="color:#4CAF50; text-decoration:none;">Uptime</a> &middot; <a href="{{ national_weather_url }}" target="_blank" style="color:#4CAF50; text-decoration:none;">National Weather</a></div>
+        <div class="timestamp">Last Updated: {{ now.strftime('%Y-%m-%d %H:%M:%S') }} (<span id="age">just now</span>) &middot; <a href="/timelapse" style="color:#4CAF50; text-decoration:none;">Timelapses</a>{% if snapshot_url %} &middot; <a href="{{ snapshot_url }}" style="color:#4CAF50; text-decoration:none;">Now</a>{% endif %} &middot; <a href="https://onblackberryhill.com/internet" style="color:#4CAF50; text-decoration:none;">Uptime</a> &middot; <a href="{{ national_weather_url }}" target="_blank" style="color:#4CAF50; text-decoration:none;">National Weather</a> &middot; <a href="https://github.com/porttack/pumphouse" target="_blank" style="color:#4CAF50; text-decoration:none;">GitHub</a></div>
         <script>
             var _loaded = Date.now();
             setInterval(function() {
