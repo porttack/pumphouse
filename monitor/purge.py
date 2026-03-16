@@ -11,7 +11,21 @@ except ImportError:
     print("Error: RPi.GPIO not available", file=sys.stderr)
     sys.exit(1)
 
-from monitor.relay import init_relays, purge_spindown_filter, cleanup_relays, DEFAULT_PURGE_DURATION
+from monitor.relay import init_relays, purge_spindown_filter, cleanup_relays
+from monitor.config import PURGE_DURATION as DEFAULT_PURGE_DURATION
+
+
+def trigger_purge(debug=False):
+    """Trigger a purge cycle. Returns True on success. Safe to call from web server."""
+    if not init_relays():
+        return False
+    try:
+        return purge_spindown_filter(duration=DEFAULT_PURGE_DURATION, debug=debug)
+    except Exception:
+        return False
+    finally:
+        cleanup_relays()
+
 
 def main():
     parser = argparse.ArgumentParser(description='Purge spindown sediment filter')
