@@ -128,7 +128,7 @@ MAX_PRESSURE_LOG_INTERVAL = 1800  # Log at least every 30 minutes when pressure 
 # List of event types to EXCLUDE from the Recent Events table on the web dashboard
 # Common types: TANK_LEVEL, PRESSURE_HIGH, PRESSURE_LOW, INIT, SHUTDOWN, FLOAT_CALLING, FLOAT_FULL
 DASHBOARD_HIDE_EVENT_TYPES = ['TANK_LEVEL', 'PRESSURE_LOW', 'PRESSURE_HIGH', 'SHUTDOWN']  # Hide noisy tank level change events
-DASHBOARD_MAX_EVENTS = 500  # Maximum number of events to show in dashboard and emails (~7 days)
+DASHBOARD_MAX_EVENTS = 200  # Maximum number of events to show in dashboard and emails (~3 days)
 DASHBOARD_SNAPSHOT_COUNT = 97  # Number of snapshots to show (97 = 24 hours at 15-min intervals)
 
 # Reservation/Rental Income Configuration

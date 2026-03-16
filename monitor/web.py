@@ -53,6 +53,9 @@ import matplotlib.dates as mdates
 
 app = Flask(__name__)
 
+from flask_compress import Compress  # noqa: E402
+Compress(app)
+
 from monitor.web_timelapse import timelapse_bp  # noqa: E402
 from monitor.weather_api import current_weather_desc, get_wind_forecast  # noqa: E402
 app.register_blueprint(timelapse_bp)
