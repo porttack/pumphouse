@@ -47,6 +47,7 @@ class NotificationManager:
         self.last_refill_check = 0
         self.well_dry_alerted = False
         self.well_recovery_alerted_ts = None  # Timestamp of last recovery we alerted for
+        self.well_recovery_muted_until = 0    # Unix timestamp: suppress recovery alerts until then
         self.high_flow_alerted_ts = None  # Timestamp of last high flow we alerted for
         self.backflush_alerted_date = None  # Date (YYYY-MM-DD) of last backflush alert (one per day max)
         self.full_flow_active_alerted = False  # Whether we've alerted for the current active full-flow
@@ -149,13 +150,16 @@ class NotificationManager:
         )
 
         if refill_ts and days_ago is not None:
-            # Only alert if we haven't already alerted for this specific refill event
-            # Convert timestamp to string for comparison (datetime objects aren't JSON serializable)
             refill_ts_str = refill_ts.isoformat() if isinstance(refill_ts, datetime) else str(refill_ts)
 
-            if self.well_recovery_alerted_ts != refill_ts_str:
-                # This is a NEW refill we haven't alerted about yet
+            # Suppress if we recently alerted (12-hour mute window prevents duplicate
+            # alerts caused by the stagnation-start timestamp shifting as new snapshots arrive)
+            if current_time < self.well_recovery_muted_until:
+                pass  # Still muted — fall through to dry check
+            elif self.well_recovery_alerted_ts != refill_ts_str:
+                # New recovery event — alert and mute for 12 hours
                 self.well_recovery_alerted_ts = refill_ts_str
+                self.well_recovery_muted_until = current_time + 12 * 3600
                 self.well_dry_alerted = False  # Reset dry flag on recovery
                 self._save_state()
                 return ('recovery', refill_ts)
@@ -297,6 +301,7 @@ class NotificationManager:
                 with open(self.state_file, 'r') as f:
                     state = json.load(f)
                     self.well_recovery_alerted_ts = state.get('well_recovery_alerted_ts')
+                    self.well_recovery_muted_until = state.get('well_recovery_muted_until', 0)
                     self.well_dry_alerted = state.get('well_dry_alerted', False)
                     self.high_flow_alerted_ts = state.get('high_flow_alerted_ts')
                     # Support both old backflush_alerted_ts and new backflush_alerted_date
@@ -322,6 +327,7 @@ class NotificationManager:
         try:
             state = {
                 'well_recovery_alerted_ts': self.well_recovery_alerted_ts,
+                'well_recovery_muted_until': self.well_recovery_muted_until,
                 'well_dry_alerted': self.well_dry_alerted,
                 'high_flow_alerted_ts': self.high_flow_alerted_ts,
                 'backflush_alerted_date': self.backflush_alerted_date,
