@@ -32,6 +32,9 @@ from monitor.config import (
     PRESSURE_LOW_WATCH_FILE,
     OVERRIDE_MANUAL_OFF_FILE,
     BYPASS_TIMER_FILE,
+    BYPASS_CYCLE_FILE,
+    BYPASS_CYCLE_ON_HOURS,
+    BYPASS_CYCLE_OFF_HOURS,
     NATIONAL_WEATHER_URL
 )
 from monitor.gpio_helpers import (
@@ -71,6 +74,7 @@ STARTUP_TIME = datetime.now()  # Track when web server started
 # Tokens derived from bypass_on secret — no secrets.conf changes needed
 SECRET_BYPASS_TIMED_TOKEN        = (SECRET_BYPASS_ON_TOKEN + '-4h')      if SECRET_BYPASS_ON_TOKEN else ''
 SECRET_BYPASS_CANCEL_TIMER_TOKEN = (SECRET_BYPASS_ON_TOKEN + '-cancel')   if SECRET_BYPASS_ON_TOKEN else ''
+SECRET_BYPASS_CYCLE_TOKEN        = (SECRET_BYPASS_ON_TOKEN + '-cycle')    if SECRET_BYPASS_ON_TOKEN else ''
 
 
 def get_bypass_timer_expiry():
@@ -83,10 +87,42 @@ def get_bypass_timer_expiry():
     return None
 
 
+def get_bypass_cycle_info():
+    """Return cycle dict {on_hours, off_hours, next_transition (datetime), next_state} or None."""
+    import json as _json
+    try:
+        if BYPASS_CYCLE_FILE.exists():
+            d = _json.loads(BYPASS_CYCLE_FILE.read_text())
+            d['next_transition'] = datetime.fromtimestamp(d['next_transition'])
+            return d
+    except Exception:
+        pass
+    return None
+
+
+def _write_cycle(on_hours, off_hours, next_transition_dt, next_state):
+    import json as _json
+    BYPASS_CYCLE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    BYPASS_CYCLE_FILE.write_text(_json.dumps({
+        'on_hours': on_hours,
+        'off_hours': off_hours,
+        'next_transition': next_transition_dt.timestamp(),
+        'next_state': next_state,
+    }))
+
+
+def _cancel_all_bypass_modes():
+    """Clear both timer and cycle state files."""
+    BYPASS_TIMER_FILE.unlink(missing_ok=True)
+    BYPASS_CYCLE_FILE.unlink(missing_ok=True)
+
+
 def _bypass_timer_watchdog():
-    """Background thread: turn bypass OFF when the 4-hour timer expires."""
+    """Background thread: handles one-shot timer expiry and cycle transitions."""
     while True:
         _time.sleep(30)
+
+        # One-shot timer
         expiry = get_bypass_timer_expiry()
         if expiry and datetime.now() >= expiry:
             try:
@@ -94,6 +130,23 @@ def _bypass_timer_watchdog():
                 set_bypass('OFF', debug=False)
             except Exception as e:
                 print(f'bypass_timer_watchdog: {e}')
+
+        # Cycle mode
+        cycle = get_bypass_cycle_info()
+        if cycle and datetime.now() >= cycle['next_transition']:
+            try:
+                next_state = cycle['next_state']
+                set_bypass(next_state, debug=False)
+                on_h, off_h = cycle['on_hours'], cycle['off_hours']
+                if next_state == 'OFF':
+                    new_trans = datetime.now() + timedelta(hours=off_h)
+                    new_next  = 'ON'
+                else:
+                    new_trans = datetime.now() + timedelta(hours=on_h)
+                    new_next  = 'OFF'
+                _write_cycle(on_h, off_h, new_trans, new_next)
+            except Exception as e:
+                print(f'bypass_cycle_watchdog: {e}')
 
 
 threading.Thread(target=_bypass_timer_watchdog, daemon=True, name='bypass-timer').start()
@@ -1494,7 +1547,11 @@ def index():
                          token_bypass_off=SECRET_BYPASS_OFF_TOKEN,
                          token_bypass_timed=SECRET_BYPASS_TIMED_TOKEN,
                          token_bypass_cancel_timer=SECRET_BYPASS_CANCEL_TIMER_TOKEN,
+                         token_bypass_cycle=SECRET_BYPASS_CYCLE_TOKEN,
                          bypass_timer_expiry=get_bypass_timer_expiry(),
+                         bypass_cycle=get_bypass_cycle_info(),
+                         bypass_cycle_on_hours=BYPASS_CYCLE_ON_HOURS,
+                         bypass_cycle_off_hours=BYPASS_CYCLE_OFF_HOURS,
                          token_purge=SECRET_PURGE_TOKEN)
 
 @app.route('/sunset')
@@ -1619,23 +1676,40 @@ def control(token):
         success = set_supply_override('OFF', debug=False)
         action_taken = "Supply Override turned OFF"
     elif token == SECRET_BYPASS_ON_TOKEN and SECRET_BYPASS_ON_TOKEN:
-        BYPASS_TIMER_FILE.unlink(missing_ok=True)
+        _cancel_all_bypass_modes()
         success = set_bypass('ON', debug=False)
         action_taken = "Bypass turned ON"
     elif token == SECRET_BYPASS_OFF_TOKEN and SECRET_BYPASS_OFF_TOKEN:
-        BYPASS_TIMER_FILE.unlink(missing_ok=True)
+        _cancel_all_bypass_modes()
         success = set_bypass('OFF', debug=False)
         action_taken = "Bypass turned OFF"
     elif token == SECRET_BYPASS_TIMED_TOKEN and SECRET_BYPASS_TIMED_TOKEN:
+        _cancel_all_bypass_modes()
         expiry = datetime.now() + timedelta(hours=4)
         BYPASS_TIMER_FILE.parent.mkdir(parents=True, exist_ok=True)
         BYPASS_TIMER_FILE.write_text(str(expiry.timestamp()))
         success = set_bypass('ON', debug=False)
         action_taken = f"Bypass ON until {expiry.strftime('%-I:%M %p')}"
     elif token == SECRET_BYPASS_CANCEL_TIMER_TOKEN and SECRET_BYPASS_CANCEL_TIMER_TOKEN:
-        BYPASS_TIMER_FILE.unlink(missing_ok=True)
+        _cancel_all_bypass_modes()
         success = True
         action_taken = "Bypass timer cancelled (bypass stays ON)"
+    elif token == SECRET_BYPASS_CYCLE_TOKEN and SECRET_BYPASS_CYCLE_TOKEN:
+        cycle_info = get_bypass_cycle_info()
+        if cycle_info:
+            # Cycle is already running — stop it, leave bypass as-is
+            BYPASS_CYCLE_FILE.unlink(missing_ok=True)
+            success = True
+            action_taken = "Bypass cycle stopped"
+        else:
+            # Start cycle: ON phase first
+            _cancel_all_bypass_modes()
+            on_h  = float(request.args.get('on',  BYPASS_CYCLE_ON_HOURS))
+            off_h = float(request.args.get('off', BYPASS_CYCLE_OFF_HOURS))
+            next_trans = datetime.now() + timedelta(hours=on_h)
+            _write_cycle(on_h, off_h, next_trans, 'OFF')
+            success = set_bypass('ON', debug=False)
+            action_taken = f"Bypass cycle started ({on_h:.4g}h ON / {off_h:.4g}h OFF)"
     elif token == SECRET_PURGE_TOKEN and SECRET_PURGE_TOKEN:
         # Trigger one-time purge
         from monitor.purge import trigger_purge

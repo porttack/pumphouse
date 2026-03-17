@@ -176,6 +176,12 @@ OVERRIDE_MANUAL_OFF_FILE = Path.home() / '.config' / 'pumphouse' / 'override_man
 # indicating when bypass should automatically be turned off.
 BYPASS_TIMER_FILE = Path.home() / '.config' / 'pumphouse' / 'bypass_timer'
 
+# Cycle bypass: alternates bypass ON/OFF on a repeating schedule.
+# When this file exists (JSON), it stores the active cycle state.
+BYPASS_CYCLE_FILE     = Path.home() / '.config' / 'pumphouse' / 'bypass_cycle.json'
+BYPASS_CYCLE_ON_HOURS  = 4   # Default ON duration  (hours)
+BYPASS_CYCLE_OFF_HOURS = 2   # Default OFF duration (hours)
+
 def load_config_file():
     """
     Load configuration from file if it exists.
