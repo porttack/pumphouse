@@ -422,30 +422,30 @@
                   {% set cyc_on  = bypass_cycle.on_hours  | int if bypass_cycle.on_hours  == bypass_cycle.on_hours  | int else bypass_cycle.on_hours %}
                   {% set cyc_off = bypass_cycle.off_hours | int if bypass_cycle.off_hours == bypass_cycle.off_hours | int else bypass_cycle.off_hours %}
                   {% if relay_status.bypass == 'ON' %}
-                <a href="/control/{{ token_bypass_off }}" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #f44336; background: #f44336; color: #fff;" title="Stop cycle and turn bypass OFF">● Bypass ON</a>
+                <a href="/control/{{ token_bypass_off }}" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #f44336; background: #f44336; color: #fff;" title="Stop cycle and turn bypass OFF">● Bypass Filters/Dosatron: ON</a>
                   {% else %}
-                <a href="/control/{{ token_bypass_on }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;" title="Stop cycle and turn bypass ON permanently">○ Bypass OFF</a>
+                <a href="/control/{{ token_bypass_on }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;" title="Stop cycle and turn bypass ON permanently">○ Bypass Filters/Dosatron: OFF</a>
                   {% endif %}
-                <a href="/control/{{ token_bypass_timed }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;" title="Stop cycle and start 4h timer instead">⏱ 4h</a>
-                <a href="/control/{{ token_bypass_cycle }}" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #2196F3; background: #2196F3; color: #fff;" title="Stop cycle (bypass stays as-is)">↺ {{ cyc_on }}h/{{ cyc_off }}h → {{ bypass_cycle.next_state }} at {{ bypass_cycle.next_transition.strftime('%-I:%M %p') }}</a>
+                <a href="/control/{{ token_bypass_timed }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;" title="Stop cycle and start 4h timer instead">⏱ Bypass for 4h</a>
+                <a href="/control/{{ token_bypass_cycle }}" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #2196F3; background: #2196F3; color: #fff;" title="Stop cycle (bypass stays as-is)">↺ Bypass {{ cyc_on }}h/{{ cyc_off }}h → {{ bypass_cycle.next_state }} at {{ bypass_cycle.next_transition.strftime('%-I:%M %p') }}</a>
                 {% elif bypass_timer_expiry %}
                   {# ── Timer mode ── #}
-                <a href="/control/{{ token_bypass_cancel_timer }}" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #f44336; background: #f44336; color: #fff;" title="Cancel timer, keep bypass ON permanently">● Bypass ON</a>
-                <a href="/control/{{ token_bypass_off }}" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #ff9800; background: #ff9800; color: #fff;" title="Turn bypass OFF and cancel timer">⏱ until {{ bypass_timer_expiry.strftime('%-I:%M %p') }}</a>
+                <a href="/control/{{ token_bypass_cancel_timer }}" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #f44336; background: #f44336; color: #fff;" title="Cancel timer, keep bypass ON permanently">● Bypass Filters/Dosatron: ON</a>
+                <a href="/control/{{ token_bypass_off }}" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #ff9800; background: #ff9800; color: #fff;" title="Turn bypass OFF and cancel timer">⏱ Bypass until {{ bypass_timer_expiry.strftime('%-I:%M %p') }}</a>
                   {% set def_on  = bypass_cycle_on_hours  | int if bypass_cycle_on_hours  == bypass_cycle_on_hours  | int else bypass_cycle_on_hours %}
                   {% set def_off = bypass_cycle_off_hours | int if bypass_cycle_off_hours == bypass_cycle_off_hours | int else bypass_cycle_off_hours %}
-                <a href="/control/{{ token_bypass_cycle }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;" title="Stop timer and start cycle instead">↺ {{ def_on }}h/{{ def_off }}h</a>
+                <a href="/control/{{ token_bypass_cycle }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;" title="Stop timer and start cycle instead">↺ Bypass {{ def_on }}h/{{ def_off }}h</a>
                 {% else %}
                   {# ── No active mode ── #}
                   {% if relay_status.bypass == 'ON' %}
-                <a href="/control/{{ token_bypass_off }}" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #f44336; background: #f44336; color: #fff;">● Bypass ON</a>
+                <a href="/control/{{ token_bypass_off }}" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #f44336; background: #f44336; color: #fff;">● Bypass Filters/Dosatron: ON</a>
                   {% else %}
-                <a href="/control/{{ token_bypass_on }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;">○ Bypass OFF</a>
+                <a href="/control/{{ token_bypass_on }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;">○ Bypass Filters/Dosatron: OFF</a>
                   {% endif %}
                   {% set def_on  = bypass_cycle_on_hours  | int if bypass_cycle_on_hours  == bypass_cycle_on_hours  | int else bypass_cycle_on_hours %}
                   {% set def_off = bypass_cycle_off_hours | int if bypass_cycle_off_hours == bypass_cycle_off_hours | int else bypass_cycle_off_hours %}
-                <a href="/control/{{ token_bypass_timed }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;">⏱ 4h</a>
-                <a href="/control/{{ token_bypass_cycle }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;">↺ {{ def_on }}h/{{ def_off }}h</a>
+                <a href="/control/{{ token_bypass_timed }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;">⏱ Bypass for 4h</a>
+                <a href="/control/{{ token_bypass_cycle }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;">↺ Bypass {{ def_on }}h/{{ def_off }}h</a>
                 {% endif %}
                 <a href="/control/{{ token_purge }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;" onclick="return confirm('Trigger a purge cycle?')">⚙ Purge</a>
             </div>
