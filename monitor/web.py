@@ -598,7 +598,8 @@ def chart_data():
                     data_points.append({
                         'timestamp': ts,
                         'gallons': float(row['tank_gallons']),
-                        'pressure_pct': pressure_pct
+                        'pressure_pct': pressure_pct,
+                        'occupied': row.get('occupied', '').upper() == 'YES',
                     })
             except:
                 continue
@@ -623,37 +624,11 @@ def chart_data():
                 point_colors.append('#f44336')  # Red - full flow
                 continue
 
-            # PRIORITY 2: Check for stagnation (skip if tank >= OVERRIDE_ON_THRESHOLD)
-            # If tank is full enough, we shouldn't mark as stagnant since override would be on
-            if OVERRIDE_ON_THRESHOLD and point['gallons'] >= OVERRIDE_ON_THRESHOLD:
-                point_colors.append('#4CAF50')  # Green - tank at override threshold
-                continue
-
-            # Find the earliest point within the 6-hour lookback window
-            lookback_cutoff = point['timestamp'].timestamp() - stagnation_window_seconds
-            lookback_gallons = None
-
-            for j in range(i, -1, -1):  # Search backwards from current point
-                if data_points[j]['timestamp'].timestamp() >= lookback_cutoff:
-                    lookback_gallons = data_points[j]['gallons']
-                else:
-                    break  # Found the earliest point in window
-
-            # If we have 6+ hours of history
-            if lookback_gallons is not None and i > 0:
-                time_span = point['timestamp'].timestamp() - data_points[max(0, i - 25)]['timestamp'].timestamp()
-
-                # Only consider it stagnant if we have close to 6 hours of data
-                if time_span >= stagnation_window_seconds * 0.9:  # At least 90% of 6 hours
-                    gain = point['gallons'] - lookback_gallons
-                    if gain <= NOTIFY_WELL_RECOVERY_MAX_STAGNATION_GAIN:
-                        point_colors.append('#ff9800')  # Orange - stagnant
-                    else:
-                        point_colors.append('#4CAF50')  # Green - filling
-                else:
-                    point_colors.append('#4CAF50')  # Not enough history
+            # PRIORITY 2: Color by occupancy
+            if point.get('occupied'):
+                point_colors.append('#ff9800')  # Orange - occupied
             else:
-                point_colors.append('#4CAF50')  # Not enough history
+                point_colors.append('#4CAF50')  # Green - unoccupied
 
         return jsonify({
             'timestamps': timestamps,

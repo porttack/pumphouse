@@ -353,13 +353,15 @@ def render_epaper_jpg(
                    outline=(80, 105, 160), width=scale)
 
     # ── Snapshot data for graph ──────────────────────────────────────────
-    graph_gallons: list[float] = []
+    graph_gallons:  list[float] = []
+    graph_occupied: list[bool]  = []
     try:
         cutoff = datetime.now() - timedelta(hours=hours)
         for row in rows:
             try:
                 if datetime.fromisoformat(row['timestamp']) >= cutoff:
                     graph_gallons.append(float(row['tank_gallons']))
+                    graph_occupied.append(row.get('occupied', '').upper() == 'YES')
             except Exception:
                 continue
     except Exception:
@@ -423,6 +425,8 @@ def render_epaper_jpg(
         graph_gallons = smoothed
 
     # ── Data line (no fill) ───────────────────────────────────────────────
+    _COLOR_OCCUPIED   = (210, 140,  40)  # warm orange-amber — occupied
+    _COLOR_UNOCCUPIED = ( 80, 200, 100)  # fresh green — unoccupied
     if len(graph_gallons) >= 2:
         points = []
         for i, g in enumerate(graph_gallons):
@@ -430,7 +434,9 @@ def render_epaper_jpg(
             y_val = graph_bottom - 1 - int((g - g_min) / g_range * (graph_h - 2))
             points.append((x, y_val))
         for i in range(len(points) - 1):
-            draw.line([points[i], points[i + 1]], fill=(160, 230, 80), width=2 * scale)
+            occ   = graph_occupied[i] if i < len(graph_occupied) else False
+            color = _COLOR_OCCUPIED if occ else _COLOR_UNOCCUPIED
+            draw.line([points[i], points[i + 1]], fill=color, width=2 * scale)
 
     # ── Text overlays: white, no backing ────────────────────────────────
     WHITE = (255, 255, 255)
