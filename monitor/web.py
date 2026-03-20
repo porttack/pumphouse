@@ -72,9 +72,10 @@ PASSWORD = os.environ.get('PUMPHOUSE_PASS', 'pumphouse')
 STARTUP_TIME = datetime.now()  # Track when web server started
 
 # Tokens derived from bypass_on secret — no secrets.conf changes needed
-SECRET_BYPASS_TIMED_TOKEN        = (SECRET_BYPASS_ON_TOKEN + '-4h')      if SECRET_BYPASS_ON_TOKEN else ''
-SECRET_BYPASS_CANCEL_TIMER_TOKEN = (SECRET_BYPASS_ON_TOKEN + '-cancel')   if SECRET_BYPASS_ON_TOKEN else ''
-SECRET_BYPASS_CYCLE_TOKEN        = (SECRET_BYPASS_ON_TOKEN + '-cycle')    if SECRET_BYPASS_ON_TOKEN else ''
+SECRET_BYPASS_TIMED_TOKEN        = (SECRET_BYPASS_ON_TOKEN + '-4h')           if SECRET_BYPASS_ON_TOKEN else ''
+SECRET_BYPASS_CANCEL_TIMER_TOKEN = (SECRET_BYPASS_ON_TOKEN + '-cancel')        if SECRET_BYPASS_ON_TOKEN else ''
+SECRET_BYPASS_CYCLE_TOKEN        = (SECRET_BYPASS_ON_TOKEN + '-cycle')         if SECRET_BYPASS_ON_TOKEN else ''
+SECRET_TEST_FILTER_TOKEN         = (SECRET_BYPASS_ON_TOKEN + '-test-filter')   if SECRET_BYPASS_ON_TOKEN else ''
 
 
 def get_bypass_timer_expiry():
@@ -1326,7 +1327,7 @@ def water_status():
     {img_html}
   </div>
   <div class="links">
-    <span>Updates every 10 minutes</span>
+    <span>Updates every 10&ndash;30 minutes</span>
     <span>&bull;</span>
     <a href="/timelapse">Timelapse</a>{extra_links}
   </div>
@@ -1338,6 +1339,147 @@ def water_status():
         resp.headers['Cache-Control'] = 'public, max-age=60'
     else:
         resp.headers['Cache-Control'] = 'public, max-age=600, stale-if-error=172800'
+    return resp
+
+
+@app.route('/water2')
+def water2_status():
+    """
+    Owner-facing water status page with bypass controls.
+    Same graph as /water; bypass buttons always shown (URL is obscure enough).
+    Designed to work via Cloudflare — uses token-based /control/<token> links.
+    Cache-Control is no-store so relay state is always fresh.
+    """
+    via_cloudflare = bool(request.headers.get('CF-Ray'))
+    dashboard_url  = 'https://onblackberryhill2.tplinkdns.com:6443/?hours=120&totals=income'
+
+    hours_arg = request.args.get('hours', type=int)
+    days_arg  = request.args.get('days',  type=int)
+    if hours_arg is None and days_arg is not None:
+        hours_arg = days_arg * 24
+
+    import time as _time
+    _ts = int(_time.time())
+    img_param = f'tenant=no&hours={hours_arg}&_t={_ts}' if hours_arg is not None else f'tenant=no&_t={_ts}'
+    img_tag   = f'<img src="/api/epaper.jpg?{img_param}" alt="Water tank level graph">'
+    if via_cloudflare:
+        img_html    = img_tag
+        extra_links = ''
+    else:
+        img_html    = f'<a href="{dashboard_url}" style="display:block;">{img_tag}</a>'
+        extra_links = (
+            '\n    <span>&bull;</span>'
+            '\n    <a href="/">Dashboard</a>'
+        )
+
+    back = '/water2'
+
+    controls_html = ''
+    if SECRET_BYPASS_ON_TOKEN:
+        relay_status = get_all_relay_status()
+        bypass_on    = relay_status.get('bypass') == 'ON'
+        override_on  = relay_status.get('supply_override') == 'ON'
+
+        btn_active  = 'background:#f44336;border-color:#f44336;color:#fff;'
+        btn_warning = 'background:#ff9800;border-color:#ff9800;color:#fff;'
+        btn_base    = 'display:inline-block;padding:8px 16px;border:1px solid #7aa4d8;border-radius:6px;color:#7aa4d8;text-decoration:none;font-size:0.9rem;'
+
+        if bypass_on:
+            bypass_btn = f'<a href="/control/{SECRET_BYPASS_OFF_TOKEN}?back={back}" style="{btn_base}{btn_active}">&#9679; Bypass Filters/Dosatron: ON</a>'
+        else:
+            bypass_btn = f'<a href="/control/{SECRET_BYPASS_ON_TOKEN}?back={back}" style="{btn_base}">&#9675; Bypass Filters/Dosatron: OFF</a>'
+
+        if override_on:
+            override_btn = f'<a href="/control/{SECRET_OVERRIDE_OFF_TOKEN}?back={back}" style="{btn_base}{btn_warning}">&#9679; Force Fill Tank Valve Open: ON</a>'
+        else:
+            override_btn = f'<a href="/control/{SECRET_OVERRIDE_ON_TOKEN}?back={back}" style="{btn_base}">&#9675; Force Fill Tank Valve Open: OFF</a>'
+
+        purge_btn       = f'<a href="/control/{SECRET_PURGE_TOKEN}?back={back}" style="{btn_base}" onclick="return confirm(\'Trigger a purge cycle?\')">&#9881; Purge</a>'
+        test_filter_btn = f'<a href="/control/{SECRET_TEST_FILTER_TOKEN}?back={back}" style="{btn_base}" onclick="return confirm(\'Start test filter mode? This turns Override ON and Bypass OFF.\')">&#128308; Test Filter</a>'
+
+        float_state = read_float_sensor()
+        if float_state == FLOAT_STATE_CALLING:
+            tank_valve_html = '<div style="color:#ff9800;font-size:0.9rem;text-align:center;">&#9654; Fill Tank Valve: OPEN (tank calling for water)</div>'
+        else:
+            tank_valve_html = '<div style="color:#ff9800;font-size:0.9rem;text-align:center;">&#9679; Fill Tank Valve: CLOSED (tank full)</div>'
+
+        controls_html = f'{tank_valve_html}<div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:8px;">{bypass_btn}{override_btn}{purge_btn}{test_filter_btn}</div>'
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="600">
+  <title>Water Status &mdash; onblackberryhill.com</title>
+  <link rel="icon" type="image/svg+xml" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M16 2C16 2 6 14 6 21a10 10 0 0 0 20 0C26 14 16 2 16 2z" fill="%231e90ff"/><path d="M11 20c0-3 2-5 4-7" stroke="white" stroke-width="1.5" fill="none" stroke-linecap="round" opacity="0.5"/></svg>'>
+  <style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      background: #1a2440;
+      color: #cdd8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 24px 16px;
+      gap: 20px;
+    }}
+    h1 {{
+      font-size: 1.2rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: #8fb3e8;
+      text-transform: uppercase;
+    }}
+    .card {{
+      background: #243060;
+      border-radius: 12px;
+      padding: 12px;
+      max-width: 640px;
+      width: 100%;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    }}
+    .card img {{
+      width: 100%;
+      height: auto;
+      border-radius: 6px;
+      display: block;
+    }}
+    .links {{
+      font-size: 0.82rem;
+      color: #6a82b0;
+      text-align: center;
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }}
+    .links a {{ color: #7aa4d8; text-decoration: none; }}
+    .links a:hover {{ text-decoration: underline; }}
+  </style>
+</head>
+<body>
+  <h1>Water Tank &mdash; onblackberryhill.com</h1>
+  <div class="card">
+    {img_html}
+  </div>
+  {controls_html}
+  <div class="links">
+    <span>Updates every 10&ndash;30 minutes</span>
+    <span>&bull;</span>
+    <a href="/timelapse">Timelapse</a>
+    <span>&bull;</span>
+    <a href="/water">Public view</a>
+    <span>&bull;</span>
+    <a href="{AMBIENT_WEATHER_DASHBOARD_URL}" target="_blank">Weather</a>{extra_links}
+  </div>
+</body>
+</html>"""
+
+    resp = Response(html, mimetype='text/html')
+    resp.headers['Cache-Control'] = 'no-store'
     return resp
 
 
@@ -1715,6 +1857,14 @@ def control(token):
         from monitor.purge import trigger_purge
         success = trigger_purge(debug=False)
         action_taken = "Purge triggered"
+    elif token == SECRET_TEST_FILTER_TOKEN and SECRET_TEST_FILTER_TOKEN:
+        # Test filter mode: override ON (pump runs) + bypass OFF (water through filter)
+        _cancel_all_bypass_modes()
+        ok1 = set_bypass('OFF', debug=False)
+        OVERRIDE_MANUAL_OFF_FILE.unlink(missing_ok=True)
+        ok2 = set_supply_override('ON', debug=False)
+        success = ok1 and ok2
+        action_taken = "Test filter mode: Override ON, Bypass OFF"
     else:
         return Response('Invalid token', status=403)
 
