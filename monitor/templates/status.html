@@ -476,7 +476,10 @@
                     </thead>
                     <tbody>
                         {% for res in reservation_list %}
-                        <tr>
+                        {% set today_str = now.strftime('%Y-%m-%d') %}
+                        {% set is_current = res['Check-In'] <= today_str and res['Checkout'] > today_str %}
+                        {% set is_past    = res['Checkout'] <= today_str %}
+                        <tr style="{{ 'color:#4a9e6b;' if is_current else 'color:#555e72;' if is_past else '' }}">
                             <td>{{ format_date_short(res['Check-In']) }}</td>
                             <td>{{ format_date_short(res['Checkout']) }}</td>
                             <td style="text-align: center;">{{ res['Nights'] }}</td>
