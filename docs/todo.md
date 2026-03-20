@@ -63,6 +63,7 @@ Pending tasks, security items, ideas, and completed history.
 
 ### Low Priority
 
+- [ ] **Rate-limit the timelapse rating endpoint** — `/timelapse/<date>/rate` is a POST that bypasses Cloudflare caching and hits the Pi directly on every request; a flood of rating POSTs could overwhelm the Pi. Options: Cloudflare rate-limiting rule on that path, or a simple in-process token bucket in Flask.
 - [ ] _Add your ideas here_
 
 ---

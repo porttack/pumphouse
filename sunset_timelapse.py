@@ -39,6 +39,7 @@ WINDOW_BEFORE    = 60    # minutes before sunset to start capture
 WINDOW_AFTER     = 60    # minutes after sunset to stop capture
 RETENTION_DAYS   = 30    # keep every day's timelapse for this many days
 WEEKLY_YEARS     = 3     # after RETENTION_DAYS, keep one per ISO week for this many years
+KEEP_MIN_STARS   = 4     # always keep videos with avg rating >= this (None to disable)
 OUTPUT_FPS       = 24    # output video frame rate
 OUTPUT_CRF       = 33    # H.264 quality (lower = better; 23 = default, 35 = ~40x smaller)
 PREVIEW_INTERVAL = 2400  # seconds between partial preview assemblies (40 min)
@@ -166,12 +167,33 @@ def _generate_zoom(source: Path) -> None:
     log.info(f"Zoom: {zoom_path.name} ({mb:.1f} MB)")
 
 
-def cleanup_old(retention_days=RETENTION_DAYS, weekly_years=WEEKLY_YEARS):
+def _load_ratings():
+    """Return ratings dict from ratings.json, or {} on any error."""
+    import json as _json
+    path = TIMELAPSE_DIR / 'ratings.json'
+    try:
+        with open(path) as f:
+            return _json.load(f)
+    except Exception:
+        return {}
+
+
+def _avg_rating(ratings, date_str):
+    """Return average star rating for date_str, or 0 if unrated."""
+    r = ratings.get(date_str, {})
+    count = r.get('count', 0)
+    return r.get('sum', 0) / count if count else 0
+
+
+def cleanup_old(retention_days=RETENTION_DAYS, weekly_years=WEEKLY_YEARS,
+                keep_min_stars=KEEP_MIN_STARS):
     """
     Tiered retention:
       - ≤ retention_days old        → keep all
       - retention_days..weekly_years → keep oldest file of each ISO week
       - older than weekly_years      → delete
+    If keep_min_stars is set, any video with avg rating >= that value is
+    always kept regardless of age (set to None to disable).
     Handles both YYYY-MM-DD_HHMM.mp4 and legacy YYYY-MM-DD.mp4 names.
     """
     import re as _re
@@ -180,6 +202,8 @@ def cleanup_old(retention_days=RETENTION_DAYS, weekly_years=WEEKLY_YEARS):
     today = _date.today()
     cutoff_daily  = today - timedelta(days=retention_days)
     cutoff_weekly = today - timedelta(days=weekly_years * 365)
+
+    ratings = _load_ratings() if keep_min_stars is not None else {}
 
     # Collect all dated MP4s → {date: Path}
     dated = {}
@@ -204,18 +228,27 @@ def cleanup_old(retention_days=RETENTION_DAYS, weekly_years=WEEKLY_YEARS):
             if key not in keep_per_week:
                 keep_per_week[key] = d
 
+    from monitor.logger import log_event
+    from monitor.config import EVENTS_FILE
+
     for d, f in dated.items():
         if d >= cutoff_daily:
             continue  # within daily window — keep
+        if keep_min_stars is not None and _avg_rating(ratings, d.isoformat()) >= keep_min_stars:
+            continue  # highly rated — keep regardless of age
         if d < cutoff_weekly:
             f.unlink()
+            reason = f"Deleted timelapse {f.name}: older than {weekly_years} years"
             log.info(f"Removed (>{weekly_years}yr): {f.name}")
+            log_event(EVENTS_FILE, 'TIMELAPSE_DELETED', None, None, None, None, None, None, None, reason)
             continue
         # Weekly zone: keep only the oldest of each ISO week
         key = d.isocalendar()[:2]
         if keep_per_week.get(key) != d:
             f.unlink()
+            reason = f"Deleted timelapse {f.name}: weekly dedup (kept {dated[keep_per_week[key]].name})"
             log.info(f"Removed (weekly dedup): {f.name}")
+            log_event(EVENTS_FILE, 'TIMELAPSE_DELETED', None, None, None, None, None, None, None, reason)
 
 
 def run_todays_timelapse(start_dt=None, end_dt=None, frames_root=None):
