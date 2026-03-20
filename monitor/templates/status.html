@@ -415,7 +415,7 @@
                 {% if relay_status.supply_override == 'ON' %}
                 <a href="/control/{{ token_override_off }}" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #f44336; background: #f44336; color: #fff;">● Override ON</a>
                 {% else %}
-                <a href="/control/{{ token_override_on }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;">○ Override OFF</a>
+                <a href="/control/{{ token_override_on }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;">○ Override OFF ({{ 'Calling' if sensor_data.float != FLOAT_STATE_FULL else 'Not Calling' }})</a>
                 {% endif %}
                 {% if bypass_cycle %}
                   {# ── Cycle mode ── #}
