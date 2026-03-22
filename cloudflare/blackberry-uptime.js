@@ -153,6 +153,77 @@ function downtimeIntervals(entries) {
   return intervals;
 }
 
+// ─── Wind Forecast ────────────────────────────────────────────────────────────
+
+function degreesToCompass(deg) {
+  const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+  return dirs[Math.round(deg / 22.5) % 16];
+}
+
+function summariseWindHours(hours) {
+  if (!hours.length) return null;
+  const speeds = hours.map(h => h.speed);
+  const gusts  = hours.map(h => h.gust);
+  let sinSum = 0, cosSum = 0;
+  for (const h of hours) {
+    sinSum += h.speed * Math.sin(h.dirDeg * Math.PI / 180);
+    cosSum += h.speed * Math.cos(h.dirDeg * Math.PI / 180);
+  }
+  const avgDir = (Math.atan2(sinSum, cosSum) * 180 / Math.PI + 360) % 360;
+  return {
+    speedMin: Math.round(Math.min(...speeds)),
+    speedMax: Math.round(Math.max(...speeds)),
+    gustMax:  Math.round(Math.max(...gusts)),
+    direction: degreesToCompass(avgDir),
+  };
+}
+
+async function getWindForecast() {
+  try {
+    const url = 'https://api.open-meteo.com/v1/forecast'
+      + '?latitude=44.6368&longitude=-124.0535'
+      + '&hourly=windspeed_10m,windgusts_10m,winddirection_10m'
+      + '&wind_speed_unit=mph&timezone=America%2FLos_Angeles&forecast_days=3';
+    const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    const data = await resp.json();
+    const { time: times, windspeed_10m: speeds, windgusts_10m: gusts, winddirection_10m: dirs } = data.hourly;
+
+    const now      = new Date(new Date().toLocaleString('en-US', { timeZone: TZ }));
+    const todayStr = now.toLocaleDateString('en-CA', { timeZone: TZ }); // YYYY-MM-DD
+    const tomorrowStr = new Date(now.getTime() + 86400000).toLocaleDateString('en-CA', { timeZone: TZ });
+
+    const tonightHours = [], tomorrowHours = [];
+    for (let i = 0; i < times.length; i++) {
+      const dateStr = times[i].slice(0, 10);
+      const hour    = parseInt(times[i].slice(11, 13), 10);
+      const entry   = { speed: speeds[i] || 0, gust: gusts[i] || 0, dirDeg: dirs[i] || 0 };
+      if (dateStr === todayStr && times[i] >= now.toISOString().slice(0, 16).replace('T', ' '))
+        tonightHours.push(entry);
+      else if (dateStr === tomorrowStr && hour >= 6 && hour <= 22)
+        tomorrowHours.push(entry);
+    }
+    return { tonight: summariseWindHours(tonightHours), tomorrow: summariseWindHours(tomorrowHours) };
+  } catch (e) {
+    return null;
+  }
+}
+
+function renderWindCard(wind) {
+  if (!wind) return '';
+  const fmt = w => w
+    ? `${w.direction} ${w.speedMin}–${w.speedMax} mph${w.gustMax > w.speedMax ? `, gusts ${w.gustMax}` : ''}`
+    : null;
+  const tonight  = fmt(wind.tonight);
+  const tomorrow = fmt(wind.tomorrow);
+  if (!tonight && !tomorrow) return '';
+  return `
+  <div class="card">
+    <h2><a href="https://forecast.weather.gov/MapClick.php?lat=44.64196&lon=-124.04110" target="_blank" style="color:#94a3b8;text-decoration:none;">Wind Forecast ↗</a></h2>
+    ${tonight  ? `<div style="margin-bottom:0.4rem">Tonight: ${tonight}</div>` : ''}
+    ${tomorrow ? `<div>Tomorrow: ${tomorrow}</div>` : ''}
+  </div>`;
+}
+
 // ─── Dashboard Components ─────────────────────────────────────────────────────
 
 // Uses timestamp-based accounting so downtime matches the outage list exactly.
@@ -273,7 +344,10 @@ function windowEntries(entries, windowMs, now) {
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 async function serveDashboard(env, show4h = false) {
-  const keys = await listAllKeys(env, 'log:');
+  const [keys, wind] = await Promise.all([
+    listAllKeys(env, 'log:'),
+    getWindForecast(),
+  ]);
   const entries = await Promise.all(
     keys.map(k => env.UPTIME_LOG.get(k.name).then(v => JSON.parse(v)))
   );
@@ -416,6 +490,8 @@ async function serveDashboard(env, show4h = false) {
       <span><i class="dot" style="background:#333"></i> No data</span>
     </div>
   </div>
+
+  ${renderWindCard(wind)}
 
   <div class="card">
     <h2>Outages — Past 28 Days</h2>
