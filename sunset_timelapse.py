@@ -403,7 +403,8 @@ def _send_timelapse_email(snapshot_path: Path, date_str: str) -> None:
     gallons = None
     try:
         import csv as _csv
-        with open('snapshots.csv') as f:
+        from monitor.config import DEFAULT_SNAPSHOTS_FILE
+        with open(DEFAULT_SNAPSHOTS_FILE) as f:
             rows = list(_csv.DictReader(f))
         if rows:
             gallons = float(rows[-1]['tank_gallons'])
@@ -440,6 +441,13 @@ def _send_timelapse_email(snapshot_path: Path, date_str: str) -> None:
             include_status=True,
         )
         log.info(f"Timelapse email sent: {subject}")
+        try:
+            from monitor.logger import log_event
+            from monitor.config import EVENTS_FILE
+            log_event(EVENTS_FILE, 'TIMELAPSE_EMAIL', None, None,
+                      gallons, None, None, None, None, subject)
+        except Exception as le:
+            log.warning(f"Event log failed: {le}")
     except Exception as e:
         log.error(f"Timelapse email failed: {e}")
 
