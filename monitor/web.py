@@ -349,6 +349,94 @@ def get_snapshots_stats(filepath=DEFAULT_SNAPSHOTS_FILE):
     except Exception as e:
         return None
 
+def build_calendar_months(all_reservations, num_months=19):
+    """Build calendar data for the availability calendar (current month + 18 more).
+
+    Returns a list of month dicts, each with:
+        name   - e.g. 'Mar 2026'
+        weeks  - list of 6 week rows, each a list of 7 cell dicts:
+                 {'day': int|None, 'cls': str, 'today': bool}
+    CSS classes: cal-pad, cal-past, cal-free, cal-guest, cal-owner
+    """
+    import calendar as _cal
+    from datetime import date as _date
+
+    today = _date.today()
+
+    # Build a map of date -> booking type, and income totals by checkout month
+    booked = {}
+    monthly_income = {}  # 'YYYY-MM' -> float (net, guest stays only)
+    for res in all_reservations:
+        status = res.get('Status', '').lower()
+        if not any(s in status for s in ('confirmed', 'checked in', 'checked out')):
+            continue
+        try:
+            checkin  = _date.fromisoformat(res.get('Check-In', ''))
+            checkout = _date.fromisoformat(res.get('Checkout', ''))
+        except ValueError:
+            continue
+        res_type = res.get('Type', '')
+        if 'Owner' in res_type:
+            day_type = 'owner'
+        elif res_type.lower() == 'airbnb':
+            day_type = 'airbnb'
+        elif res_type.lower() == 'vrbo':
+            day_type = 'vrbo'
+        else:
+            day_type = 'guest'
+        cur = checkin
+        while cur < checkout:
+            booked[cur] = day_type
+            cur += timedelta(days=1)
+        # Accumulate net income by checkout month (guest stays only)
+        if day_type != 'owner':
+            try:
+                gross = float(res.get('Income', 0) or 0)
+                net = gross * (1 - MANAGEMENT_FEE_PERCENT / 100)
+                month_key = checkout.strftime('%Y-%m')
+                monthly_income[month_key] = monthly_income.get(month_key, 0) + net
+            except (ValueError, TypeError):
+                pass
+
+    cls_map = {'owner': 'cal-owner', 'airbnb': 'cal-airbnb', 'vrbo': 'cal-vrbo', 'guest': 'cal-guest'}
+    months = []
+    yr, mo = today.year, today.month
+    cal = _cal.Calendar(firstweekday=6)  # Sunday-first columns
+    is_current_month = True  # only the first iteration is the current month
+    for _ in range(num_months):
+        first = _date(yr, mo, 1)
+        week_rows = []
+        for week in cal.monthdayscalendar(yr, mo):
+            row = []
+            for day_num in week:
+                if day_num == 0:
+                    row.append({'day': None, 'cls': 'cal-pad', 'today': False})
+                else:
+                    d = _date(yr, mo, day_num)
+                    is_today = (d == today)
+                    booked_type = booked.get(d)
+                    if d < today:
+                        # In current month: show booking color for booked past days
+                        cls = cls_map.get(booked_type, 'cal-past') if (is_current_month and booked_type) else 'cal-past'
+                    else:
+                        cls = cls_map.get(booked_type, 'cal-free')
+                    row.append({'day': day_num, 'cls': cls, 'today': is_today})
+            week_rows.append(row)
+        month_key = first.strftime('%Y-%m')
+        income = monthly_income.get(month_key)
+        months.append({
+            'name': first.strftime('%b %Y'),
+            'weeks': week_rows,
+            'income': f'${income:,.0f}' if income else None,
+        })
+        is_current_month = False
+        mo += 1
+        if mo > 12:
+            mo = 1
+            yr += 1
+    return months
+
+
 def get_sensor_data():
     """Read current sensor states"""
     # Note: We don't call init_gpio() here because the monitor process may be using GPIO.
@@ -1669,7 +1757,8 @@ def index():
                          bypass_cycle=get_bypass_cycle_info(),
                          bypass_cycle_on_hours=BYPASS_CYCLE_ON_HOURS,
                          bypass_cycle_off_hours=BYPASS_CYCLE_OFF_HOURS,
-                         token_purge=SECRET_PURGE_TOKEN)
+                         token_purge=SECRET_PURGE_TOKEN,
+                         calendar_months=build_calendar_months(all_reservations))
 
 @app.route('/sunset')
 def sunset():

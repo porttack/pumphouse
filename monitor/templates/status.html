@@ -215,6 +215,73 @@
                 width: auto;
             }
         }
+        /* Availability Calendar */
+        .cal-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+        }
+        @media (max-width: 900px) { .cal-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 540px)  { .cal-grid { grid-template-columns: 1fr; } }
+        .cal-month {
+            background: #1a1a1a;
+            border-radius: 4px;
+            padding: 8px 6px;
+        }
+        .cal-month-name {
+            color: #4CAF50;
+            font-size: 12px;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 4px;
+        }
+        .cal-month table {
+            background: transparent;
+            table-layout: fixed;
+            width: 100%;
+            font-size: 11px;
+            border-spacing: 2px;
+            border-collapse: separate;
+        }
+        .cal-month th {
+            color: #555;
+            text-align: center;
+            padding: 1px 0;
+            font-size: 10px;
+            border: none;
+            height: auto;
+        }
+        .cal-month td {
+            text-align: center;
+            padding: 2px 0;
+            border-radius: 3px;
+            border: none;
+            line-height: 1.5;
+        }
+        .cal-pad   { color: transparent; }
+        .cal-past  { color: #3a3a3a; }
+        .cal-free  { color: #666; }
+        .cal-airbnb { background: #4a1422; color: #e87090; }
+        .cal-vrbo   { background: #00312e; color: #40c8a8; }
+        .cal-guest  { background: #1e3a5f; color: #7ab0e8; }
+        .cal-owner  { background: #4a2e00; color: #e8a030; }
+        .cal-today { outline: 2px solid #c0c0c0; outline-offset: -1px; }
+        .cal-legend {
+            display: flex;
+            gap: 16px;
+            font-size: 11px;
+            color: #888;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+        .cal-swatch {
+            display: inline-block;
+            width: 11px;
+            height: 11px;
+            border-radius: 2px;
+            vertical-align: middle;
+            margin-right: 3px;
+        }
     </style>
 </head>
 <body>
@@ -674,6 +741,44 @@
 
         document.addEventListener('DOMContentLoaded', function() { loadChart(_currentHours); });
     </script>
+
+        {% if calendar_months %}
+        <div class="section">
+            <h2>AVAILABILITY — NEXT 18 MONTHS</h2>
+            <div class="cal-legend">
+                <span><span class="cal-swatch" style="background:#4a1422; border:1px solid #e87090;"></span>Airbnb</span>
+                <span><span class="cal-swatch" style="background:#00312e; border:1px solid #40c8a8;"></span>Vrbo</span>
+                <span><span class="cal-swatch" style="background:#1e3a5f; border:1px solid #7ab0e8;"></span>Other guest</span>
+                <span><span class="cal-swatch" style="background:#4a2e00; border:1px solid #e8a030;"></span>Owner stay</span>
+                <span><span class="cal-swatch" style="background:#2a2a2a; border:1px solid #555;"></span>Available</span>
+            </div>
+            <div class="cal-grid">
+                {% for month in calendar_months %}
+                <div class="cal-month">
+                    <div class="cal-month-name">{{ month.name }}{% if month.income %} <span style="color:#888; font-weight:normal;">{{ month.income }}</span>{% endif %}</div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Su</th><th>Mo</th><th>Tu</th><th>We</th>
+                                <th>Th</th><th>Fr</th><th>Sa</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for week in month.weeks %}
+                            <tr>
+                                {% for cell in week %}
+                                <td class="{{ cell.cls }}{% if cell.today %} cal-today{% endif %}">{{ cell.day or '' }}</td>
+                                {% endfor %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
     <script>
         // Match sunset snapshot height to epaper image height on desktop
         document.addEventListener('DOMContentLoaded', function() {
