@@ -55,7 +55,7 @@ from monitor.occupancy import (
     load_reservations,
 )
 from monitor.tank import get_tank_data
-from monitor.weather_api import current_weather_desc, forecast_weather_codes
+from monitor.weather_api import current_weather_desc, current_weather_code, forecast_weather_codes
 from monitor.weather_icons import draw_weather_icon_color
 
 # ── Camera / timelapse paths ───────────────────────────────────────────────
@@ -464,6 +464,12 @@ def render_epaper_jpg(
 
     # ── Forecast icons: top-right of graph (full colour, no backing needed) ─
     forecast_codes = forecast_weather_codes(EPAPER_FORECAST_DAYS) if EPAPER_FORECAST_DAYS else []
+    # Replace today's daily forecast code with the live current code — the
+    # daily code pessimistically covers the whole day; current is more accurate.
+    if forecast_codes:
+        live_code = current_weather_code()
+        if live_code is not None:
+            forecast_codes[0] = live_code
     if forecast_codes:
         icon_sz  = s(14)
         icon_gap = s(3)

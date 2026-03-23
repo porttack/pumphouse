@@ -41,6 +41,7 @@ except Exception:
 _weather_desc_cache: dict = {'desc': None, 'ts': 0.0}
 _forecast_cache: dict = {'codes': None, 'ts': 0.0}
 _wind_forecast_cache: dict = {'data': None, 'ts': 0.0}
+_current_code_cache: dict = {'code': None, 'ts': 0.0}
 
 
 def _degrees_to_compass(deg: float) -> str:
@@ -130,6 +131,33 @@ def get_wind_forecast() -> dict | None:
 
     except Exception:
         return None
+
+
+def current_weather_code() -> int | None:
+    """Return the current WMO weather code from Open-Meteo's current endpoint.
+
+    More accurate than today's daily forecast code (which pessimistically
+    covers the whole day). Cached for 30 minutes.
+    """
+    now = _time.time()
+    if _current_code_cache['code'] is not None and now - _current_code_cache['ts'] < 1800:
+        return _current_code_cache['code']
+    try:
+        url = (
+            'https://api.open-meteo.com/v1/forecast'
+            '?latitude=44.6368&longitude=-124.0535'
+            '&current=weather_code'
+            '&timezone=America%2FLos_Angeles'
+        )
+        with _ureq.urlopen(url, timeout=10) as resp:
+            code = _json.loads(resp.read()).get('current', {}).get('weather_code')
+        if code is not None:
+            _current_code_cache['code'] = int(code)
+            _current_code_cache['ts']   = now
+            return int(code)
+    except Exception:
+        pass
+    return None
 
 
 def forecast_weather_codes(days: int = 5) -> list:
