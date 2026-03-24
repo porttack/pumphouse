@@ -343,6 +343,7 @@
                         {% if tank_data.pt_percentage %}
                             <span style="color: #888; font-size: 14px;">(<a href="{{ tank_url }}" target="_blank" style="color: #2196F3; text-decoration: none;">PT: {{ tank_data.pt_percentage }}%</a>)</span>
                         {% endif %}
+                        <br><span style="color:#aaa;">{{ tank_data.gallons | int }} gal</span>
                     </div>
                 </div>
                 {% endif %}
@@ -370,12 +371,26 @@
                     <div class="status-value">{{ "%.1f"|format(stats.pressure_high_pct_1hr) }}% / {{ "%.0f"|format(stats.pressure_high_min_24hr) }} min</div>
                 </div>
                 {% endif %}
-                {% if gph_metrics and (gph_metrics.slow_fill_gph or gph_metrics.fast_fill_gph) %}
-                <div class="status-item">
-                    <div class="status-label">Well GPH (3-week avg)</div>
-                    <div class="status-value" style="font-size: 12px;">
-                        {% if gph_metrics.slow_fill_gph %}Slow: {{ "%.0f"|format(gph_metrics.slow_fill_gph) }}{% else %}Slow: N/A{% endif %}
-                        {% if gph_metrics.fast_fill_gph %} • Fast: {{ "%.0f"|format(gph_metrics.fast_fill_gph) }}{% else %} • Fast: N/A{% endif %}
+                {% if hourly_gph %}
+                <div class="status-item" style="min-width:200px;">
+                    <div class="status-label">Tank Fill Rate — past 6 hours</div>
+                    <div style="display:flex;align-items:flex-end;gap:3px;height:40px;margin-top:4px;">
+                        {% set max_abs = namespace(v=1) %}
+                        {% for h in hourly_gph %}{% if h.delta is not none and h.delta|abs > max_abs.v %}{% set max_abs.v = h.delta|abs %}{% endif %}{% endfor %}
+                        {% for h in hourly_gph %}
+                        {% if h.delta is not none %}
+                        {% set pct = (h.delta / max_abs.v * 100)|abs|int %}
+                        {% set bar_h = [pct, 8]|max %}
+                        {% set color = '#4CAF50' if h.delta >= 0 else '#f44336' %}
+                        <div style="display:flex;flex-direction:column;align-items:center;flex:1;gap:2px;" title="{{ h.label }}: {{ '%+d'|format(h.delta|int) }} gal">
+                            <span style="font-size:9px;color:#888;">{{ '%+d'|format(h.delta|int) }}</span>
+                            <div style="width:100%;height:{{ bar_h }}px;background:{{ color }};border-radius:2px;"></div>
+                            <span style="font-size:9px;color:#666;">{{ h.label }}</span>
+                        </div>
+                        {% else %}
+                        <div style="flex:1;"></div>
+                        {% endif %}
+                        {% endfor %}
                     </div>
                 </div>
                 {% endif %}
@@ -544,8 +559,9 @@
                     <tbody>
                         {% for res in reservation_list %}
                         {% set today_str = now.strftime('%Y-%m-%d') %}
-                        {% set is_current = res['Check-In'] <= today_str and res['Checkout'] > today_str %}
-                        {% set is_past    = res['Checkout'] <= today_str %}
+                        {% set checking_out_today = res['Checkout'] == today_str and now.hour < 10 %}
+                        {% set is_current = res['Check-In'] <= today_str and (res['Checkout'] > today_str or checking_out_today) %}
+                        {% set is_past    = res['Checkout'] <= today_str and not checking_out_today %}
                         <tr style="{{ 'color:#4a9e6b;' if is_current else 'color:#555e72;' if is_past else '' }}">
                             <td>{{ format_date_short(res['Check-In']) }}</td>
                             <td>{{ format_date_short(res['Checkout']) }}</td>
@@ -767,7 +783,7 @@
                             {% for week in month.weeks %}
                             <tr>
                                 {% for cell in week %}
-                                <td class="{{ cell.cls }}{% if cell.today %} cal-today{% endif %}">{{ cell.day or '' }}</td>
+                                <td class="{{ cell.cls }}{% if cell.today %} cal-today{% endif %}"{% if cell.style %} style="{{ cell.style }}"{% endif %}>{{ cell.day or '' }}</td>
                                 {% endfor %}
                             </tr>
                             {% endfor %}

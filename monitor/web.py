@@ -256,6 +256,42 @@ def read_events_by_time(filepath, hours=72):
     except Exception as e:
         return [], []
 
+def get_hourly_gph(filepath=DEFAULT_SNAPSHOTS_FILE, hours=6):
+    """Return list of {label, delta} for each of the past `hours` hours.
+
+    delta is net gallons change in that hour (positive = filling, negative = draining).
+    Returns [] on error or missing data.
+    """
+    if not os.path.exists(filepath):
+        return []
+    try:
+        with open(filepath, 'r') as f:
+            rows = list(csv.DictReader(f))
+        now = datetime.now()
+        result = []
+        for h in range(hours, 0, -1):
+            start = now - timedelta(hours=h)
+            end   = now - timedelta(hours=h - 1)
+            bucket = [
+                float(r['tank_gallons'])
+                for r in rows
+                if r.get('tank_gallons')
+                for ts in [datetime.fromisoformat(r['timestamp'])]
+                if start <= ts < end
+            ]
+            if len(bucket) >= 2:
+                delta = bucket[-1] - bucket[0]
+            elif bucket:
+                delta = 0.0
+            else:
+                delta = None
+            label = start.strftime('%-I%p').lower()
+            result.append({'label': label, 'delta': round(delta, 0) if delta is not None else None})
+        return result
+    except Exception:
+        return []
+
+
 def get_snapshots_stats(filepath=DEFAULT_SNAPSHOTS_FILE):
     """Calculate aggregate stats from snapshots.csv for 1hr and 24hr windows"""
     if not os.path.exists(filepath):
@@ -352,20 +388,34 @@ def get_snapshots_stats(filepath=DEFAULT_SNAPSHOTS_FILE):
 def build_calendar_months(all_reservations, num_months=19):
     """Build calendar data for the availability calendar (current month + 18 more).
 
-    Returns a list of month dicts, each with:
-        name   - e.g. 'Mar 2026'
-        weeks  - list of 6 week rows, each a list of 7 cell dicts:
-                 {'day': int|None, 'cls': str, 'today': bool}
-    CSS classes: cal-pad, cal-past, cal-free, cal-guest, cal-owner
+    Each cell dict: {'day': int|None, 'cls': str, 'style': str|None, 'today': bool}
+    Split days use inline linear-gradient style:
+      check-in  → right half colored
+      check-out → left half colored
+      turn day  → left 1/3 (out color) + right 1/3 (in color), middle free
     """
     import calendar as _cal
     from datetime import date as _date
 
     today = _date.today()
 
-    # Build a map of date -> booking type, and income totals by checkout month
-    booked = {}
-    monthly_income = {}  # 'YYYY-MM' -> float (net, guest stays only)
+    # Per-type background and foreground colors (must match CSS classes)
+    _BG = {'airbnb': '#4a1422', 'vrbo': '#00312e', 'guest': '#1e3a5f', 'owner': '#4a2e00'}
+    _FG = {'airbnb': '#e87090', 'vrbo': '#40c8a8', 'guest': '#7ab0e8', 'owner': '#e8a030'}
+    _FREE = '#1a1a1a'
+    _cls_map = {'owner': 'cal-owner', 'airbnb': 'cal-airbnb', 'vrbo': 'cal-vrbo', 'guest': 'cal-guest'}
+
+    def _res_type(res):
+        t = res.get('Type', '')
+        if 'Owner' in t:      return 'owner'
+        if t.lower() == 'airbnb': return 'airbnb'
+        if t.lower() == 'vrbo':   return 'vrbo'
+        return 'guest'
+
+    # day_info[date] = {'in': type, 'out': type, 'mid': type}  (keys present only when set)
+    day_info = {}
+    monthly_income = {}
+
     for res in all_reservations:
         status = res.get('Status', '').lower()
         if not any(s in status for s in ('confirmed', 'checked in', 'checked out')):
@@ -375,34 +425,60 @@ def build_calendar_months(all_reservations, num_months=19):
             checkout = _date.fromisoformat(res.get('Checkout', ''))
         except ValueError:
             continue
-        res_type = res.get('Type', '')
-        if 'Owner' in res_type:
-            day_type = 'owner'
-        elif res_type.lower() == 'airbnb':
-            day_type = 'airbnb'
-        elif res_type.lower() == 'vrbo':
-            day_type = 'vrbo'
-        else:
-            day_type = 'guest'
-        cur = checkin
+        day_type = _res_type(res)
+
+        day_info.setdefault(checkin,  {})['in']  = day_type
+        cur = checkin + timedelta(days=1)
         while cur < checkout:
-            booked[cur] = day_type
+            day_info.setdefault(cur, {})['mid'] = day_type
             cur += timedelta(days=1)
-        # Accumulate net income by checkout month (guest stays only)
+        day_info.setdefault(checkout, {})['out'] = day_type
+
         if day_type != 'owner':
             try:
                 gross = float(res.get('Income', 0) or 0)
                 net = gross * (1 - MANAGEMENT_FEE_PERCENT / 100)
-                month_key = checkout.strftime('%Y-%m')
-                monthly_income[month_key] = monthly_income.get(month_key, 0) + net
+                mk = checkout.strftime('%Y-%m')
+                monthly_income[mk] = monthly_income.get(mk, 0) + net
             except (ValueError, TypeError):
                 pass
 
-    cls_map = {'owner': 'cal-owner', 'airbnb': 'cal-airbnb', 'vrbo': 'cal-vrbo', 'guest': 'cal-guest'}
+    def _cell_appearance(d, is_past, is_current_month):
+        """Return (cls, style) for a day cell."""
+        # Past days outside the current month: always dim, no booking detail
+        if is_past and not is_current_month:
+            return 'cal-past', None
+
+        info = day_info.get(d, {})
+        mid  = info.get('mid')
+        cin  = info.get('in')
+        cout = info.get('out')
+
+        # Full stay day (middle of a reservation)
+        if mid:
+            return _cls_map[mid], None
+
+        # Split days — use inline linear-gradient
+        if cin and cout:
+            # Turn day: left 1/3 = checkout color, middle = free, right 1/3 = checkin color
+            s = (f'background:linear-gradient(to right,'
+                 f'{_BG[cout]} 33%,{_FREE} 33% 67%,{_BG[cin]} 67%);color:#bbb')
+            return '', s
+        if cin:
+            s = (f'background:linear-gradient(to right,'
+                 f'{_FREE} 50%,{_BG[cin]} 50%);color:{_FG[cin]}')
+            return '', s
+        if cout:
+            s = (f'background:linear-gradient(to right,'
+                 f'{_BG[cout]} 50%,{_FREE} 50%);color:{_FG[cout]}')
+            return '', s
+
+        return ('cal-past' if is_past else 'cal-free'), None
+
     months = []
     yr, mo = today.year, today.month
-    cal = _cal.Calendar(firstweekday=6)  # Sunday-first columns
-    is_current_month = True  # only the first iteration is the current month
+    cal = _cal.Calendar(firstweekday=6)  # Sunday-first
+    is_current_month = True
     for _ in range(num_months):
         first = _date(yr, mo, 1)
         week_rows = []
@@ -410,20 +486,14 @@ def build_calendar_months(all_reservations, num_months=19):
             row = []
             for day_num in week:
                 if day_num == 0:
-                    row.append({'day': None, 'cls': 'cal-pad', 'today': False})
+                    row.append({'day': None, 'cls': 'cal-pad', 'style': None, 'today': False})
                 else:
                     d = _date(yr, mo, day_num)
-                    is_today = (d == today)
-                    booked_type = booked.get(d)
-                    if d < today:
-                        # In current month: show booking color for booked past days
-                        cls = cls_map.get(booked_type, 'cal-past') if (is_current_month and booked_type) else 'cal-past'
-                    else:
-                        cls = cls_map.get(booked_type, 'cal-free')
-                    row.append({'day': day_num, 'cls': cls, 'today': is_today})
+                    cls, style = _cell_appearance(d, d < today, is_current_month)
+                    row.append({'day': day_num, 'cls': cls, 'style': style, 'today': d == today})
             week_rows.append(row)
-        month_key = first.strftime('%Y-%m')
-        income = monthly_income.get(month_key)
+        mk = first.strftime('%Y-%m')
+        income = monthly_income.get(mk)
         months.append({
             'name': first.strftime('%b %Y'),
             'weeks': week_rows,
@@ -1599,6 +1669,9 @@ def index():
     # Get GPH metrics (cached, recalculated daily)
     gph_metrics = get_cached_gph(max_age_hours=24)
 
+    # Hourly tank fill rate for sparkline
+    hourly_gph = get_hourly_gph()
+
     # Get internet uptime stats from Cloudflare worker
     internet_uptime = get_internet_uptime()
 
@@ -1738,6 +1811,7 @@ def index():
                          default_hours=DASHBOARD_DEFAULT_HOURS,
                          ecobee_temp=ecobee_temp,
                          gph_metrics=gph_metrics,
+                         hourly_gph=hourly_gph,
                          internet_uptime=internet_uptime,
                          wind_forecast=wind_forecast,
                          national_weather_url=NATIONAL_WEATHER_URL,
