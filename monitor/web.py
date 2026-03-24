@@ -765,6 +765,7 @@ def chart_data():
                         'gallons': float(row['tank_gallons']),
                         'pressure_pct': pressure_pct,
                         'occupied': row.get('occupied', '').upper() == 'YES',
+                        'bypass': row.get('relay_bypass', '').upper() == 'ON',
                     })
             except:
                 continue
@@ -806,22 +807,28 @@ def chart_data():
         )
         while bstart < now:
             bend = bstart + timedelta(hours=block_hours)
-            bucket = [p['gallons'] for p in data_points if bstart <= p['timestamp'] < bend]
+            in_block = [p for p in data_points if bstart <= p['timestamp'] < bend]
+            bucket = [p['gallons'] for p in in_block]
             if len(bucket) >= 2:
-                block_gph_map[bstart] = round((bucket[-1] - bucket[0]) / block_hours, 1)
+                bypass = any(p['bypass'] for p in in_block)
+                block_gph_map[bstart] = {'gph': round((bucket[-1] - bucket[0]) / block_hours, 1), 'bypass': bypass}
             bstart = bend
 
         block_gph = []
+        block_bypass = []
         for point in data_points:
             ts = point['timestamp']
             bstart = ts.replace(hour=(ts.hour // block_hours) * block_hours, minute=0, second=0, microsecond=0)
-            block_gph.append(block_gph_map.get(bstart))
+            entry = block_gph_map.get(bstart)
+            block_gph.append(entry['gph'] if entry else None)
+            block_bypass.append(entry['bypass'] if entry else False)
 
         return jsonify({
             'timestamps': timestamps,
             'gallons': gallons,
             'pointColors': point_colors,
             'blockGph': block_gph,
+            'blockBypass': block_bypass,
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500

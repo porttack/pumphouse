@@ -702,9 +702,10 @@
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     var ctx = document.getElementById('tankChart').getContext('2d');
-                    var barColors = (data.blockGph || []).map(function(v) {
+                    var barColors = (data.blockGph || []).map(function(v, i) {
                         if (v === null || v === undefined) return 'transparent';
-                        return v >= 0 ? 'rgba(76,175,80,0.35)' : 'rgba(244,67,54,0.35)';
+                        if (v < 0) return 'rgba(244,67,54,0.35)';
+                        return (data.blockBypass || [])[i] ? 'rgba(255,152,0,0.45)' : 'rgba(76,175,80,0.35)';
                     });
                     if (_tankChart) {
                         _tankChart.data.labels = data.timestamps;
@@ -713,6 +714,7 @@
                         _tankChart.data.datasets[0].pointBorderColor = data.pointColors;
                         _tankChart.data.datasets[1].data = data.blockGph;
                         _tankChart.data.datasets[1].backgroundColor = barColors;
+                        _tankChart.data.datasets[1].blockBypass = data.blockBypass;
                         _tankChart.update();
                     } else {
                         _tankChart = new Chart(ctx, {
