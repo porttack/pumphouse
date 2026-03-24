@@ -374,7 +374,7 @@
                 {% if hourly_gph %}
                 <div class="status-item" style="min-width:200px;">
                     <div class="status-label">Tank Fill Rate (GPH)</div>
-                    <div style="display:flex;align-items:flex-end;gap:3px;height:52px;margin-top:4px;overflow:hidden;">
+                    <div style="display:flex;align-items:flex-end;gap:3px;height:62px;margin-top:4px;overflow:hidden;">
                         {% set max_abs = namespace(v=1) %}
                         {% for h in hourly_gph %}{% if h.delta is not none and h.delta|abs > max_abs.v %}{% set max_abs.v = h.delta|abs %}{% endif %}{% endfor %}
                         {% for h in hourly_gph %}
