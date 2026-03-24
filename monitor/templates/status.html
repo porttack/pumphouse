@@ -374,12 +374,12 @@
                 {% if hourly_gph %}
                 <div class="status-item" style="min-width:200px;">
                     <div class="status-label">Tank Fill Rate (GPH)</div>
-                    <div style="display:flex;align-items:flex-end;gap:3px;height:62px;margin-top:4px;overflow:hidden;">
+                    <div style="display:flex;align-items:flex-end;gap:3px;height:52px;margin-top:4px;overflow:hidden;">
                         {% set max_abs = namespace(v=1) %}
                         {% for h in hourly_gph %}{% if h.delta is not none and h.delta|abs > max_abs.v %}{% set max_abs.v = h.delta|abs %}{% endif %}{% endfor %}
                         {% for h in hourly_gph %}
                         {% if h.delta is not none %}
-                        {% set bar_h = [[((h.delta|abs / max_abs.v) * 36)|int, 4]|max, 36]|min %}
+                        {% set bar_h = [[((h.delta|abs / max_abs.v) * 24)|int, 4]|max, 24]|min %}
                         {% set color = '#4CAF50' if h.delta >= 0 else '#f44336' %}
                         <div style="display:flex;flex-direction:column;align-items:center;flex:1;gap:1px;" title="{{ h.label }}: {{ '%+d'|format(h.delta|int) }} gal">
                             <span style="font-size:9px;color:#aaa;line-height:1.2;">{{ "%.1f"|format(h.delta / 2) }}</span>
