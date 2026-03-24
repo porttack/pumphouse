@@ -256,10 +256,11 @@ def read_events_by_time(filepath, hours=72):
     except Exception as e:
         return [], []
 
-def get_hourly_gph(filepath=DEFAULT_SNAPSHOTS_FILE, hours=6):
-    """Return list of {label, delta} for each of the past `hours` hours.
+def get_hourly_gph(filepath=DEFAULT_SNAPSHOTS_FILE, blocks=6, block_hours=2):
+    """Return list of {label, delta} for the last `blocks` complete 2-hour blocks.
 
-    delta is net gallons change in that hour (positive = filling, negative = draining).
+    Snaps to even block boundaries and excludes the current (incomplete) block.
+    delta is net gallons change in that block (positive = filling, negative = draining).
     Returns [] on error or missing data.
     """
     if not os.path.exists(filepath):
@@ -268,10 +269,13 @@ def get_hourly_gph(filepath=DEFAULT_SNAPSHOTS_FILE, hours=6):
         with open(filepath, 'r') as f:
             rows = list(csv.DictReader(f))
         now = datetime.now()
+        # Snap to the start of the current block boundary
+        block_start_hour = (now.hour // block_hours) * block_hours
+        current_block_start = now.replace(hour=block_start_hour, minute=0, second=0, microsecond=0)
         result = []
-        for h in range(hours, 0, -1):
-            start = now - timedelta(hours=h)
-            end   = now - timedelta(hours=h - 1)
+        for i in range(blocks, 0, -1):
+            start = current_block_start - timedelta(hours=i * block_hours)
+            end   = start + timedelta(hours=block_hours)
             bucket = [
                 float(r['tank_gallons'])
                 for r in rows

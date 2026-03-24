@@ -373,19 +373,18 @@
                 {% endif %}
                 {% if hourly_gph %}
                 <div class="status-item" style="min-width:200px;">
-                    <div class="status-label">Tank Fill Rate — past 6 hours</div>
-                    <div style="display:flex;align-items:flex-end;gap:3px;height:40px;margin-top:4px;">
+                    <div class="status-label">Tank Fill Rate — past 12 hours (2h blocks)</div>
+                    <div style="display:flex;align-items:flex-end;gap:3px;height:62px;margin-top:4px;overflow:hidden;">
                         {% set max_abs = namespace(v=1) %}
                         {% for h in hourly_gph %}{% if h.delta is not none and h.delta|abs > max_abs.v %}{% set max_abs.v = h.delta|abs %}{% endif %}{% endfor %}
                         {% for h in hourly_gph %}
                         {% if h.delta is not none %}
-                        {% set pct = (h.delta / max_abs.v * 100)|abs|int %}
-                        {% set bar_h = [pct, 8]|max %}
+                        {% set bar_h = [[((h.delta|abs / max_abs.v) * 36)|int, 4]|max, 36]|min %}
                         {% set color = '#4CAF50' if h.delta >= 0 else '#f44336' %}
-                        <div style="display:flex;flex-direction:column;align-items:center;flex:1;gap:2px;" title="{{ h.label }}: {{ '%+d'|format(h.delta|int) }} gal">
-                            <span style="font-size:9px;color:#888;">{{ '%+d'|format(h.delta|int) }}</span>
-                            <div style="width:100%;height:{{ bar_h }}px;background:{{ color }};border-radius:2px;"></div>
-                            <span style="font-size:9px;color:#666;">{{ h.label }}</span>
+                        <div style="display:flex;flex-direction:column;align-items:center;flex:1;gap:1px;" title="{{ h.label }}: {{ '%+d'|format(h.delta|int) }} gal">
+                            <span style="font-size:9px;color:#888;line-height:1.2;">{{ '%+d'|format(h.delta|int) }}</span>
+                            <div style="width:100%;height:{{ bar_h }}px;background:{{ color }};border-radius:2px;flex-shrink:0;"></div>
+                            <span style="font-size:9px;color:#666;line-height:1.2;">{{ h.label }}</span>
                         </div>
                         {% else %}
                         <div style="flex:1;"></div>
