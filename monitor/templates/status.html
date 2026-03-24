@@ -702,28 +702,48 @@
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     var ctx = document.getElementById('tankChart').getContext('2d');
+                    var barColors = (data.blockGph || []).map(function(v) {
+                        if (v === null || v === undefined) return 'transparent';
+                        return v >= 0 ? 'rgba(76,175,80,0.35)' : 'rgba(244,67,54,0.35)';
+                    });
                     if (_tankChart) {
                         _tankChart.data.labels = data.timestamps;
                         _tankChart.data.datasets[0].data = data.gallons;
                         _tankChart.data.datasets[0].pointBackgroundColor = data.pointColors;
                         _tankChart.data.datasets[0].pointBorderColor = data.pointColors;
+                        _tankChart.data.datasets[1].data = data.blockGph;
+                        _tankChart.data.datasets[1].backgroundColor = barColors;
                         _tankChart.update();
                     } else {
                         _tankChart = new Chart(ctx, {
-                            type: 'line',
+                            type: 'bar',
                             data: {
                                 labels: data.timestamps,
-                                datasets: [{
-                                    label: 'Gallons',
-                                    data: data.gallons,
-                                    borderColor: '#4CAF50',
-                                    backgroundColor: 'rgba(76,175,80,0.1)',
-                                    pointBackgroundColor: data.pointColors,
-                                    pointBorderColor: data.pointColors,
-                                    pointRadius: 3,
-                                    tension: 0.2,
-                                    fill: true
-                                }]
+                                datasets: [
+                                    {
+                                        type: 'line',
+                                        label: 'Gallons',
+                                        data: data.gallons,
+                                        borderColor: '#4CAF50',
+                                        backgroundColor: 'rgba(76,175,80,0.1)',
+                                        pointBackgroundColor: data.pointColors,
+                                        pointBorderColor: data.pointColors,
+                                        pointRadius: 3,
+                                        tension: 0.2,
+                                        fill: true,
+                                        yAxisID: 'y',
+                                        order: 1,
+                                    },
+                                    {
+                                        type: 'bar',
+                                        label: 'GPH (2h)',
+                                        data: data.blockGph,
+                                        backgroundColor: barColors,
+                                        borderWidth: 0,
+                                        yAxisID: 'y2',
+                                        order: 2,
+                                    }
+                                ]
                             },
                             options: {
                                 responsive: true,
@@ -746,6 +766,11 @@
                                     y: {
                                         ticks: { color: '#888' },
                                         grid: { color: '#333' }
+                                    },
+                                    y2: {
+                                        position: 'right',
+                                        ticks: { color: '#666' },
+                                        grid: { drawOnChartArea: false },
                                     }
                                 }
                             }
