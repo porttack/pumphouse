@@ -795,17 +795,21 @@ def chart_data():
             else:
                 point_colors.append('#4CAF50')  # Green - unoccupied
 
-        # Compute 2-hour block GPH for each data point
+        # Compute 2-hour block GPH for every block in the chart window
         block_hours = 2
-        block_start_hour = (now.hour // block_hours) * block_hours
-        current_block_start = now.replace(hour=block_start_hour, minute=0, second=0, microsecond=0)
         block_gph_map = {}
-        for i in range(7, 0, -1):  # look back a bit further to cover chart window
-            bstart = current_block_start - timedelta(hours=i * block_hours)
-            bend   = bstart + timedelta(hours=block_hours)
+        earliest = data_points[0]['timestamp']
+        # Walk all complete 2-hour blocks from earliest point to now
+        bstart = earliest.replace(
+            hour=(earliest.hour // block_hours) * block_hours,
+            minute=0, second=0, microsecond=0
+        )
+        while bstart < now:
+            bend = bstart + timedelta(hours=block_hours)
             bucket = [p['gallons'] for p in data_points if bstart <= p['timestamp'] < bend]
             if len(bucket) >= 2:
                 block_gph_map[bstart] = round((bucket[-1] - bucket[0]) / block_hours, 1)
+            bstart = bend
 
         block_gph = []
         for point in data_points:
