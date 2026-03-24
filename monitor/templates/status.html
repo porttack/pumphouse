@@ -766,7 +766,12 @@
                                         grid: { color: '#333' }
                                     },
                                     y: {
-                                        ticks: { color: '#888' },
+                                        ticks: {
+                                            color: '#888',
+                                            callback: function(v) {
+                                                return v + ' (' + Math.round(v / {{ tank_capacity }} * 100) + '%)';
+                                            }
+                                        },
                                         grid: { color: '#333' }
                                     },
                                     y2: {
