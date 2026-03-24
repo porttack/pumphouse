@@ -276,13 +276,16 @@ def get_hourly_gph(filepath=DEFAULT_SNAPSHOTS_FILE, blocks=6, block_hours=2):
         for i in range(blocks, 0, -1):
             start = current_block_start - timedelta(hours=i * block_hours)
             end   = start + timedelta(hours=block_hours)
-            bucket = [
-                float(r['tank_gallons'])
-                for r in rows
-                if r.get('tank_gallons')
-                for ts in [datetime.fromisoformat(r['timestamp'])]
-                if start <= ts < end
-            ]
+            bucket = []
+            bypass_on = False
+            for r in rows:
+                if not r.get('tank_gallons'):
+                    continue
+                ts = datetime.fromisoformat(r['timestamp'])
+                if start <= ts < end:
+                    bucket.append(float(r['tank_gallons']))
+                    if r.get('relay_bypass', '').upper() == 'ON':
+                        bypass_on = True
             if len(bucket) >= 2:
                 delta = bucket[-1] - bucket[0]
             elif bucket:
@@ -290,7 +293,7 @@ def get_hourly_gph(filepath=DEFAULT_SNAPSHOTS_FILE, blocks=6, block_hours=2):
             else:
                 delta = None
             label = start.strftime('%-I%p').lower()
-            result.append({'label': label, 'delta': round(delta, 0) if delta is not None else None})
+            result.append({'label': label, 'delta': round(delta, 0) if delta is not None else None, 'bypass': bypass_on})
         return result
     except Exception:
         return []

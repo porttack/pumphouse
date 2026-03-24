@@ -385,7 +385,7 @@
                             <span style="font-size:9px;color:#aaa;line-height:1.2;">{{ "%.1f"|format(h.delta / 2) }}</span>
                             <span style="font-size:9px;color:#888;line-height:1.2;">{{ '%+d'|format(h.delta|int) }}g</span>
                             <div style="width:100%;height:{{ bar_h }}px;background:{{ color }};border-radius:2px;flex-shrink:0;"></div>
-                            <span style="font-size:9px;color:#666;line-height:1.2;">{{ h.label }}</span>
+                            <span style="font-size:9px;color:{{ '#ff9800' if h.bypass else '#666' }};line-height:1.2;">{{ h.label }}</span>
                         </div>
                         {% else %}
                         <div style="flex:1;"></div>
