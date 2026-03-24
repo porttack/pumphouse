@@ -780,10 +780,12 @@ def chart_data():
         timestamps = []
         gallons = []
         point_colors = []
+        pressure_pcts = []
 
         for i, point in enumerate(data_points):
             timestamps.append(point['timestamp'].strftime('%a %H:%M'))
             gallons.append(point['gallons'])
+            pressure_pcts.append(point['pressure_pct'])
 
             # PRIORITY 1: Check for full-flow (pressure >= threshold)
             if point['pressure_pct'] >= NOTIFY_FULL_FLOW_PRESSURE_THRESHOLD:
@@ -829,6 +831,7 @@ def chart_data():
             'pointColors': point_colors,
             'blockGph': block_gph,
             'blockBypass': block_bypass,
+            'pressurePct': pressure_pcts,
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500

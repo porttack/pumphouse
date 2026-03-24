@@ -715,6 +715,7 @@
                         _tankChart.data.datasets[1].data = data.blockGph;
                         _tankChart.data.datasets[1].backgroundColor = barColors;
                         _tankChart.data.datasets[1].blockBypass = data.blockBypass;
+                        _tankChart.data.datasets[2].data = data.pressurePct;
                         _tankChart.update();
                     } else {
                         _tankChart = new Chart(ctx, {
@@ -744,6 +745,19 @@
                                         borderWidth: 0,
                                         yAxisID: 'y2',
                                         order: 2,
+                                    },
+                                    {
+                                        type: 'line',
+                                        label: 'Pressure High %',
+                                        data: data.pressurePct,
+                                        borderColor: 'rgba(244,67,54,0.5)',
+                                        backgroundColor: 'rgba(244,67,54,0.15)',
+                                        borderWidth: 1,
+                                        pointRadius: 0,
+                                        tension: 0.2,
+                                        fill: true,
+                                        yAxisID: 'y3',
+                                        order: 3,
                                     }
                                 ]
                             },
@@ -778,6 +792,11 @@
                                         position: 'right',
                                         ticks: { color: '#666' },
                                         grid: { drawOnChartArea: false },
+                                    },
+                                    y3: {
+                                        display: false,
+                                        min: 0,
+                                        max: 500,  // pressure 0-100% occupies bottom 20% of chart
                                     }
                                 }
                             }
