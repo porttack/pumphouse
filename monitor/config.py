@@ -77,12 +77,12 @@ ENABLE_CHECKOUT_REMINDER = True  # Send checkout reminder to turn down thermosta
 CHECKOUT_REMINDER_TIME = "11:00"  # Time to send checkout reminder (HH:MM in 24-hour format)
 
 # Timelapse Email Configuration
-ENABLE_TIMELAPSE_EMAIL = True   # Send email after each day's sunset timelapse is assembled
+ENABLE_TIMELAPSE_EMAIL = False   # Send email after each day's sunset timelapse is assembled
 TIMELAPSE_EMAIL_LINK = "https://onblackberryhill.com/timelapse"  # Link target for the inline snapshot image
 
 # Notification Rules - Which events trigger notifications
-NOTIFY_TANK_DECREASING = [1300, 1150, 1000, 700, 500, 250]  # Alert when tank crosses these levels going DOWN
-NOTIFY_TANK_INCREASING = [500, 750, 1000, 1200, 1300]  # Alert when tank crosses these levels going UP
+NOTIFY_TANK_DECREASING = [1000, 700, 500, 250]  # Alert when tank crosses these levels going DOWN
+NOTIFY_TANK_INCREASING = [500, 750, 1150]  # Alert when tank crosses these levels going UP
 NOTIFY_WELL_RECOVERY_THRESHOLD = 50  # Gallons gained to count as recovery
 NOTIFY_WELL_RECOVERY_STAGNATION_HOURS = 6  # Hours of flat/declining before recovery
 NOTIFY_WELL_RECOVERY_MAX_STAGNATION_GAIN = 30  # Max gallons gained during stagnation period (to filter slow fill)
