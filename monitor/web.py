@@ -1714,6 +1714,30 @@ def index():
     # Hourly tank fill rate for sparkline
     hourly_gph = get_hourly_gph()
 
+    # Predict next pump cycle from recent PRESSURE_HIGH events
+    next_pump_cycle = None
+    try:
+        _high_times = []
+        with open(EVENTS_FILE) as _f:
+            for _row in csv.DictReader(_f):
+                if _row.get('event_type') == 'PRESSURE_HIGH':
+                    try:
+                        _high_times.append(datetime.fromisoformat(_row['timestamp']))
+                    except Exception:
+                        pass
+        if len(_high_times) >= 4:
+            _intervals = [(_high_times[i+1] - _high_times[i]).total_seconds()
+                          for i in range(len(_high_times) - 1)]
+            _median = sorted(_intervals)[len(_intervals) // 2]
+            _typical = [iv for iv in _intervals if abs(iv - _median) < 120]
+            if _typical:
+                _avg_interval = sum(_typical) / len(_typical)
+                _predicted = _high_times[-1] + timedelta(seconds=_avg_interval)
+                if _predicted > datetime.now():
+                    next_pump_cycle = _predicted
+    except Exception:
+        pass
+
     # Get internet uptime stats from Cloudflare worker
     internet_uptime = get_internet_uptime()
 
@@ -1855,6 +1879,7 @@ def index():
                          ecobee_temp=ecobee_temp,
                          gph_metrics=gph_metrics,
                          hourly_gph=hourly_gph,
+                         next_pump_cycle=next_pump_cycle,
                          internet_uptime=internet_uptime,
                          wind_forecast=wind_forecast,
                          national_weather_url=NATIONAL_WEATHER_URL,

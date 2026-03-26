@@ -377,6 +377,13 @@
                     </div>
                 </div>
                 {% endif %}
+                {% if next_pump_cycle %}
+                {% set mins_away = ((next_pump_cycle - now).total_seconds() / 60) | int %}
+                <div class="status-item">
+                    <div class="status-label">Next Pump Cycle</div>
+                    <div class="status-value">{{ next_pump_cycle.strftime('%-I:%M %p') }} <span style="color:#888;font-size:0.85em">(in {{ mins_away }} min)</span></div>
+                </div>
+                {% endif %}
                 {% if hourly_gph %}
                 <div class="status-item" style="min-width:200px;">
                     <div class="status-label">Tank Fill Rate (GPH)</div>
