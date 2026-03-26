@@ -570,13 +570,15 @@ def render_epaper_jpg(
 
     # Occupancy text centred near graph bottom (owner/unoccupied mode only, not public)
     if not is_tenant and not public_mode:
+        _DOW = ['M', 'Tu', 'W', 'Th', 'F', 'Sa', 'Su']
+
         def _day_suffix(dt: datetime) -> str:
             today = datetime.now().date()
             if dt.date() == today:
                 return ' (today)'
             if dt.date() == today + timedelta(days=1):
                 return ' (tomorrow)'
-            return ''
+            return ' ' + _DOW[dt.weekday()]
 
         if is_occupied_now and occupancy.get('checkout_date'):
             co       = occupancy['checkout_date']
