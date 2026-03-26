@@ -313,20 +313,25 @@ def get_snapshots_stats(filepath=DEFAULT_SNAPSHOTS_FILE):
             return None
 
         now = datetime.now()
-        one_hour_ago = now.timestamp() - 3600
+        one_hour_ago        = now.timestamp() - 3600
+        two_hours_ago       = now.timestamp() - 7200
+        twelve_hours_ago    = now.timestamp() - 43200
         twenty_four_hours_ago = now.timestamp() - 86400
 
         stats = {
             'tank_change_1hr': None,
             'tank_change_24hr': None,
-            'pressure_high_pct_1hr': None,
-            'pressure_high_min_24hr': None,
+            'pressure_high_pct_2hr': None,
+            'pressure_high_pct_12hr': None,
+            'pressure_high_pct_24hr': None,
             'last_refill_50_days': None,
             'last_refill_50_timestamp': None
         }
 
         # Parse timestamps and filter rows
-        rows_1hr = []
+        rows_1hr  = []
+        rows_2hr  = []
+        rows_12hr = []
         rows_24hr = []
 
         for row in rows:
@@ -334,6 +339,10 @@ def get_snapshots_stats(filepath=DEFAULT_SNAPSHOTS_FILE):
                 ts = datetime.fromisoformat(row['timestamp']).timestamp()
                 if ts >= one_hour_ago:
                     rows_1hr.append(row)
+                if ts >= two_hours_ago:
+                    rows_2hr.append(row)
+                if ts >= twelve_hours_ago:
+                    rows_12hr.append(row)
                 if ts >= twenty_four_hours_ago:
                     rows_24hr.append(row)
             except:
@@ -356,30 +365,23 @@ def get_snapshots_stats(filepath=DEFAULT_SNAPSHOTS_FILE):
             except:
                 pass
 
-        # Calculate pressure HIGH percentages/minutes
-        if len(rows_1hr) > 0:
-            try:
-                total_seconds = 0
-                high_seconds = 0
-                for row in rows_1hr:
-                    duration = float(row['duration_seconds'])
-                    high = float(row['pressure_high_seconds'])
-                    total_seconds += duration
-                    high_seconds += high
-                if total_seconds > 0:
-                    stats['pressure_high_pct_1hr'] = (high_seconds / total_seconds) * 100
-            except:
-                pass
+        # Calculate pressure HIGH percentages for 2hr, 12hr, 24hr windows
+        def _pressure_pct(row_list):
+            total, high = 0.0, 0.0
+            for row in row_list:
+                total += float(row['duration_seconds'])
+                high  += float(row['pressure_high_seconds'])
+            return (high / total * 100) if total > 0 else None
 
-        if len(rows_24hr) > 0:
-            try:
-                total_high_seconds = 0
-                for row in rows_24hr:
-                    high = float(row['pressure_high_seconds'])
-                    total_high_seconds += high
-                stats['pressure_high_min_24hr'] = total_high_seconds / 60
-            except:
-                pass
+        try:
+            stats['pressure_high_pct_2hr']  = _pressure_pct(rows_2hr)
+        except: pass
+        try:
+            stats['pressure_high_pct_12hr'] = _pressure_pct(rows_12hr)
+        except: pass
+        try:
+            stats['pressure_high_pct_24hr'] = _pressure_pct(rows_24hr)
+        except: pass
 
         # Find last time tank increased by 50+ gallons using shared stats module
         refill_ts, days_ago = find_last_refill(filepath, threshold_gallons=50)

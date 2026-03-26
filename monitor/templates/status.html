@@ -365,10 +365,16 @@
                     <div class="relay-warning">⚠ BYPASS ON</div>
                     {% endif %}
                 </div>
-                {% if stats and stats.pressure_high_pct_1hr is not none and stats.pressure_high_min_24hr is not none %}
+                {% if stats and stats.pressure_high_pct_24hr is not none %}
                 <div class="status-item">
-                    <div class="status-label">Pressure HIGH (1 hour / 24 hours)</div>
-                    <div class="status-value">{{ "%.1f"|format(stats.pressure_high_pct_1hr) }}% / {{ "%.0f"|format(stats.pressure_high_min_24hr) }} min</div>
+                    <div class="status-label">Pressure HIGH</div>
+                    <div class="status-value">
+                        2h: {{ "%.1f"|format(stats.pressure_high_pct_2hr) if stats.pressure_high_pct_2hr is not none else "—" }}%
+                        &nbsp;·&nbsp;
+                        12h: {{ "%.1f"|format(stats.pressure_high_pct_12hr) if stats.pressure_high_pct_12hr is not none else "—" }}%
+                        &nbsp;·&nbsp;
+                        24h: {{ "%.1f"|format(stats.pressure_high_pct_24hr) }}%
+                    </div>
                 </div>
                 {% endif %}
                 {% if hourly_gph %}
