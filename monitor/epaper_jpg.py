@@ -575,20 +575,20 @@ def render_epaper_jpg(
         def _day_suffix(dt: datetime) -> str:
             today = datetime.now().date()
             if dt.date() == today:
-                return ' (today)'
+                return 'today '
             if dt.date() == today + timedelta(days=1):
-                return ' (tomorrow)'
-            return ' ' + _DOW[dt.weekday()]
+                return 'tomorrow '
+            return _DOW[dt.weekday()] + ' '
 
         if is_occupied_now and occupancy.get('checkout_date'):
             co       = occupancy['checkout_date']
-            occ_text = 'occupied until ' + co.strftime('%-m/%d') + _day_suffix(co)
+            occ_text = 'occupied until ' + _day_suffix(co) + co.strftime('%-m/%d')
         elif is_occupied_now:
             occ_text = 'occupied'
         elif next_res:
             checkin_dt = get_checkin_datetime(next_res.get('Check-In'))
             if checkin_dt:
-                occ_text = 'next checkin ' + checkin_dt.strftime('%-m/%d') + _day_suffix(checkin_dt)
+                occ_text = 'next checkin ' + _day_suffix(checkin_dt) + checkin_dt.strftime('%-m/%d')
             else:
                 occ_text = 'unoccupied'
         else:
