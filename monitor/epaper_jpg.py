@@ -447,7 +447,7 @@ def render_epaper_jpg(
                                  sum(x[1] for x in _first12_vals))
         _pct_first = (_ph_first / _pt_first * 100) if _pt_first > 0 else 0.0
         _pct_last  = _flow12 or 0.0
-        _arrow = '↑' if _pct_last > _pct_first + 1.0 else ('↓' if _pct_last < _pct_first - 1.0 else '→')
+        _arrow = '▲' if _pct_last > _pct_first + 1.0 else ('▼' if _pct_last < _pct_first - 1.0 else '=')
 
         _flow_label = f'Flow {_flow12:.1f}% {_arrow}' if _flow12 is not None else 'Flow —'
     except Exception:
