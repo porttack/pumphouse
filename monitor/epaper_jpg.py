@@ -392,8 +392,8 @@ def render_epaper_jpg(
     draw.text((graph_left - y_label_w - s(3), graph_bottom - s(11)), y_min_label, font=font_small, fill=AXIS_COLOR)
 
     # ── Flow sparkline + label (pressure high % past 24h) ────────────────
-    _FLOW_BAR_COLOR  = (200, 80,  80)   # muted red on light BG
-    _FLOW_TEXT_COLOR = (120, 40,  40)
+    _FLOW_BAR_COLOR  = ( 50, 90, 170)   # dark blue on light BG
+    _FLOW_TEXT_COLOR = ( 30, 60, 130)
     _SPARK_H         = s(6)             # max bar height
     _spark_y_base    = graph_bottom + s(1) + _SPARK_H  # bars grow upward from here
     _label_y         = graph_bottom + s(9)             # text row below sparkline
