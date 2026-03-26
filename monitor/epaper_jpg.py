@@ -450,15 +450,13 @@ def render_epaper_jpg(
         _arrow = '↑' if _pct_last > _pct_first + 1.0 else ('↓' if _pct_last < _pct_first - 1.0 else '→')
 
         _flow_label = f'Flow {_flow12:.1f}% {_arrow}' if _flow12 is not None else 'Flow —'
-        _fl_bbox    = draw.textbbox((0, 0), _flow_label, font=font_small)
-        _fl_w       = _fl_bbox[2] - _fl_bbox[0]
-        _fl_x       = graph_left + (graph_right - graph_left - _fl_w) // 2
-        draw.text((_fl_x, _label_y), _flow_label, font=font_small, fill=_FLOW_TEXT_COLOR)
     except Exception:
-        pass
+        _flow_label = None
 
     # ── X-axis labels ────────────────────────────────────────────────────
     hours_label = f'{hours // 24}d ago' if hours % 24 == 0 else f'{hours}h ago'
+    hl_bbox = draw.textbbox((0, 0), hours_label, font=font_small)
+    hl_w    = hl_bbox[2] - hl_bbox[0]
     draw.text((graph_left + s(1), _label_y), hours_label, font=font_small, fill=AXIS_COLOR)
     try:
         if live_reading_ts:
@@ -470,8 +468,20 @@ def render_epaper_jpg(
     except Exception:
         now_label = 'now'
     nl_bbox = draw.textbbox((0, 0), now_label, font=font_small)
-    draw.text((graph_right - (nl_bbox[2] - nl_bbox[0]) - s(1), _label_y),
+    nl_w    = nl_bbox[2] - nl_bbox[0]
+    draw.text((graph_right - nl_w - s(1), _label_y),
               now_label, font=font_small, fill=AXIS_COLOR)
+
+    # Re-center flow label in the gap between the two x-axis labels
+    try:
+        _gap_left  = graph_left + s(1) + hl_w + s(2)
+        _gap_right = graph_right - nl_w - s(1) - s(2)
+        _fl_bbox   = draw.textbbox((0, 0), _flow_label, font=font_small)
+        _fl_w      = _fl_bbox[2] - _fl_bbox[0]
+        _fl_x      = _gap_left + (_gap_right - _gap_left - _fl_w) // 2
+        draw.text((_fl_x, _label_y), _flow_label, font=font_small, fill=_FLOW_TEXT_COLOR)
+    except Exception:
+        pass
 
     # ── Adaptive smoothing: large window when flat, raw when changing ─────
     # Each snapshot is ~15 min; window=11 → ~2.5 hr when tank is quiet.
