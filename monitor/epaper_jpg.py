@@ -123,17 +123,19 @@ def _get_camera_background(graph_w: int, graph_h: int) -> Image.Image | None:
         except Exception:
             pass
 
-    # Check for an active timelapse capture
-    frame_dir = _FRAME_BASE / now.strftime('%Y-%m-%d')
+    # Check for an active timelapse capture (dirs named YYYY-MM-DD_HHMM)
     timelapse_running = False
     latest_frame: pathlib.Path | None = None
-    if frame_dir.exists():
-        frames = sorted(frame_dir.glob('frame_*.jpg'))
-        if frames:
-            newest = frames[-1]
-            if time.time() - newest.stat().st_mtime < _ACTIVE_THRESHOLD_SECONDS:
-                timelapse_running = True
-                latest_frame = newest
+    today_prefix = now.strftime('%Y-%m-%d')
+    if _FRAME_BASE.exists():
+        today_dirs = sorted(_FRAME_BASE.glob(f'{today_prefix}_*'))
+        if today_dirs:
+            frames = sorted(today_dirs[-1].glob('frame_*.jpg'))
+            if frames:
+                newest = frames[-1]
+                if time.time() - newest.stat().st_mtime < _ACTIVE_THRESHOLD_SECONDS:
+                    timelapse_running = True
+                    latest_frame = newest
     if latest_frame:
         try:
             return _fit_image(Image.open(latest_frame).convert('RGB'), graph_w, graph_h)
