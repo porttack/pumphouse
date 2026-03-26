@@ -1850,6 +1850,7 @@ def index():
                          now=datetime.now(),
                          startup_time=STARTUP_TIME,
                          hours=hours,
+                         epaper_cache_bust=int(_time.time()),
                          default_hours=DASHBOARD_DEFAULT_HOURS,
                          ecobee_temp=ecobee_temp,
                          gph_metrics=gph_metrics,
