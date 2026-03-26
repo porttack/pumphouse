@@ -308,7 +308,7 @@ def render_epaper_jpg(
     graph_left   = y_label_w + s(6)
     graph_right  = WIDTH     - s(4)
     graph_top    = s(32)
-    graph_bottom = HEIGHT    - s(14)
+    graph_bottom = HEIGHT    - s(22)   # extra s(8) for flow sparkline row
     graph_w      = graph_right  - graph_left
     graph_h      = graph_bottom - graph_top
 
@@ -391,9 +391,75 @@ def render_epaper_jpg(
     draw.text((graph_left - y_label_w - s(3), graph_top    - s(1)),  y_max_label, font=font_small, fill=AXIS_COLOR)
     draw.text((graph_left - y_label_w - s(3), graph_bottom - s(11)), y_min_label, font=font_small, fill=AXIS_COLOR)
 
+    # ── Flow sparkline + label (pressure high % past 24h) ────────────────
+    _FLOW_BAR_COLOR  = (200, 80,  80)   # muted red on light BG
+    _FLOW_TEXT_COLOR = (120, 40,  40)
+    _SPARK_H         = s(6)             # max bar height
+    _spark_y_base    = graph_bottom + s(1) + _SPARK_H  # bars grow upward from here
+    _label_y         = graph_bottom + s(9)             # text row below sparkline
+
+    try:
+        _now_ts  = datetime.now().timestamp()
+        _24h_ago = _now_ts - 86400
+        _12h_ago = _now_ts - 43200
+
+        # Build 24 hourly buckets for sparkline
+        _hourly: list[tuple[float, float]] = [(0.0, 0.0)] * 24  # (high_s, total_s)
+        for _row in rows:
+            try:
+                _ts  = datetime.fromisoformat(_row['timestamp']).timestamp()
+                if _ts < _24h_ago:
+                    continue
+                _bucket = min(int((_ts - _24h_ago) / 3600), 23)
+                _h, _t  = _hourly[_bucket]
+                _hourly[_bucket] = (
+                    _h + float(_row['pressure_high_seconds']),
+                    _t + float(_row['duration_seconds']),
+                )
+            except Exception:
+                continue
+
+        _hourly_pct = [(_h / _t * 100) if _t > 0 else 0.0 for _h, _t in _hourly]
+        _pct_max    = max(_hourly_pct) if any(_hourly_pct) else 1.0
+
+        # Draw sparkline bars
+        _n   = len(_hourly_pct)
+        _bar_w = max(1, (graph_right - graph_left) // _n)
+        for _i, _pct in enumerate(_hourly_pct):
+            _bx   = graph_left + _i * (graph_right - graph_left) // _n
+            _bh   = max(1, int(_pct / max(_pct_max, 1.0) * _SPARK_H)) if _pct > 0 else 0
+            if _bh:
+                draw.rectangle(
+                    [_bx, _spark_y_base - _bh, _bx + _bar_w - 1, _spark_y_base],
+                    fill=_FLOW_BAR_COLOR,
+                )
+
+        # 12h pct + trend arrow
+        _first12_vals = [(_h, _t) for (_h, _t), _ts in
+                         zip(_hourly[:12], range(24)) if _hourly[_ts][1] > 0]
+        _last12_vals  = [(_h, _t) for (_h, _t), _ts in
+                         zip(_hourly[12:], range(12, 24)) if _hourly[_ts][1] > 0]
+        _ph12h, _pt12h = (sum(x[0] for x in _last12_vals),
+                          sum(x[1] for x in _last12_vals))
+        _flow12 = (_ph12h / _pt12h * 100) if _pt12h > 0 else None
+
+        _ph_first, _pt_first = (sum(x[0] for x in _first12_vals),
+                                 sum(x[1] for x in _first12_vals))
+        _pct_first = (_ph_first / _pt_first * 100) if _pt_first > 0 else 0.0
+        _pct_last  = _flow12 or 0.0
+        _arrow = '↑' if _pct_last > _pct_first + 1.0 else ('↓' if _pct_last < _pct_first - 1.0 else '→')
+
+        _flow_label = f'Flow {_flow12:.1f}% {_arrow}' if _flow12 is not None else 'Flow —'
+        _fl_bbox    = draw.textbbox((0, 0), _flow_label, font=font_small)
+        _fl_w       = _fl_bbox[2] - _fl_bbox[0]
+        _fl_x       = graph_left + (graph_right - graph_left - _fl_w) // 2
+        draw.text((_fl_x, _label_y), _flow_label, font=font_small, fill=_FLOW_TEXT_COLOR)
+    except Exception:
+        pass
+
     # ── X-axis labels ────────────────────────────────────────────────────
     hours_label = f'{hours // 24}d ago' if hours % 24 == 0 else f'{hours}h ago'
-    draw.text((graph_left + s(1), graph_bottom + s(1)), hours_label, font=font_small, fill=AXIS_COLOR)
+    draw.text((graph_left + s(1), _label_y), hours_label, font=font_small, fill=AXIS_COLOR)
     try:
         if live_reading_ts:
             now_label = live_reading_ts.strftime('%-m/%d %-I:%M %p')
@@ -404,7 +470,7 @@ def render_epaper_jpg(
     except Exception:
         now_label = 'now'
     nl_bbox = draw.textbbox((0, 0), now_label, font=font_small)
-    draw.text((graph_right - (nl_bbox[2] - nl_bbox[0]) - s(1), graph_bottom + s(1)),
+    draw.text((graph_right - (nl_bbox[2] - nl_bbox[0]) - s(1), _label_y),
               now_label, font=font_small, fill=AXIS_COLOR)
 
     # ── Adaptive smoothing: large window when flat, raw when changing ─────
