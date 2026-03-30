@@ -163,7 +163,7 @@ def human_time_filter(timestamp_str):
             dt = timestamp_str
         else:
             return timestamp_str
-        return dt.strftime('%a %H:%M')
+        return dt.strftime('%a %-I:%M %p')
     except:
         return timestamp_str
 
@@ -904,10 +904,10 @@ def chart_image():
 
         # Format x-axis based on time window
         if hours <= 24:
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%-I:%M %p'))
             ax.xaxis.set_major_locator(mdates.HourLocator(interval=max(1, hours // 6)))
         elif hours <= 72:
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %-I %p'))
             ax.xaxis.set_major_locator(mdates.HourLocator(interval=12))
         else:
             ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
@@ -1218,12 +1218,12 @@ def epaper_bmp():
     draw.text((graph_left + s(1), graph_bottom + s(1)), hours_label, font=font_small, fill=0)
     try:
         if live_reading_ts:
-            now_label = live_reading_ts.strftime("%-m/%d %H:%M")
+            now_label = live_reading_ts.strftime("%-m/%d %-I:%M %p")
         else:
             last_ts = datetime.fromisoformat(rows[-1]['timestamp'])
             data_age = float(rows[-1].get('tank_data_age_seconds', 0))
             reading_ts = last_ts - timedelta(seconds=data_age)
-            now_label = reading_ts.strftime("%-m/%d %H:%M")
+            now_label = reading_ts.strftime("%-m/%d %-I:%M %p")
     except Exception:
         now_label = "now"
     nl_bbox = draw.textbbox((0, 0), now_label, font=font_small)

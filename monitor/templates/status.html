@@ -319,6 +319,10 @@
         {% if sensor_data.gpio_available %}
         <div class="section">
             <h2>SENSORS</h2>
+            <div style="margin-bottom:10px;">
+                <img src="/api/epaper.jpg?tenant=no&hours={{ hours }}&scale=1&_t={{ epaper_cache_bust }}"
+                     alt="E-paper preview" style="border-radius:3px; display:block; max-width:100%;">
+            </div>
             <div class="status-grid">
                 {% if stats and stats.tank_change_1hr is not none and stats.tank_change_24hr is not none %}
                 <div class="status-item">

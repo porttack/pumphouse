@@ -12,7 +12,7 @@ import requests
 
 
 def format_human_time(timestamp_str):
-    """Convert timestamp to 3-letter day and HH:MM format (e.g., 'Mon 14:23')"""
+    """Convert timestamp to 3-letter day and 12-hour time (e.g., 'Mon 2:23 PM')"""
     try:
         if isinstance(timestamp_str, str):
             dt = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S.%f')
@@ -20,7 +20,7 @@ def format_human_time(timestamp_str):
             dt = timestamp_str
         else:
             return timestamp_str
-        return dt.strftime('%a %H:%M')
+        return dt.strftime('%a %-I:%M %p')
     except:
         return timestamp_str
 
