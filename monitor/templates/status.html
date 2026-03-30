@@ -320,24 +320,19 @@
         <div class="section">
             <h2>SENSORS</h2>
             <div class="status-grid">
+                {% if tank_age_minutes is not none or (stats and stats.tank_change_1hr is not none) %}
                 <div class="status-item">
-                    <div class="status-label">In-House Display</div>
-                    <img src="/api/epaper.bmp?_t={{ epaper_cache_bust }}"
-                         alt="E-paper display" style="display:block; image-rendering:pixelated; width:100%; margin-top:4px;">
-                </div>
-                {% if stats and stats.tank_change_1hr is not none and stats.tank_change_24hr is not none %}
-                <div class="status-item">
-                    <div class="status-label">Change (1 hour / 24 hours)</div>
-                    <div class="status-value">
-                        <span class="{{ 'positive' if stats.tank_change_1hr >= 0 else 'negative' }}">{{ "%+.0f"|format(stats.tank_change_1hr) }} gal</span> /
-                        <span class="{{ 'positive' if stats.tank_change_24hr >= 0 else 'negative' }}">{{ "%+.0f"|format(stats.tank_change_24hr) }} gal</span>
+                    <div class="status-label">Tank Data</div>
+                    {% if tank_age_minutes is not none %}
+                    <div class="status-value" style="font-size:14px;">Updated {{ tank_data.last_updated.strftime('%-I:%M %p') }} <span style="color:#888;font-size:0.85em">({{ tank_age_minutes }} min ago)</span></div>
+                    {% endif %}
+                    {% if stats and stats.tank_change_1hr is not none and stats.tank_change_24hr is not none %}
+                    <div style="margin-top:6px; font-size:13px; color:#888;">
+                        1h: <span class="{{ 'positive' if stats.tank_change_1hr >= 0 else 'negative' }}" style="font-weight:bold;">{{ "%+.0f"|format(stats.tank_change_1hr) }} gal</span>
+                        &nbsp;&nbsp;
+                        24h: <span class="{{ 'positive' if stats.tank_change_24hr >= 0 else 'negative' }}" style="font-weight:bold;">{{ "%+.0f"|format(stats.tank_change_24hr) }} gal</span>
                     </div>
-                </div>
-                {% endif %}
-                {% if tank_age_minutes is not none %}
-                <div class="status-item">
-                    <div class="status-label">Data Age</div>
-                    <div class="status-value">{{ tank_age_minutes }} min (updated {{ tank_data.last_updated.strftime('%H:%M') }})</div>
+                    {% endif %}
                 </div>
                 {% endif %}
                 {% if tank_data.status == 'success' and tank_data.depth is not none %}
@@ -373,13 +368,18 @@
                 {% if stats and stats.pressure_high_pct_24hr is not none %}
                 <div class="status-item">
                     <div class="status-label">Pressure HIGH</div>
-                    <div class="status-value">
-                        2h: {{ "%.1f"|format(stats.pressure_high_pct_2hr) if stats.pressure_high_pct_2hr is not none else "—" }}%
-                        &nbsp;·&nbsp;
-                        12h: {{ "%.1f"|format(stats.pressure_high_pct_12hr) if stats.pressure_high_pct_12hr is not none else "—" }}%
-                        &nbsp;·&nbsp;
-                        24h: {{ "%.1f"|format(stats.pressure_high_pct_24hr) }}%
-                    </div>
+                    <table style="border-collapse:collapse; margin-top:6px; font-size:13px; width:100%;">
+                        <tr style="color:#888;">
+                            <td style="padding:2px 8px 2px 0;">2h</td>
+                            <td style="padding:2px 8px 2px 0;">12h</td>
+                            <td style="padding:2px 0;">24h</td>
+                        </tr>
+                        <tr style="font-weight:bold; color:#e0e0e0; font-size:15px;">
+                            <td style="padding:2px 8px 2px 0;">{{ "%.1f"|format(stats.pressure_high_pct_2hr) if stats.pressure_high_pct_2hr is not none else "—" }}%</td>
+                            <td style="padding:2px 8px 2px 0;">{{ "%.1f"|format(stats.pressure_high_pct_12hr) if stats.pressure_high_pct_12hr is not none else "—" }}%</td>
+                            <td style="padding:2px 0;">{{ "%.1f"|format(stats.pressure_high_pct_24hr) }}%</td>
+                        </tr>
+                    </table>
                 </div>
                 {% endif %}
                 {% if next_pump_cycle %}
@@ -503,6 +503,11 @@
                     {% endif %}
                 </div>
                 {% endif %}
+                <div class="status-item">
+                    <div class="status-label">In-House Display</div>
+                    <img src="/api/epaper.bmp?_t={{ epaper_cache_bust }}"
+                         alt="E-paper display" style="display:block; image-rendering:pixelated; width:100%; margin-top:4px;">
+                </div>
             </div>
             {% if owner_mode %}
             <div style="margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
