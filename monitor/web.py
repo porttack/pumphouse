@@ -1202,7 +1202,7 @@ def epaper_bmp():
     graph_left = y_label_w + s(6)
     graph_right = WIDTH - s(4)
     graph_top = s(32)
-    graph_bottom = HEIGHT - s(14)
+    graph_bottom = HEIGHT - s(22)  # extra s(8) for flow sparkline row
     graph_w = graph_right - graph_left
     graph_h = graph_bottom - graph_top
 
@@ -1213,9 +1213,63 @@ def epaper_bmp():
     draw.text((graph_left - y_label_w - s(3), graph_top - s(1)), y_max_label, font=font_small, fill=0)
     draw.text((graph_left - y_label_w - s(3), graph_bottom - s(11)), y_min_label, font=font_small, fill=0)
 
-    # X-axis labels
+    # ── Flow sparkline (pressure high %) ─────────────────────────────────
+    _SPARK_H        = s(6)
+    _spark_y_base   = graph_bottom + s(1) + _SPARK_H   # bars grow upward from here
+    _label_y        = graph_bottom + s(9)               # x-axis label + flow label row
+    _flow_label     = None
+    try:
+        _now_ts    = datetime.now().timestamp()
+        _graph_ago = _now_ts - hours * 3600
+        _24h_ago   = _now_ts - 86400
+        _n_buckets = max(hours, 1)
+        _spark:   list = [(0.0, 0.0)] * _n_buckets
+        _bypass:  list = [0] * _n_buckets
+        _trend24: list = [(0.0, 0.0)] * 24
+        for _row in rows:
+            try:
+                _ts = datetime.fromisoformat(_row['timestamp']).timestamp()
+                _hi = float(_row['pressure_high_seconds'])
+                _du = float(_row['duration_seconds'])
+                if _ts >= _graph_ago:
+                    _b = min(int((_ts - _graph_ago) / 3600), _n_buckets - 1)
+                    _h, _t = _spark[_b]; _spark[_b] = (_h + _hi, _t + _du)
+                    if _row.get('relay_bypass', '').upper() == 'ON':
+                        _bypass[_b] += 1
+                if _ts >= _24h_ago:
+                    _b24 = min(int((_ts - _24h_ago) / 3600), 23)
+                    _h, _t = _trend24[_b24]; _trend24[_b24] = (_h + _hi, _t + _du)
+            except Exception:
+                continue
+        _spark_pct   = [(_h / _t * 100) if _t > 0 else 0.0 for _h, _t in _spark]
+        _bypass_flag = [_bypass[i] > 0 for i in range(_n_buckets)]
+        _pct_max     = max(_spark_pct) if any(_spark_pct) else 1.0
+        _gw = graph_right - graph_left
+        for _i, _pct in enumerate(_spark_pct):
+            _bx  = graph_left + int(_i * _gw / _n_buckets)
+            _bx2 = graph_left + int((_i + 1) * _gw / _n_buckets) - 1
+            if _bypass_flag[_i]:
+                draw.rectangle([_bx, _spark_y_base - max(1, s(1)), _bx2, _spark_y_base], fill=0)
+            else:
+                _bh = max(1, int(_pct / _pct_max * _SPARK_H)) if _pct > 0 else 0
+                if _bh:
+                    draw.rectangle([_bx, _spark_y_base - _bh, _bx2, _spark_y_base], fill=0)
+        _first12 = _trend24[:12]; _last12 = _trend24[12:]
+        _ph12, _pt12 = sum(h for h, _ in _last12), sum(t for _, t in _last12)
+        _flow12 = (_ph12 / _pt12 * 100) if _pt12 > 0 else None
+        _phf, _ptf = sum(h for h, _ in _first12), sum(t for _, t in _first12)
+        _pct_first = (_phf / _ptf * 100) if _ptf > 0 else 0.0
+        _pct_last  = _flow12 or 0.0
+        _arrow = '\u25b2' if _pct_last > _pct_first + 1.0 else ('\u25bc' if _pct_last < _pct_first - 1.0 else '=')
+        _flow_label = f'Flow {_flow12:.1f}% {_arrow}' if _flow12 is not None else 'Flow \u2014'
+    except Exception:
+        pass
+
+    # X-axis labels (shifted down to _label_y to leave room for sparkline)
     hours_label = f"{hours // 24}d ago" if hours % 24 == 0 else f"{hours}h ago"
-    draw.text((graph_left + s(1), graph_bottom + s(1)), hours_label, font=font_small, fill=0)
+    hl_bbox = draw.textbbox((0, 0), hours_label, font=font_small)
+    hl_w = hl_bbox[2] - hl_bbox[0]
+    draw.text((graph_left + s(1), _label_y), hours_label, font=font_small, fill=0)
     try:
         if live_reading_ts:
             now_label = live_reading_ts.strftime("%-m/%d %-I:%M %p")
@@ -1227,7 +1281,20 @@ def epaper_bmp():
     except Exception:
         now_label = "now"
     nl_bbox = draw.textbbox((0, 0), now_label, font=font_small)
-    draw.text((graph_right - (nl_bbox[2] - nl_bbox[0]) - s(1), graph_bottom + s(1)), now_label, font=font_small, fill=0)
+    nl_w = nl_bbox[2] - nl_bbox[0]
+    draw.text((graph_right - nl_w - s(1), _label_y), now_label, font=font_small, fill=0)
+
+    # Flow label centered in gap between x-axis labels
+    if _flow_label:
+        try:
+            _gap_left  = graph_left + s(1) + hl_w + s(2)
+            _gap_right = graph_right - nl_w - s(1) - s(2)
+            _fl_bbox   = draw.textbbox((0, 0), _flow_label, font=font_small)
+            _fl_w      = _fl_bbox[2] - _fl_bbox[0]
+            _fl_x      = _gap_left + (_gap_right - _gap_left - _fl_w) // 2
+            draw.text((_fl_x, _label_y), _flow_label, font=font_small, fill=0)
+        except Exception:
+            pass
 
     # Plot graph
     if len(graph_gallons) >= 2:
@@ -1331,24 +1398,21 @@ def epaper_bmp():
 
     # Occupancy status bar (inverted) at bottom of graph for owner/unoccupied mode
     if not is_tenant:
-        def _day_suffix(dt):
-            """Return ' (today)' or ' (tomorrow)' if dt matches, else ''."""
-            today = datetime.now().date()
-            if dt.date() == today:
-                return " (today)"
-            elif dt.date() == today + timedelta(days=1):
-                return " (tomorrow)"
-            return ""
+        _DOW_BMP = ['M', 'Tu', 'W', 'Th', 'F', 'Sa', 'Su']
+
+        def _dow_prefix(dt):
+            """Return day-of-week abbreviation + space before m/d (e.g. 'Sa 4/5')."""
+            return _DOW_BMP[dt.weekday()] + ' '
 
         if is_occupied_now and occupancy.get('checkout_date'):
             co = occupancy['checkout_date']
-            occ_text = "occupied until " + co.strftime("%-m/%d") + _day_suffix(co)
+            occ_text = "occupied until " + _dow_prefix(co) + co.strftime("%-m/%d")
         elif is_occupied_now:
             occ_text = "occupied"
         elif next_res:
             checkin_dt = get_checkin_datetime(next_res.get('Check-In'))
             if checkin_dt:
-                occ_text = "next checkin " + checkin_dt.strftime("%-m/%d") + _day_suffix(checkin_dt)
+                occ_text = "next checkin " + _dow_prefix(checkin_dt) + checkin_dt.strftime("%-m/%d")
             else:
                 occ_text = "unoccupied"
         else:

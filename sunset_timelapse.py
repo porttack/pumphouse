@@ -35,7 +35,7 @@ TIMELAPSE_DIR  = Path("/home/pi/timelapses")
 FRAME_INTERVAL   = 20    # base seconds between captured frames
 SLOWDOWN_FACTOR  = 4     # capture this many times more frames (divide interval by this)
                          # e.g. factor=4, interval=20 → 5s/frame → 1440 frames/2hr → 60s at 24fps
-WINDOW_BEFORE    = 90    # minutes before sunset to start capture
+WINDOW_BEFORE    = 120   # minutes before sunset to start capture
 WINDOW_AFTER     = 60    # minutes after sunset to stop capture
 RETENTION_DAYS   = 30    # keep every day's timelapse for this many days
 WEEKLY_YEARS     = 3     # after RETENTION_DAYS, keep one per ISO week for this many years
