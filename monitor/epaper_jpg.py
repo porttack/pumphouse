@@ -440,9 +440,8 @@ def render_epaper_jpg(
             _bx  = graph_left + int(_i * _gw / _n_buckets)
             _bx2 = graph_left + int((_i + 1) * _gw / _n_buckets) - 1
             if _bypass_flag[_i]:
-                # Bypass on: draw a thin centre line — flow unknown
-                _mid = (_spark_y_base + graph_bottom + s(1)) // 2
-                draw.rectangle([_bx, _mid, _bx2, _mid + max(1, s(1))],
+                # Bypass on: draw a thin line at the bottom — flow unknown
+                draw.rectangle([_bx, _spark_y_base - max(1, s(1)), _bx2, _spark_y_base],
                                 fill=_BYPASS_COLOR)
             else:
                 _bh = max(1, int(_pct / _pct_max * _SPARK_H)) if _pct > 0 else 0
