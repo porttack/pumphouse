@@ -413,16 +413,18 @@ def render_epaper_jpg(
         for _row in rows:
             try:
                 _ts = datetime.fromisoformat(_row['timestamp']).timestamp()
+                _is_bypass = _row.get('relay_bypass', '').upper() == 'ON'
                 _hi = float(_row['pressure_high_seconds'])
                 _du = float(_row['duration_seconds'])
                 if _ts >= _graph_ago:
                     _b = min(int((_ts - _graph_ago) / 3600), _n_buckets - 1)
-                    _h, _t = _spark[_b]
-                    _spark[_b] = (_h + _hi, _t + _du)
-                    _total_s[_b] += 1
-                    if _row.get('relay_bypass', '').upper() == 'ON':
+                    if _is_bypass:
                         _bypass[_b] += 1
-                if _ts >= _24h_ago:
+                    else:
+                        _h, _t = _spark[_b]
+                        _spark[_b] = (_h + _hi, _t + _du)
+                        _total_s[_b] += 1
+                if _ts >= _24h_ago and not _is_bypass:
                     _b24 = min(int((_ts - _24h_ago) / 3600), 23)
                     _h, _t = _trend24[_b24]
                     _trend24[_b24] = (_h + _hi, _t + _du)

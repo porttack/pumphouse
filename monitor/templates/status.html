@@ -368,16 +368,16 @@
                 {% if stats and stats.pressure_high_pct_24hr is not none %}
                 <div class="status-item">
                     <div class="status-label">Pressure HIGH</div>
-                    <table style="border-collapse:collapse; margin-top:6px; font-size:13px; width:100%;">
+                    <table style="border-collapse:collapse; margin-top:6px; font-size:13px; width:100%; table-layout:fixed;">
                         <tr style="color:#888;">
-                            <td style="padding:2px 8px 2px 0;">2h</td>
-                            <td style="padding:2px 8px 2px 0;">12h</td>
-                            <td style="padding:2px 0;">24h</td>
+                            <td style="padding:2px 0; text-align:center;">2h</td>
+                            <td style="padding:2px 0; text-align:center;">12h</td>
+                            <td style="padding:2px 0; text-align:center;">24h</td>
                         </tr>
                         <tr style="font-weight:bold; color:#e0e0e0; font-size:15px;">
-                            <td style="padding:2px 8px 2px 0;">{{ "%.1f"|format(stats.pressure_high_pct_2hr) if stats.pressure_high_pct_2hr is not none else "—" }}%</td>
-                            <td style="padding:2px 8px 2px 0;">{{ "%.1f"|format(stats.pressure_high_pct_12hr) if stats.pressure_high_pct_12hr is not none else "—" }}%</td>
-                            <td style="padding:2px 0;">{{ "%.1f"|format(stats.pressure_high_pct_24hr) }}%</td>
+                            <td style="padding:2px 0; text-align:center;">{{ "%.1f"|format(stats.pressure_high_pct_2hr) if stats.pressure_high_pct_2hr is not none else "—" }}%</td>
+                            <td style="padding:2px 0; text-align:center;">{{ "%.1f"|format(stats.pressure_high_pct_12hr) if stats.pressure_high_pct_12hr is not none else "—" }}%</td>
+                            <td style="padding:2px 0; text-align:center;">{{ "%.1f"|format(stats.pressure_high_pct_24hr) }}%</td>
                         </tr>
                     </table>
                 </div>
