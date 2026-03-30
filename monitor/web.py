@@ -366,9 +366,12 @@ def get_snapshots_stats(filepath=DEFAULT_SNAPSHOTS_FILE):
                 pass
 
         # Calculate pressure HIGH percentages for 2hr, 12hr, 24hr windows
+        # Bypass-on intervals are excluded — pressure reading is meaningless then.
         def _pressure_pct(row_list):
             total, high = 0.0, 0.0
             for row in row_list:
+                if row.get('relay_bypass', '').upper() == 'ON':
+                    continue
                 total += float(row['duration_seconds'])
                 high  += float(row['pressure_high_seconds'])
             return (high / total * 100) if total > 0 else None
