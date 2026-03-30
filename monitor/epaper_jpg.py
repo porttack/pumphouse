@@ -399,53 +399,66 @@ def render_epaper_jpg(
     _label_y         = graph_bottom + s(9)             # text row below sparkline
 
     try:
-        _now_ts  = datetime.now().timestamp()
-        _24h_ago = _now_ts - 86400
-        _12h_ago = _now_ts - 43200
+        _now_ts    = datetime.now().timestamp()
+        _graph_ago = _now_ts - hours * 3600
+        _24h_ago   = _now_ts - 86400
 
-        # Build 24 hourly buckets for sparkline
-        _hourly: list[tuple[float, float]] = [(0.0, 0.0)] * 24  # (high_s, total_s)
+        # Build hourly buckets matching the main graph duration
+        _n_buckets: int = max(hours, 1)
+        _spark:   list[tuple[float, float]] = [(0.0, 0.0)] * _n_buckets
+        _bypass:  list[int] = [0] * _n_buckets  # count of bypass-ON snapshots per bucket
+        _total_s: list[int] = [0] * _n_buckets  # count of all snapshots per bucket
+        # Separate 24h buckets for trend comparison (always 24h regardless of graph duration)
+        _trend24: list[tuple[float, float]] = [(0.0, 0.0)] * 24
         for _row in rows:
             try:
-                _ts  = datetime.fromisoformat(_row['timestamp']).timestamp()
-                if _ts < _24h_ago:
-                    continue
-                _bucket = min(int((_ts - _24h_ago) / 3600), 23)
-                _h, _t  = _hourly[_bucket]
-                _hourly[_bucket] = (
-                    _h + float(_row['pressure_high_seconds']),
-                    _t + float(_row['duration_seconds']),
-                )
+                _ts = datetime.fromisoformat(_row['timestamp']).timestamp()
+                _hi = float(_row['pressure_high_seconds'])
+                _du = float(_row['duration_seconds'])
+                if _ts >= _graph_ago:
+                    _b = min(int((_ts - _graph_ago) / 3600), _n_buckets - 1)
+                    _h, _t = _spark[_b]
+                    _spark[_b] = (_h + _hi, _t + _du)
+                    _total_s[_b] += 1
+                    if _row.get('relay_bypass', '').upper() == 'ON':
+                        _bypass[_b] += 1
+                if _ts >= _24h_ago:
+                    _b24 = min(int((_ts - _24h_ago) / 3600), 23)
+                    _h, _t = _trend24[_b24]
+                    _trend24[_b24] = (_h + _hi, _t + _du)
             except Exception:
                 continue
 
-        _hourly_pct = [(_h / _t * 100) if _t > 0 else 0.0 for _h, _t in _hourly]
-        _pct_max    = max(_hourly_pct) if any(_hourly_pct) else 1.0
+        _spark_pct    = [(_h / _t * 100) if _t > 0 else 0.0 for _h, _t in _spark]
+        _bypass_flag  = [_bypass[i] > 0 for i in range(_n_buckets)]
+        _pct_max      = max(_spark_pct) if any(_spark_pct) else 1.0
+        _BYPASS_COLOR = (210, 140, 40)   # orange — matches occupied color elsewhere
 
-        # Draw sparkline bars
-        _n   = len(_hourly_pct)
-        _bar_w = max(1, (graph_right - graph_left) // _n)
-        for _i, _pct in enumerate(_hourly_pct):
-            _bx   = graph_left + _i * (graph_right - graph_left) // _n
-            _bh   = max(1, int(_pct / max(_pct_max, 1.0) * _SPARK_H)) if _pct > 0 else 0
-            if _bh:
-                draw.rectangle(
-                    [_bx, _spark_y_base - _bh, _bx + _bar_w - 1, _spark_y_base],
-                    fill=_FLOW_BAR_COLOR,
-                )
+        # Draw sparkline bars aligned with main graph width
+        _gw = graph_right - graph_left
+        for _i, _pct in enumerate(_spark_pct):
+            _bx  = graph_left + int(_i * _gw / _n_buckets)
+            _bx2 = graph_left + int((_i + 1) * _gw / _n_buckets) - 1
+            if _bypass_flag[_i]:
+                # Bypass on: draw a thin centre line — flow unknown
+                _mid = (_spark_y_base + graph_bottom + s(1)) // 2
+                draw.rectangle([_bx, _mid, _bx2, _mid + max(1, s(1))],
+                                fill=_BYPASS_COLOR)
+            else:
+                _bh = max(1, int(_pct / _pct_max * _SPARK_H)) if _pct > 0 else 0
+                if _bh:
+                    draw.rectangle(
+                        [_bx, _spark_y_base - _bh, _bx2, _spark_y_base],
+                        fill=_FLOW_BAR_COLOR,
+                    )
 
-        # 12h pct + trend arrow
-        _first12_vals = [(_h, _t) for (_h, _t), _ts in
-                         zip(_hourly[:12], range(24)) if _hourly[_ts][1] > 0]
-        _last12_vals  = [(_h, _t) for (_h, _t), _ts in
-                         zip(_hourly[12:], range(12, 24)) if _hourly[_ts][1] > 0]
-        _ph12h, _pt12h = (sum(x[0] for x in _last12_vals),
-                          sum(x[1] for x in _last12_vals))
-        _flow12 = (_ph12h / _pt12h * 100) if _pt12h > 0 else None
-
-        _ph_first, _pt_first = (sum(x[0] for x in _first12_vals),
-                                 sum(x[1] for x in _first12_vals))
-        _pct_first = (_ph_first / _pt_first * 100) if _pt_first > 0 else 0.0
+        # Trend: compare first 12h vs last 12h of the 24h window
+        _first12 = _trend24[:12]
+        _last12  = _trend24[12:]
+        _ph12, _pt12 = sum(h for h, _ in _last12), sum(t for _, t in _last12)
+        _flow12  = (_ph12 / _pt12 * 100) if _pt12 > 0 else None
+        _phf, _ptf = sum(h for h, _ in _first12), sum(t for _, t in _first12)
+        _pct_first = (_phf / _ptf * 100) if _ptf > 0 else 0.0
         _pct_last  = _flow12 or 0.0
         _arrow = '▲' if _pct_last > _pct_first + 1.0 else ('▼' if _pct_last < _pct_first - 1.0 else '=')
 
