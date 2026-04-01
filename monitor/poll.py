@@ -54,7 +54,7 @@ def get_next_snapshot_time(current_time, interval_minutes):
         next_dt = dt.replace(hour=dt.hour + 1 if dt.hour < 23 else 0,
                             minute=0, second=0, microsecond=0)
         if dt.hour == 23:
-            next_dt = next_dt.replace(day=dt.day + 1)
+            next_dt = next_dt + timedelta(days=1)
     else:
         next_dt = dt.replace(minute=minutes, second=0, microsecond=0)
     return next_dt.timestamp()
