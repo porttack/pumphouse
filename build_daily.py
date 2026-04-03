@@ -30,6 +30,10 @@ SNAPSHOTS  = DATA_DIR / 'snapshots.csv'
 # pressure was high for more than this fraction of the window.
 HIGH_THRESHOLD_PCT = 50.0
 
+# Maximum plausible gallons pumped in one 15-min window (~80 GPH × 0.25 hr).
+# Values above this are sensor glitches and are clamped to 0.
+MAX_GAL_PER_WINDOW = 20.0
+
 FIELDNAMES = [
     # Coverage
     'date', 'n_snapshots', 'hours_covered',
@@ -97,15 +101,22 @@ def summarize_day(date, rows):
 
     def _stats(row_list):
         dur  = sum(flt(r, 'duration_seconds') for r in row_list)
-        pump = sum(flt(r, 'estimated_gallons_pumped') for r in row_list)
+        # Clamp per-window gallons to filter out sensor glitches
+        pump = sum(min(flt(r, 'estimated_gallons_pumped'), MAX_GAL_PER_WINDOW) for r in row_list)
         high = sum(flt(r, 'pressure_high_seconds') for r in row_list)
         gph  = pump / (dur / 3600) if dur > 0 else None
         return dur, pump, high, gph
 
     bypass_dur, _,          _,       _         = _stats(bypass_rows)
     nb_dur,     _,          nb_high, _         = _stats(non_bypass)
-    ext_dur,    _,          _,       ext_gph   = _stats(high_rows)
+    ext_dur,    _,          _,       _         = _stats(high_rows)
     low_dur,    _,          _,       low_gph   = _stats(low_rows)
+
+    # For high-event GPH, only count windows where the tank isn't full —
+    # when float_always_full=YES the pump is running against a full tank
+    # and not actually delivering water to it.
+    high_delivery_rows = [r for r in high_rows if r.get('float_always_full', '').upper() != 'YES']
+    _, _, _, ext_gph = _stats(high_delivery_rows) if high_delivery_rows else (0, 0, 0, None)
 
     low_consumed = sum(
         -flt(r, 'tank_gallons_delta') for r in low_rows
@@ -152,7 +163,9 @@ def summarize_day(date, rows):
         'high_events_avg_minutes':   round(sum(run_mins) / len(run_mins), 0) if run_mins else None,
         'high_events_pump_gph':      round(ext_gph, 1) if ext_gph else None,
         'low_events_windows':        len(low_rows),
-        'low_events_pump_gph':       round(low_gph, 1) if low_gph else None,
+        # Require at least 4 windows (1 hr) of low-pressure data for a meaningful rate;
+        # fewer windows means a single pump cycle dominates and the average is unreliable.
+        'low_events_pump_gph':       round(low_gph, 1) if (low_gph and len(low_rows) >= 4) else None,
         'low_events_consume_gph':    round(low_consume_gph, 1) if low_consume_gph else None,
         'outdoor_temp_min':          round(min(out_temps), 1) if out_temps else None,
         'outdoor_temp_max':          round(max(out_temps), 1) if out_temps else None,

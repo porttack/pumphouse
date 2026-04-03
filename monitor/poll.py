@@ -1,6 +1,7 @@
 """
 Simplified event-based polling loop
 """
+import threading
 import time
 from datetime import datetime, timedelta
 import signal
@@ -23,7 +24,8 @@ from monitor.config import (
     ENABLE_CHECKOUT_REMINDER, CHECKOUT_REMINDER_TIME,
     MAX_TANK_FETCH_FAILURES,
     ENABLE_AMBIENT_WEATHER, AMBIENT_WEATHER_POLL_INTERVAL,
-    AMBIENT_WEATHER_API_KEY, AMBIENT_WEATHER_APPLICATION_KEY, AMBIENT_WEATHER_MAC_ADDRESS
+    AMBIENT_WEATHER_API_KEY, AMBIENT_WEATHER_APPLICATION_KEY, AMBIENT_WEATHER_MAC_ADDRESS,
+    PURGE_PENDING_FILE
 )
 from monitor.gpio_helpers import (
     read_pressure, read_float_sensor,
@@ -494,6 +496,18 @@ class SimplifiedMonitor:
                         self.log_state_event('PRESSURE_HIGH')
                         if self.debug:
                             print(f"{datetime.now().strftime('%H:%M:%S')} - Pressure HIGH")
+
+                        # Pressure-timed purge: fire ~15s into the cycle if pending
+                        if PURGE_PENDING_FILE.exists():
+                            PURGE_PENDING_FILE.unlink(missing_ok=True)
+                            def _delayed_purge(monitor=self):
+                                time.sleep(15)
+                                from monitor.relay import purge_spindown_filter
+                                if purge_spindown_filter(debug=monitor.debug):
+                                    monitor.log_state_event('PURGE', 'Pressure-timed purge (15s into cycle)')
+                                    monitor.snapshot_tracker.increment_purge()
+                                    monitor.last_purge_time = time.time()
+                            threading.Thread(target=_delayed_purge, daemon=True, name='purge-timed').start()
 
                         # Send high pressure alert if enabled
                         if NOTIFY_HIGH_PRESSURE_ENABLED and self.notification_manager.can_notify('high_pressure'):
@@ -979,6 +993,25 @@ class SimplifiedMonitor:
                                 f"(tank {full_flow_status['tank_gain']:+.0f} gal, ~{full_flow_status['estimated_gph']:.0f} GPH)",
                                 priority='default'
                             )
+
+                    # Secondary full-flow detection via GPH surge (bypass-independent)
+                    bypass_ff = self.notification_manager.check_bypass_full_flow_status()
+                    if bypass_ff and self.notification_manager.can_notify('full_flow_bypass'):
+                        current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
+                        gph_1h   = bypass_ff['gph_last_1h']
+                        gph_prev = bypass_ff['gph_prev_1h']
+                        self.log_state_event(
+                            'FULL_FLOW',
+                            notes=f"Full-flow detected via GPH surge. "
+                                  f"Last 1h: {gph_1h:.1f} GPH, Prev 1h: {gph_prev:.1f} GPH"
+                        )
+                        self.send_alert(
+                            'NOTIFY_FULL_FLOW',
+                            f"{current_gal:.0f} gal - Full Flow (GPH surge)",
+                            f"Full flow detected via fill rate surge. "
+                            f"Fill rate jumped from ~{gph_prev:.0f} to ~{gph_1h:.0f} GPH",
+                            priority='default'
+                        )
 
                     tank_data_age = self.get_tank_data_age()
                     snapshot_data = self.snapshot_tracker.get_snapshot_data(

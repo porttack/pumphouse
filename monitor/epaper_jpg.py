@@ -221,8 +221,9 @@ def render_epaper_jpg(
         _reg  = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
         font_large  = ImageFont.truetype(_bold, s(22))
         font_small  = ImageFont.truetype(_reg,  s(11))
+        font_tiny   = ImageFont.truetype(_reg,  s(9))
     except (IOError, OSError):
-        font_large = font_small = ImageFont.load_default()
+        font_large = font_small = font_tiny = ImageFont.load_default()
 
     # ── Snapshot history ─────────────────────────────────────────────────
     rows: list[dict] = []
@@ -393,7 +394,7 @@ def render_epaper_jpg(
 
     # ── Flow sparkline + label (pressure high % past 24h) ────────────────
     _FLOW_BAR_COLOR  = ( 50, 90, 170)   # dark blue on light BG
-    _FLOW_TEXT_COLOR = ( 30, 60, 130)
+    _FLOW_TEXT_COLOR = ( 10, 100, 110)  # teal — distinct from navy axis labels
     _SPARK_H         = s(6)             # max bar height
     _spark_y_base    = graph_bottom + s(1) + _SPARK_H  # bars grow upward from here
     _label_y         = graph_bottom + s(9)             # text row below sparkline
@@ -408,8 +409,15 @@ def render_epaper_jpg(
         _spark:   list[tuple[float, float]] = [(0.0, 0.0)] * _n_buckets
         _bypass:  list[int] = [0] * _n_buckets  # count of bypass-ON snapshots per bucket
         _total_s: list[int] = [0] * _n_buckets  # count of all snapshots per bucket
-        # Separate 24h buckets for trend comparison (always 24h regardless of graph duration)
+        # Separate 24h buckets for pressure % trend (bypass excluded — meaningless for pressure)
         _trend24: list[tuple[float, float]] = [(0.0, 0.0)] * 24
+        # Tank gallons buckets for GPH (bypass included — tank fills regardless)
+        _6h_ago   = _now_ts - 21600
+        _1h_ago   = _now_ts - 3600
+        _2h_ago   = _now_ts - 7200
+        _tank_6h:     list[tuple[float, float]] = []  # (ts, gallons) last 6h, bypass-inclusive
+        _tank_1h:     list[tuple[float, float]] = []  # last 1h for full-flow detection
+        _tank_prev1h: list[tuple[float, float]] = []  # 1h-2h ago for full-flow detection
         for _row in rows:
             try:
                 _ts = datetime.fromisoformat(_row['timestamp']).timestamp()
@@ -428,6 +436,13 @@ def render_epaper_jpg(
                     _b24 = min(int((_ts - _24h_ago) / 3600), 23)
                     _h, _t = _trend24[_b24]
                     _trend24[_b24] = (_h + _hi, _t + _du)
+                if _ts >= _6h_ago and _row.get('tank_gallons'):
+                    _gv = float(_row['tank_gallons'])
+                    _tank_6h.append((_ts, _gv))
+                    if _ts >= _1h_ago:
+                        _tank_1h.append((_ts, _gv))
+                    elif _ts >= _2h_ago:
+                        _tank_prev1h.append((_ts, _gv))
             except Exception:
                 continue
 
@@ -453,17 +468,45 @@ def render_epaper_jpg(
                         fill=_FLOW_BAR_COLOR,
                     )
 
-        # Trend: compare first 12h vs last 12h of the 24h window
-        _first12 = _trend24[:12]
-        _last12  = _trend24[12:]
-        _ph12, _pt12 = sum(h for h, _ in _last12), sum(t for _, t in _last12)
-        _flow12  = (_ph12 / _pt12 * 100) if _pt12 > 0 else None
-        _phf, _ptf = sum(h for h, _ in _first12), sum(t for _, t in _first12)
-        _pct_first = (_phf / _ptf * 100) if _ptf > 0 else 0.0
-        _pct_last  = _flow12 or 0.0
-        _arrow = '▲' if _pct_last > _pct_first + 1.0 else ('▼' if _pct_last < _pct_first - 1.0 else '=')
+        # Pressure %: last 6h vs previous 6h (buckets 18-23 vs 12-17 of the 24h window)
+        _last6  = _trend24[18:]
+        _prev6  = _trend24[12:18]
+        _ph6,  _pt6  = sum(h for h, _ in _last6), sum(t for _, t in _last6)
+        _flow6       = (_ph6 / _pt6 * 100) if _pt6 > 0 else None
+        _phf6, _ptf6 = sum(h for h, _ in _prev6), sum(t for _, t in _prev6)
+        _pct_prev6   = (_phf6 / _ptf6 * 100) if _ptf6 > 0 else 0.0
+        _pct_last6   = _flow6 or 0.0
+        _arrow = '▲' if _pct_last6 > _pct_prev6 + 1.0 else ('▼' if _pct_last6 < _pct_prev6 - 1.0 else '=')
 
-        _flow_label = f'Flow {_flow12:.1f}% {_arrow}' if _flow12 is not None else 'Flow —'
+        # GPH: net fill over last 6h (bypass-inclusive)
+        _gph_str = ''
+        try:
+            if len(_tank_6h) >= 2:
+                _tank_6h.sort()
+                _gal_delta = _tank_6h[-1][1] - _tank_6h[0][1]
+                _hr_delta  = (_tank_6h[-1][0] - _tank_6h[0][0]) / 3600
+                if _hr_delta > 0 and _gal_delta > 0:
+                    _gph_str = f'  {_gal_delta / _hr_delta:.2g} gph'
+        except Exception:
+            pass
+
+        # Full-flow detection: last 1h GPH >= 2x previous 1h GPH → green
+        _full_flow = False
+        try:
+            if len(_tank_1h) >= 2 and len(_tank_prev1h) >= 2:
+                _tank_1h.sort(); _tank_prev1h.sort()
+                def _gph(pts):
+                    _dt = (pts[-1][0] - pts[0][0]) / 3600
+                    return (pts[-1][1] - pts[0][1]) / _dt if _dt > 0 else None
+                _g1 = _gph(_tank_1h); _g0 = _gph(_tank_prev1h)
+                if _g1 is not None and _g0 is not None and _g0 > 0 and _g1 >= 2 * _g0:
+                    _full_flow = True
+        except Exception:
+            pass
+
+        if _full_flow and _gph_str:
+            _gph_str += ' ▲'
+        _flow_label = f'{_flow6:.1f}% {_arrow}{_gph_str}' if _flow6 is not None else '—'
     except Exception:
         _flow_label = None
 
@@ -490,10 +533,13 @@ def render_epaper_jpg(
     try:
         _gap_left  = graph_left + s(1) + hl_w + s(2)
         _gap_right = graph_right - nl_w - s(1) - s(2)
-        _fl_bbox   = draw.textbbox((0, 0), _flow_label, font=font_small)
+        _fl_bbox   = draw.textbbox((0, 0), _flow_label, font=font_tiny)
         _fl_w      = _fl_bbox[2] - _fl_bbox[0]
+        _fl_h      = _fl_bbox[3] - _fl_bbox[1]
         _fl_x      = _gap_left + (_gap_right - _gap_left - _fl_w) // 2
-        draw.text((_fl_x, _label_y), _flow_label, font=font_small, fill=_FLOW_TEXT_COLOR)
+        _fl_y      = _label_y + (draw.textbbox((0,0), 'X', font=font_small)[3] - _fl_h) // 2
+        _label_color = (30, 150, 60) if _full_flow else _FLOW_TEXT_COLOR
+        draw.text((_fl_x, _fl_y), _flow_label, font=font_tiny, fill=_label_color)
     except Exception:
         pass
 

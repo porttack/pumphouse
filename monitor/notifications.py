@@ -2,6 +2,7 @@
 Notification rule engine with state tracking
 Evaluates notification rules without directly sending (separation of concerns)
 """
+import csv
 import time
 import json
 import os
@@ -50,7 +51,8 @@ class NotificationManager:
         self.well_recovery_muted_until = 0    # Unix timestamp: suppress recovery alerts until then
         self.high_flow_alerted_ts = None  # Timestamp of last high flow we alerted for
         self.backflush_alerted_date = None  # Date (YYYY-MM-DD) of last backflush alert (one per day max)
-        self.full_flow_active_alerted = False  # Whether we've alerted for the current active full-flow
+        self.full_flow_active_alerted = False         # Whether we've alerted for the current active full-flow (pressure-based)
+        self.bypass_full_flow_active_alerted = False  # Whether we've alerted for the current bypass full-flow (GPH-based)
 
         # New state for suppression logic
         self.tank_full_alerted_level = None  # Tank level when last tank_full alert sent
@@ -294,6 +296,75 @@ class NotificationManager:
             'estimated_gph': qualifying_period['estimated_gph']
         }
 
+    def check_bypass_full_flow_status(self):
+        """
+        Secondary full-flow detection using tank fill rate doubling.
+        Intended for use when bypass is ON and pressure-based detection is masked.
+        Triggers when last-1h GPH >= 2x the previous-1h GPH.
+        """
+        if not NOTIFY_FULL_FLOW_ENABLED:
+            return None
+
+        # Suppress if pressure-based full-flow alert already fired recently
+        if self.full_flow_alerted_time:
+            if time.time() - self.full_flow_alerted_time < NOTIFY_FULL_FLOW_DELAY_MINUTES * 60:
+                return None
+
+        try:
+            now_ts = time.time()
+            _1h_ago = now_ts - 3600
+            _2h_ago = now_ts - 7200
+            tank_1h, tank_prev1h = [], []
+            with open(self.snapshots_file) as f:
+                for row in csv.DictReader(f):
+                    try:
+                        ts = datetime.fromisoformat(row['timestamp']).timestamp()
+                        gal = row.get('tank_gallons')
+                        if not gal:
+                            continue
+                        gal = float(gal)
+                        if ts >= _1h_ago:
+                            tank_1h.append((ts, gal))
+                        elif ts >= _2h_ago:
+                            tank_prev1h.append((ts, gal))
+                    except Exception:
+                        continue
+        except Exception:
+            return None
+
+        def _gph(pts):
+            pts = sorted(pts)
+            dt = (pts[-1][0] - pts[0][0]) / 3600
+            return (pts[-1][1] - pts[0][1]) / dt if dt > 0 else None
+
+        surge = False
+        gph_1h = gph_prev = None
+        if len(tank_1h) >= 2 and len(tank_prev1h) >= 2:
+            gph_1h  = _gph(tank_1h)
+            gph_prev = _gph(tank_prev1h)
+            if gph_1h is not None and gph_prev is not None and gph_prev > 0 and gph_1h >= 2 * gph_prev:
+                surge = True
+
+        if not surge:
+            if self.bypass_full_flow_active_alerted:
+                self.bypass_full_flow_active_alerted = False
+                self._save_state()
+            return None
+
+        if self.bypass_full_flow_active_alerted:
+            return None
+
+        self.bypass_full_flow_active_alerted = True
+        self.full_flow_active_alerted = True   # suppress pressure-based alert for same event
+        self.full_flow_alerted_time = time.time()
+        self._save_state()
+
+        return {
+            'type': 'full_flow_bypass',
+            'gph_last_1h': round(gph_1h, 1),
+            'gph_prev_1h': round(gph_prev, 1),
+        }
+
     def _load_state(self):
         """Load persistent notification state from disk"""
         try:
@@ -310,6 +381,7 @@ class NotificationManager:
                     # Migrate from old full_flow_alerted_ts to boolean flag
                     self.full_flow_active_alerted = state.get('full_flow_active_alerted',
                         state.get('full_flow_alerted_ts') is not None)
+                    self.bypass_full_flow_active_alerted = state.get('bypass_full_flow_active_alerted', False)
                     # New suppression state
                     self.tank_full_alerted_level = state.get('tank_full_alerted_level')
                     self.tank_full_alerted_time = state.get('tank_full_alerted_time')
@@ -332,6 +404,7 @@ class NotificationManager:
                 'high_flow_alerted_ts': self.high_flow_alerted_ts,
                 'backflush_alerted_date': self.backflush_alerted_date,
                 'full_flow_active_alerted': self.full_flow_active_alerted,
+                'bypass_full_flow_active_alerted': self.bypass_full_flow_active_alerted,
                 'tank_full_alerted_level': self.tank_full_alerted_level,
                 'tank_full_alerted_time': self.tank_full_alerted_time,
                 'full_flow_alerted_time': self.full_flow_alerted_time,

@@ -31,7 +31,7 @@ from monitor.config import (
     DASHBOARD_URL,
     PRESSURE_LOW_WATCH_FILE,
     OVERRIDE_MANUAL_OFF_FILE,
-    BYPASS_TIMER_FILE,
+    BYPASS_TIMER_FILE, PURGE_PENDING_FILE,
     BYPASS_CYCLE_FILE,
     BYPASS_CYCLE_ON_HOURS,
     BYPASS_CYCLE_OFF_HOURS,
@@ -47,7 +47,7 @@ from monitor.relay import get_all_relay_status, set_supply_override, set_bypass
 from monitor.stats import find_last_refill
 from monitor.occupancy import (
     get_occupancy_status, get_current_and_upcoming_reservations,
-    load_reservations, format_date_short
+    load_reservations, format_date_short, get_next_reservation, get_checkin_datetime
 )
 from monitor.gph_calculator import get_cached_gph, format_gph_for_display
 
@@ -76,6 +76,15 @@ SECRET_BYPASS_TIMED_TOKEN        = (SECRET_BYPASS_ON_TOKEN + '-4h')           if
 SECRET_BYPASS_CANCEL_TIMER_TOKEN = (SECRET_BYPASS_ON_TOKEN + '-cancel')        if SECRET_BYPASS_ON_TOKEN else ''
 SECRET_BYPASS_CYCLE_TOKEN        = (SECRET_BYPASS_ON_TOKEN + '-cycle')         if SECRET_BYPASS_ON_TOKEN else ''
 SECRET_TEST_FILTER_TOKEN         = (SECRET_BYPASS_ON_TOKEN + '-test-filter')   if SECRET_BYPASS_ON_TOKEN else ''
+
+
+SECRET_PURGE_NEXT_TOKEN        = (SECRET_PURGE_TOKEN + '-next')   if SECRET_PURGE_TOKEN else ''
+SECRET_PURGE_CANCEL_NEXT_TOKEN = (SECRET_PURGE_TOKEN + '-cancel') if SECRET_PURGE_TOKEN else ''
+
+
+def get_purge_pending():
+    """Return True if a pressure-timed purge is waiting for the next pump cycle."""
+    return PURGE_PENDING_FILE.exists()
 
 
 def get_bypass_timer_expiry():
@@ -1741,6 +1750,37 @@ def index():
     except Exception:
         pass
 
+    # Estimate time to reach full tank (1400 gal) based on 24h fill rate
+    time_to_full = None
+    try:
+        current_gallons = tank_data.get('gallons') if tank_data.get('status') == 'success' else None
+        if current_gallons is not None and current_gallons < TANK_CAPACITY_GALLONS:
+            if stats and stats.get('tank_change_24hr') is not None and stats['tank_change_24hr'] > 0:
+                fill_rate_gph = stats['tank_change_24hr'] / 24.0
+                hours_to_full = (TANK_CAPACITY_GALLONS - current_gallons) / fill_rate_gph
+                if 0 < hours_to_full < 168:  # Only show if within 1 week
+                    time_to_full = datetime.now() + timedelta(hours=hours_to_full)
+    except Exception:
+        pass
+
+    # Estimate tank gallons at next guest check-in (only when unoccupied)
+    gallons_at_checkin = None
+    try:
+        if not occupancy_status['occupied']:
+            current_gallons = tank_data.get('gallons') if tank_data.get('status') == 'success' else None
+            if current_gallons is not None and stats and stats.get('tank_change_24hr') is not None:
+                fill_rate_gph = stats['tank_change_24hr'] / 24.0
+                next_res = get_next_reservation(load_reservations(reservations_csv))
+                if next_res:
+                    checkin_dt = get_checkin_datetime(next_res.get('Check-In'))
+                    if checkin_dt:
+                        hours_until = (checkin_dt - datetime.now()).total_seconds() / 3600
+                        if hours_until > 0:
+                            projected = current_gallons + fill_rate_gph * hours_until
+                            gallons_at_checkin = min(round(projected), TANK_CAPACITY_GALLONS)
+    except Exception:
+        pass
+
     # Get internet uptime stats from Cloudflare worker
     internet_uptime = get_internet_uptime()
 
@@ -1883,6 +1923,8 @@ def index():
                          gph_metrics=gph_metrics,
                          hourly_gph=hourly_gph,
                          next_pump_cycle=next_pump_cycle,
+                         time_to_full=time_to_full,
+                         gallons_at_checkin=gallons_at_checkin,
                          internet_uptime=internet_uptime,
                          wind_forecast=wind_forecast,
                          national_weather_url=NATIONAL_WEATHER_URL,
@@ -1903,6 +1945,9 @@ def index():
                          bypass_cycle_on_hours=BYPASS_CYCLE_ON_HOURS,
                          bypass_cycle_off_hours=BYPASS_CYCLE_OFF_HOURS,
                          token_purge=SECRET_PURGE_TOKEN,
+                         token_purge_next=SECRET_PURGE_NEXT_TOKEN,
+                         token_purge_cancel_next=SECRET_PURGE_CANCEL_NEXT_TOKEN,
+                         purge_pending=get_purge_pending(),
                          calendar_months=build_calendar_months(all_reservations))
 
 @app.route('/sunset')
@@ -2062,10 +2107,20 @@ def control(token):
             success = set_bypass('ON', debug=False)
             action_taken = f"Bypass cycle started ({on_h:.4g}h ON / {off_h:.4g}h OFF)"
     elif token == SECRET_PURGE_TOKEN and SECRET_PURGE_TOKEN:
-        # Trigger one-time purge
+        # Trigger one-time purge immediately
         from monitor.purge import trigger_purge
         success = trigger_purge(debug=False)
         action_taken = "Purge triggered"
+    elif token == SECRET_PURGE_NEXT_TOKEN and SECRET_PURGE_NEXT_TOKEN:
+        # Schedule purge to fire ~15s after next PRESSURE_HIGH
+        PURGE_PENDING_FILE.parent.mkdir(parents=True, exist_ok=True)
+        PURGE_PENDING_FILE.touch()
+        success = True
+        action_taken = "Purge scheduled for next pump cycle"
+    elif token == SECRET_PURGE_CANCEL_NEXT_TOKEN and SECRET_PURGE_CANCEL_NEXT_TOKEN:
+        PURGE_PENDING_FILE.unlink(missing_ok=True)
+        success = True
+        action_taken = "Pending purge cancelled"
     elif token == SECRET_TEST_FILTER_TOKEN and SECRET_TEST_FILTER_TOKEN:
         # Test filter mode: override ON (pump runs) + bypass OFF (water through filter)
         _cancel_all_bypass_modes()

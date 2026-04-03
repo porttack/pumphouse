@@ -54,7 +54,7 @@ if not PUMPHOUSE_HOST:
 
 IMAGE_URL = f"https://{PUMPHOUSE_HOST}:{PUMPHOUSE_PORT}/api/epaper.bmp"
 
-# Set up logging
+# Set up logging 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',

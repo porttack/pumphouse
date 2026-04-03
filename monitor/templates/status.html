@@ -412,6 +412,23 @@
                     </div>
                 </div>
                 {% endif %}
+                {% if time_to_full %}
+                {% set hours_left = ((time_to_full - now).total_seconds() / 3600) %}
+                <div class="status-item">
+                    <div class="status-label">Est. Time to Full</div>
+                    <div class="status-value">{{ time_to_full.strftime('%-I:%M %p') }}</div>
+                    <div style="margin-top:4px; font-size:12px; color:#888;">
+                        {{ time_to_full.strftime('%a %b %-d') }}
+                        &nbsp;·&nbsp;
+                        {% if hours_left >= 1 %}
+                        in {{ hours_left | int }}h {{ (((hours_left % 1) * 60) | int) }}m
+                        {% else %}
+                        in {{ ((hours_left * 60) | int) }}m
+                        {% endif %}
+                    </div>
+                    <div style="margin-top:2px; font-size:11px; color:#555;">at 24h fill rate</div>
+                </div>
+                {% endif %}
                 {% if sensor_data.temp is not none or outdoor_weather %}
                 <div class="status-item">
                     <div class="status-label">Temp / Humidity</div>
@@ -439,6 +456,10 @@
                     {% if occupancy_status.next_checkin %}
                     <div class="status-label" style="margin-top: 8px; font-size: 11px;">
                         Next check-in: {{ occupancy_status.next_checkin }}
+                        {% if gallons_at_checkin is not none %}
+                        &nbsp;·&nbsp;
+                        <span style="color: {{ '#4CAF50' if gallons_at_checkin >= 1200 else '#ff9800' if gallons_at_checkin >= 800 else '#f44336' }}; font-weight: bold;">~{{ gallons_at_checkin }} gal</span>
+                        {% endif %}
                     </div>
                     {% endif %}
                 </div>
@@ -552,7 +573,12 @@
                 <a href="/control/{{ token_bypass_timed }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;">⏱ Bypass for 4h</a>
                 <a href="/control/{{ token_bypass_cycle }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;">↺ Bypass {{ def_on }}h/{{ def_off }}h</a>
                 {% endif %}
-                <a href="/control/{{ token_purge }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;" onclick="return confirm('Trigger a purge cycle?')">⚙ Purge</a>
+                <a href="/control/{{ token_purge }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;" onclick="return confirm('Trigger a purge cycle now?')">⚙ Purge now</a>
+                {% if purge_pending %}
+                <a href="/control/{{ token_purge_cancel_next }}" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #ff9800; background: #ff9800; color: #fff;">⚙ Purge pending — cancel?</a>
+                {% else %}
+                <a href="/control/{{ token_purge_next }}" class="time-btn" style="font-size: 12px; padding: 4px 10px;" onclick="return confirm('Schedule purge for next pump cycle (+15s)?')">⚙ Purge w/ pressure</a>
+                {% endif %}
             </div>
             {% endif %}
         </div>

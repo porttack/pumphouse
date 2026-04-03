@@ -135,7 +135,7 @@ DASHBOARD_SNAPSHOT_COUNT = 97  # Number of snapshots to show (97 = 24 hours at 1
 MANAGEMENT_FEE_PERCENT = 36  # Percentage paid to management company (subtracted from displayed income)
 
 # E-Paper Display Configuration
-EPAPER_CONSERVE_WATER_THRESHOLD = 61  # Show "Save Water" when tank percent <= this value (None to disable)
+EPAPER_CONSERVE_WATER_THRESHOLD = 50  # Show "Save Water" when tank percent <= this value (None to disable)
 EPAPER_OWNER_STAY_TYPES = ['Owner Stay', 'Owner Stay, Full Clean']  # Reservation Type values that count as owner occupancy
 EPAPER_DEFAULT_HOURS_TENANT = 24  # Default graph hours when occupied by a tenant
 EPAPER_DEFAULT_HOURS_OTHER = 72  # Default graph hours for owner or unoccupied
@@ -174,7 +174,8 @@ OVERRIDE_MANUAL_OFF_FILE = Path.home() / '.config' / 'pumphouse' / 'override_man
 
 # Timed bypass: when this file exists, it contains an epoch-timestamp float
 # indicating when bypass should automatically be turned off.
-BYPASS_TIMER_FILE = Path.home() / '.config' / 'pumphouse' / 'bypass_timer'
+BYPASS_TIMER_FILE  = Path.home() / '.config' / 'pumphouse' / 'bypass_timer'
+PURGE_PENDING_FILE = Path.home() / '.config' / 'pumphouse' / 'purge_pending'
 
 # Cycle bypass: alternates bypass ON/OFF on a repeating schedule.
 # When this file exists (JSON), it stores the active cycle state.
