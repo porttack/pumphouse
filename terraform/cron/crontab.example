@@ -24,3 +24,7 @@ VENV=$PROJECT/venv/bin/python3
 # --- Daily GPH logger ---
 # Calculate and log well gallons-per-hour at 2 AM.
 0 2 * * * cd $PROJECT && $VENV log_daily_gph.py >> $PROJECT/gph_log.txt 2>&1
+
+# --- Daily summary CSV ---
+# Append yesterday's summary row to daily.csv at 2:30 AM.
+30 2 * * * cd $PROJECT && $VENV build_daily.py >> $PROJECT/logs/build_daily.log 2>&1

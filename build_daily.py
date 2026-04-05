@@ -22,9 +22,10 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-DATA_DIR   = Path.home() / '.local' / 'share' / 'pumphouse'
-DAILY_CSV  = DATA_DIR / 'daily.csv'
-SNAPSHOTS  = DATA_DIR / 'snapshots.csv'
+DATA_DIR          = Path.home() / '.local' / 'share' / 'pumphouse'
+DAILY_CSV         = DATA_DIR / 'daily.csv'
+SNAPSHOTS         = DATA_DIR / 'snapshots.csv'
+RESERVATIONS_FILE = DATA_DIR / 'reservations.csv'
 
 # A 15-min window qualifies as a "high-pressure event" window if
 # pressure was high for more than this fraction of the window.
@@ -34,28 +35,52 @@ HIGH_THRESHOLD_PCT = 50.0
 # Values above this are sensor glitches and are clamped to 0.
 MAX_GAL_PER_WINDOW = 20.0
 
+# Backflush detection — mirrors config.py values.
+BACKFLUSH_THRESHOLD   = 50    # gallons lost to qualify as a backflush
+BACKFLUSH_WINDOW_ROWS = 3     # consecutive snapshot rows to sum
+BACKFLUSH_TIME_START  = (0,   0)   # (hour, minute) — start of overnight window
+BACKFLUSH_TIME_END    = (4,  30)   # (hour, minute) — end of overnight window
+
+# Income — mirrors config.py MANAGEMENT_FEE_PERCENT.
+MANAGEMENT_FEE_PCT = 36
+
+# Reservation types that generate guest income (exclude owner stays / maintenance).
+PAYING_TYPES = {'Regular - Renter', 'Airbnb', 'Vrbo', 'HomeToGo',
+                'MyBookingPal', 'Bookingcom', 'Owner Guest'}
+
 FIELDNAMES = [
-    # Coverage
-    'date', 'n_snapshots', 'hours_covered',
-    # Tank levels
-    'gallons_start', 'gallons_end', 'gallons_net_change',
-    'gallons_min', 'gallons_max',
-    # Occupancy
-    'occupied_windows', 'occupied_pct',
-    # Float & override
+    # ── Priority columns (most useful at a glance) ────────────────────────
+    'date',
+    'occupied_pct',
+    'gallons_end',              # tank level at end of day
+    'gallons_net_change',
+    'tank_rolling_gph_avg',     # avg fill rate during calling windows
+    'pressure_high_pct_overall',
+    'high_events_pump_gph',
+    'low_events_pump_gph',
+    'bypass_hours',
+    'backflush_gallons',
+    'checkout_net_income',
+    'net_income_cumulative',
+    # ── Tank detail ───────────────────────────────────────────────────────
+    'gallons_start', 'gallons_min', 'gallons_max',
+    # ── GPH detail ────────────────────────────────────────────────────────
+    'tank_rolling_gph_min', 'tank_rolling_gph_max', 'low_events_consume_gph',
+    # ── Pressure / event detail ───────────────────────────────────────────
+    'pressure_high_minutes',
+    'high_events', 'high_events_total_minutes', 'high_events_avg_minutes',
+    'low_events_windows',
+    # ── Float, override, purge ────────────────────────────────────────────
     'float_calling_windows', 'float_full_windows',
     'override_windows', 'override_minutes',
     'total_purges',
-    # Bypass
-    'bypass_windows', 'bypass_minutes',
-    # Pressure HIGH overall (non-bypass)
-    'pressure_high_pct_overall', 'pressure_high_minutes',
-    # High-pressure events (consecutive runs >50%, non-bypass)
-    'high_events', 'high_events_total_minutes',
-    'high_events_avg_minutes', 'high_events_pump_gph',
-    # Low-pressure (normal, non-bypass, non-high-event) windows
-    'low_events_windows', 'low_events_pump_gph', 'low_events_consume_gph',
-    # Weather
+    # ── Bypass detail ─────────────────────────────────────────────────────
+    'bypass_windows',
+    # ── Occupancy detail ──────────────────────────────────────────────────
+    'occupied_windows',
+    # ── Coverage ──────────────────────────────────────────────────────────
+    'n_snapshots', 'hours_covered',
+    # ── Weather ───────────────────────────────────────────────────────────
     'outdoor_temp_min', 'outdoor_temp_max', 'outdoor_temp_avg',
     'indoor_temp_min',  'indoor_temp_max',  'indoor_temp_avg',
     'humidity_avg', 'baro_avg', 'wind_gust_max',
@@ -74,7 +99,7 @@ def avg(vals):
     return round(sum(v) / len(v), 1) if v else None
 
 
-def summarize_day(date, rows):
+def summarize_day(date, rows, checkout_net_income=0.0):
     """Return a dict of daily stats for one calendar day's worth of rows."""
     n = len(rows)
     if n == 0:
@@ -125,6 +150,38 @@ def summarize_day(date, rows):
     low_consume_gph = low_consumed / (low_dur / 3600) if low_dur > 0 else None
     run_mins = [sum(flt(r, 'duration_seconds') for r in run) / 60 for run in runs]
 
+    # Backflush detection: look for a run of BACKFLUSH_WINDOW_ROWS consecutive
+    # overnight (00:00–04:30) rows where the total tank decline ≥ threshold.
+    backflush_gallons = None
+    try:
+        _start_m = BACKFLUSH_TIME_START[0] * 60 + BACKFLUSH_TIME_START[1]
+        _end_m   = BACKFLUSH_TIME_END[0]   * 60 + BACKFLUSH_TIME_END[1]
+        _night_rows = []
+        for r in rows:
+            try:
+                from datetime import datetime as _dt
+                _ts = _dt.fromisoformat(r['timestamp'])
+                _t  = _ts.hour * 60 + _ts.minute
+                if _start_m <= _t <= _end_m:
+                    _night_rows.append(flt(r, 'tank_gallons_delta'))
+            except Exception:
+                pass
+        for _i in range(len(_night_rows) - BACKFLUSH_WINDOW_ROWS + 1):
+            _decline = sum(_night_rows[_i:_i + BACKFLUSH_WINDOW_ROWS])
+            if _decline <= -BACKFLUSH_THRESHOLD:
+                backflush_gallons = round(abs(_decline), 0)
+                break
+    except Exception:
+        pass
+
+    calling_gph = []
+    for r in rows:
+        if r.get('float_ever_calling', '').upper() == 'YES':
+            try:
+                calling_gph.append(float(r['tank_rolling_gph']))
+            except (KeyError, ValueError, TypeError):
+                pass
+
     def weather_vals(key):
         return [flt(r, key) for r in rows if (r.get(key) or '').strip()]
 
@@ -155,7 +212,10 @@ def summarize_day(date, rows):
         'override_minutes':          round(ov_wins * 15, 0),
         'total_purges':              sum(int(flt(r, 'purge_count')) for r in rows),
         'bypass_windows':            len(bypass_rows),
-        'bypass_minutes':            round(bypass_dur / 60, 0),
+        'bypass_hours':              round(bypass_dur / 3600, 2),
+        'backflush_gallons':         backflush_gallons,
+        'checkout_net_income':       round(checkout_net_income, 2) if checkout_net_income else None,
+        'net_income_cumulative':     None,  # filled in by main() after running total is known
         'pressure_high_pct_overall': round(nb_high / nb_dur * 100, 1) if nb_dur else None,
         'pressure_high_minutes':     round(nb_high / 60, 0),
         'high_events':               len(runs),
@@ -167,6 +227,9 @@ def summarize_day(date, rows):
         # fewer windows means a single pump cycle dominates and the average is unreliable.
         'low_events_pump_gph':       round(low_gph, 1) if (low_gph and len(low_rows) >= 4) else None,
         'low_events_consume_gph':    round(low_consume_gph, 1) if low_consume_gph else None,
+        'tank_rolling_gph_avg':      round(sum(calling_gph) / len(calling_gph), 1) if calling_gph else None,
+        'tank_rolling_gph_min':      round(min(calling_gph), 1) if calling_gph else None,
+        'tank_rolling_gph_max':      round(max(calling_gph), 1) if calling_gph else None,
         'outdoor_temp_min':          round(min(out_temps), 1) if out_temps else None,
         'outdoor_temp_max':          round(max(out_temps), 1) if out_temps else None,
         'outdoor_temp_avg':          avg(out_temps),
@@ -177,6 +240,31 @@ def summarize_day(date, rows):
         'baro_avg':                  avg(baro),
         'wind_gust_max':             round(max(gusts), 1) if gusts else None,
     }
+
+
+def load_reservations_by_checkout():
+    """Return {checkout_date_str: net_income} for all paying reservations."""
+    by_checkout = defaultdict(float)
+    if not RESERVATIONS_FILE.exists():
+        return by_checkout
+    try:
+        with open(RESERVATIONS_FILE, newline='') as f:
+            for row in csv.DictReader(f):
+                if row.get('Type') not in PAYING_TYPES:
+                    continue
+                if row.get('Status') not in ('Confirmed', 'Checked Out', 'Checked In'):
+                    continue
+                checkout = (row.get('Checkout') or '').strip()[:10]
+                if not checkout:
+                    continue
+                try:
+                    gross = float(row.get('Income') or 0)
+                    by_checkout[checkout] += gross * (1 - MANAGEMENT_FEE_PCT / 100)
+                except (ValueError, TypeError):
+                    pass
+    except Exception:
+        pass
+    return by_checkout
 
 
 def iter_all_rows():
@@ -213,6 +301,12 @@ def main():
         print('Removed existing daily.csv — rebuilding from scratch.')
 
     existing_dates = load_existing_dates()
+    reservations   = load_reservations_by_checkout()
+
+    # Seed monthly running income from the last existing row only if it shares
+    # the same month as the first new date we are about to write.
+    running_income = 0.0
+    current_month  = None
 
     # Group all rows by date
     by_day = defaultdict(list)
@@ -236,8 +330,27 @@ def main():
         if write_header:
             writer.writeheader()
         for date in new_dates:
-            summary = summarize_day(date, by_day[date])
+            month = date[:7]
+            if month != current_month:
+                # Entering a new month — try to seed from the last existing row
+                # if it falls in this same month (incremental run mid-month).
+                running_income = 0.0
+                if current_month is None and DAILY_CSV.exists():
+                    try:
+                        with open(DAILY_CSV) as _seed_f:
+                            _last = None
+                            for _last in csv.DictReader(_seed_f):
+                                pass
+                            if _last and _last['date'][:7] == month:
+                                running_income = float(_last.get('net_income_cumulative') or 0)
+                    except Exception:
+                        pass
+                current_month = month
+            income = reservations.get(date, 0.0)
+            running_income += income
+            summary = summarize_day(date, by_day[date], checkout_net_income=income)
             if summary:
+                summary['net_income_cumulative'] = round(running_income, 2)
                 writer.writerow(summary)
                 written += 1
 
