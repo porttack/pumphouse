@@ -15,7 +15,8 @@ from functools import wraps
 
 from monitor import __version__
 from monitor.config import (
-    EVENTS_FILE, RESERVATIONS_FILE, DEFAULT_SNAPSHOTS_FILE,
+    EVENTS_FILE, RESERVATIONS_FILE, DEFAULT_SNAPSHOTS_FILE, DAILY_CSV,
+    NOTIFY_BACKFLUSH_TIME_START, NOTIFY_BACKFLUSH_TIME_END,
     TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS,
     EPAPER_CONSERVE_WATER_THRESHOLD, EPAPER_OWNER_STAY_TYPES,
     EPAPER_DEFAULT_HOURS_TENANT, EPAPER_DEFAULT_HOURS_OTHER,
@@ -576,6 +577,48 @@ def get_outdoor_weather():
         return None
 
 
+def get_service_uptimes():
+    """Return list of {name, state, since} for the three pumphouse services plus the Pi itself."""
+    import subprocess
+    SERVICES = [
+        ('monitor',   'pumphouse-monitor.service'),
+        ('web',       'pumphouse-web.service'),
+        ('timelapse', 'pumphouse-timelapse.service'),
+    ]
+    result = []
+
+    # Pi uptime from /proc/uptime (first field = seconds since boot)
+    try:
+        with open('/proc/uptime') as _f:
+            _boot_seconds = float(_f.read().split()[0])
+        _boot_since = datetime.now() - timedelta(seconds=_boot_seconds)
+        result.append({'name': 'pi', 'state': 'active', 'since': _boot_since})
+    except Exception:
+        result.append({'name': 'pi', 'state': 'unknown', 'since': None})
+
+    for label, svc in SERVICES:
+        try:
+            out = subprocess.run(
+                ['systemctl', 'show', svc,
+                 '--property=ActiveState,ActiveEnterTimestamp'],
+                capture_output=True, text=True, timeout=5
+            ).stdout
+            props = dict(line.split('=', 1) for line in out.splitlines() if '=' in line)
+            state = props.get('ActiveState', 'unknown')
+            ts_str = props.get('ActiveEnterTimestamp', '')
+            since = None
+            if ts_str:
+                try:
+                    # systemd format: "Mon 2026-04-05 00:40:43 PDT"
+                    since = datetime.strptime(ts_str, '%a %Y-%m-%d %H:%M:%S %Z')
+                except Exception:
+                    pass
+            result.append({'name': label, 'state': state, 'since': since})
+        except Exception:
+            result.append({'name': label, 'state': 'unknown', 'since': None})
+    return result
+
+
 def get_internet_uptime():
     """Fetch uptime stats from Cloudflare worker and compute 24h and 7d metrics."""
     import urllib.request
@@ -966,7 +1009,7 @@ def epaper_bmp():
     """
     from PIL import Image, ImageDraw, ImageFont, ImageChops
     from monitor.occupancy import load_reservations, is_occupied, get_next_reservation, get_checkin_datetime
-    from monitor.weather_api import forecast_weather_codes
+    from monitor.weather_api import forecast_weather_codes, current_weather_code
     from monitor.weather_icons import draw_weather_icon as _draw_wx_icon
 
     hours_explicit = request.args.get('hours', type=int)  # None if not provided
@@ -1260,6 +1303,10 @@ def epaper_bmp():
 
     # Forecast icons: top-right of graph (XOR — inverts over whatever is behind)
     forecast_codes = forecast_weather_codes(EPAPER_FORECAST_DAYS) if EPAPER_FORECAST_DAYS else []
+    if forecast_codes:
+        live_code = current_weather_code()
+        if live_code is not None:
+            forecast_codes[0] = live_code
     if forecast_codes:
         icon_sz  = s(13)
         icon_gap = s(2)
@@ -1700,6 +1747,7 @@ def index():
 
     # Read CSV files
     snapshot_headers, snapshot_rows = read_csv_tail(DEFAULT_SNAPSHOTS_FILE, max_rows=DASHBOARD_SNAPSHOT_COUNT)
+    daily_headers, daily_rows = read_csv_tail(str(DAILY_CSV), max_rows=62)
     event_headers, event_rows = read_events_by_time(EVENTS_FILE, hours=hours)
 
     # Filter events based on DASHBOARD_HIDE_EVENT_TYPES
@@ -1750,6 +1798,33 @@ def index():
     except Exception:
         pass
 
+    # Predict next backflush from historical NOTIFY_BACKFLUSH events in the overnight window
+    next_backflush = None
+    try:
+        _bf_start = sum(int(x) * m for x, m in zip(NOTIFY_BACKFLUSH_TIME_START.split(':'), (60, 1)))
+        _bf_end   = sum(int(x) * m for x, m in zip(NOTIFY_BACKFLUSH_TIME_END.split(':'),   (60, 1)))
+        _bf_dates = []
+        with open(EVENTS_FILE) as _f:
+            for _row in csv.DictReader(_f):
+                if _row.get('event_type') == 'NOTIFY_BACKFLUSH':
+                    try:
+                        _ts = datetime.fromisoformat(_row['timestamp'])
+                        _t  = _ts.hour * 60 + _ts.minute
+                        if _bf_start <= _t <= _bf_end:
+                            _d = _ts.date()
+                            # Deduplicate: skip if within 3 days of the last recorded date
+                            if not _bf_dates or (_d - _bf_dates[-1]).days > 3:
+                                _bf_dates.append(_d)
+                    except Exception:
+                        pass
+        if len(_bf_dates) >= 2:
+            _intervals = [(_bf_dates[i+1] - _bf_dates[i]).days for i in range(len(_bf_dates) - 1)]
+            _median_interval = sorted(_intervals)[len(_intervals) // 2]
+            from datetime import date as _date
+            next_backflush = datetime.combine(_bf_dates[-1], datetime.min.time()) + timedelta(days=_median_interval)
+    except Exception:
+        pass
+
     # Estimate time to reach full tank (1400 gal) based on 24h fill rate
     time_to_full = None
     try:
@@ -1782,7 +1857,8 @@ def index():
         pass
 
     # Get internet uptime stats from Cloudflare worker
-    internet_uptime = get_internet_uptime()
+    internet_uptime  = get_internet_uptime()
+    service_uptimes  = get_service_uptimes()
 
     # Get wind forecast for tonight and tomorrow
     wind_forecast = get_wind_forecast()
@@ -1904,6 +1980,8 @@ def index():
                          tank_url=TANK_URL,
                          snapshot_headers=snapshot_headers,
                          snapshot_rows=snapshot_rows,
+                         daily_headers=daily_headers,
+                         daily_rows=daily_rows,
                          event_headers=event_headers,
                          event_rows=event_rows,
                          stats=stats,
@@ -1923,9 +2001,11 @@ def index():
                          gph_metrics=gph_metrics,
                          hourly_gph=hourly_gph,
                          next_pump_cycle=next_pump_cycle,
+                         next_backflush=next_backflush,
                          time_to_full=time_to_full,
                          gallons_at_checkin=gallons_at_checkin,
                          internet_uptime=internet_uptime,
+                         service_uptimes=service_uptimes,
                          wind_forecast=wind_forecast,
                          national_weather_url=NATIONAL_WEATHER_URL,
                          FLOAT_STATE_FULL=FLOAT_STATE_FULL,

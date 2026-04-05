@@ -389,6 +389,21 @@
                     <div class="status-value">{{ next_pump_cycle.strftime('%-I:%M %p') }} <span style="color:#888;font-size:0.85em">(in {{ mins_away }} min)</span></div>
                 </div>
                 {% endif %}
+                {% if next_backflush %}
+                {% set bf_days = ((next_backflush - now).total_seconds() / 86400) %}
+                <div class="status-item">
+                    <div class="status-label">Next Backflush</div>
+                    <div class="status-value">{{ next_backflush.strftime('%a %b %-d') }}
+                        {% if bf_days < -1 %}
+                        <span style="color:#f44336;font-size:0.85em">({{ (-bf_days)|int }}d overdue)</span>
+                        {% elif bf_days < 0 %}
+                        <span style="color:#ff9800;font-size:0.85em">(today)</span>
+                        {% else %}
+                        <span style="color:#888;font-size:0.85em">(in {{ bf_days|int }}d)</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
                 {% if hourly_gph %}
                 <div class="status-item" style="min-width:200px;">
                     <div class="status-label">Tank Fill Rate (GPH)</div>
@@ -480,6 +495,51 @@
                     {% endif %}
                 </div>
                 {% endif %}
+                <!-- Relay states -->
+                <div class="status-item">
+                    <div class="status-label">Relays</div>
+                    {% set relay_rows = [
+                        ('Bypass',  relay_status.bypass,           'ON'),
+                        ('Supply',  relay_status.supply_override,  'ON'),
+                        ('Purge',   relay_status.get('purge','—'), 'ON'),
+                    ] %}
+                    <table style="border-collapse:collapse; margin-top:6px; font-size:13px; width:100%;">
+                        {% for label, state, warn_val in relay_rows %}
+                        <tr>
+                            <td style="color:#888; padding:2px 6px 2px 0; white-space:nowrap;">{{ label }}</td>
+                            <td style="font-weight:bold; padding:2px 0;
+                                color:{% if state == warn_val %}#ff9800{% elif state == 'OFF' %}#4CAF50{% else %}#888{% endif %};">
+                                {{ state }}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </table>
+                </div>
+
+                <!-- Service uptimes -->
+                {% if service_uptimes %}
+                <div class="status-item">
+                    <div class="status-label">Services</div>
+                    <table style="border-collapse:collapse; margin-top:6px; font-size:13px; width:100%;">
+                        {% for svc in service_uptimes %}
+                        {% set age_h = ((now - svc.since).total_seconds() / 3600) | int if svc.since else none %}
+                        <tr>
+                            <td style="color:#888; padding:2px 6px 2px 0; white-space:nowrap;">{{ svc.name }}</td>
+                            <td style="font-weight:bold; padding:2px 0;
+                                color:{% if svc.state == 'active' %}#4CAF50{% else %}#f44336{% endif %};">
+                                {% if svc.since and age_h is not none %}
+                                    {% if age_h >= 48 %}{{ (age_h / 24) | int }}d
+                                    {% elif age_h >= 1 %}{{ age_h }}h
+                                    {% else %}{{ ((now - svc.since).total_seconds() / 60) | int }}m
+                                    {% endif %}
+                                {% else %}{{ svc.state }}{% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </table>
+                </div>
+                {% endif %}
+
                 {% if internet_uptime %}
                 <div class="status-item" style="border-left-color: #2196F3;">
                     <div class="status-label">Internet Uptime</div>
@@ -652,6 +712,41 @@
                                 {% if loop.index == 1 %}
                                 {{ cell|human_time }}
                                 {% elif cell.startswith('+') %}
+                                <span class="positive">{{ cell }}</span>
+                                {% elif cell.startswith('-') %}
+                                <span class="negative">{{ cell }}</span>
+                                {% else %}
+                                {{ cell }}
+                                {% endif %}
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Daily Summary Section -->
+        {% if daily_headers %}
+        <div class="section">
+            <h2>DAILY SUMMARY (Last {{ daily_rows|length }})</h2>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            {% for header in daily_headers %}
+                            <th><div class="vertical-text">{{ header }}</div></th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in daily_rows|reverse %}
+                        <tr>
+                            {% for cell in row %}
+                            <td>
+                                {% if cell.startswith('+') %}
                                 <span class="positive">{{ cell }}</span>
                                 {% elif cell.startswith('-') %}
                                 <span class="negative">{{ cell }}</span>

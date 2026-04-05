@@ -31,21 +31,39 @@ Use `control.sh` for safe relay control without Python GPIO conflicts. The scrip
 
 ## Automatic Purging
 
-Automatically purges the WHC40 spindown filter after water delivery to remove accumulated sediment.
+Automatically purges the WHC40 spindown filter to remove accumulated sediment.
 
-### Enable automatic purging
+Two independent purge modes are available:
 
-Edit `monitor/config.py` (or `~/.config/pumphouse/monitor.conf`):
+### Daily purge (recommended, enabled by default)
+
+Fires once per calendar day, 15 seconds into the first pressure-HIGH event after 3 AM. This guarantees a daily purge regardless of pump cycle frequency.
 
 ```python
-ENABLE_PURGE = True         # Enable automatic purging
+ENABLE_DAILY_PURGE = True   # Once-per-day purge after first HIGH ≥ 3am
+DAILY_PURGE_HOUR   = 3      # Hour after which daily purge becomes eligible
+PURGE_DURATION     = 10     # Purge valve open for 10 seconds
+```
+
+`last_purge_date` is seeded from `events.csv` on startup so a service restart mid-day will not trigger a double purge.
+
+### Per-delivery purge (disabled by default)
+
+Fires after every pump cycle if enough time has elapsed since the last purge.
+
+```python
+ENABLE_PURGE = False        # Purge after each water delivery
 MIN_PURGE_INTERVAL = 3600   # Minimum 1 hour between purges
 PURGE_DURATION = 10         # Purge for 10 seconds
 ```
 
+### Pressure-timed (external trigger)
+
+Creating the file `~/.config/pumphouse/purge_pending` schedules a one-shot purge 15 seconds into the next pressure-HIGH event. Used by dashboard "Purge Now" button and remote token. Takes priority over the daily purge if both are pending at the same moment.
+
 ### How it works
 
-After a `PRESSURE_LOW` event (pump stops), the monitor triggers a brief pulse on the Spin Purge Valve (BCM 13, Channel 3) to backflush sediment from the spindown filter. The `MIN_PURGE_INTERVAL` prevents excessive purging.
+A brief pulse on the Spin Purge Valve (BCM 13, Channel 3) backflushes sediment from the spindown filter. Purges are logged as `PURGE` events in `events.csv`.
 
 **Impact**: Reduces filter maintenance visits from weekly (~$2,860/year) to 6–8 months (~$330–440/year).
 
