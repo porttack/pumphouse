@@ -10,7 +10,7 @@ from monitor.config import (
     load_config_file
 )
 from monitor.poll import SimplifiedMonitor
-from monitor.logger import initialize_events_csv, initialize_snapshots_csv
+from monitor.logger import initialize_events_csv, initialize_snapshots_csv, migrate_snapshots_csv
 from monitor.gpio_helpers import init_gpio, cleanup_gpio
 from monitor.restart_tracker import check_and_record_restart
 
@@ -60,6 +60,7 @@ def main():
     if initialize_snapshots_csv(args.snapshots):
         if args.debug:
             print(f"Created {args.snapshots}")
+    migrate_snapshots_csv(args.snapshots)
     
     # Check for excessive restarts (crash loop detection)
     restart_info = check_and_record_restart(args.events, debug=args.debug)

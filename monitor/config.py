@@ -35,9 +35,11 @@ RESIDUAL_PRESSURE_SECONDS = 30  # Last N seconds are residual pressure (not pump
 SECONDS_PER_GALLON = 10 / 0.14   # 10 seconds = 0.14 gallons
 
 # Purge Configuration
-ENABLE_PURGE = False  # Enable automatic filter purging after water delivery
+ENABLE_PURGE = False  # Enable automatic filter purging after every water delivery
 MIN_PURGE_INTERVAL = 3600  # Minimum seconds between purges (default: 3600 = 1 hour)
 PURGE_DURATION = 10  # Duration of purge in seconds
+ENABLE_DAILY_PURGE = True   # Purge once per day: 15s after first pressure-HIGH after 3am
+DAILY_PURGE_HOUR   = 3      # Hour (0-23) after which the daily purge becomes eligible
 
 # Override Shutoff Configuration
 ENABLE_OVERRIDE_SHUTOFF = True  # Enable automatic override shutoff to prevent tank overflow
@@ -152,6 +154,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 # Canonical data file paths
 EVENTS_FILE                = DATA_DIR / 'events.csv'
 SNAPSHOTS_FILE             = DATA_DIR / 'snapshots.csv'
+DAILY_CSV                  = DATA_DIR / 'daily.csv'
 RESERVATIONS_FILE          = DATA_DIR / 'reservations.csv'
 RESERVATIONS_SNAPSHOT_FILE = DATA_DIR / 'reservations_snapshot.csv'
 

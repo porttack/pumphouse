@@ -1,8 +1,10 @@
 """
 Simplified event-based polling loop
 """
+import csv
 import threading
 import time
+from collections import deque
 from datetime import datetime, timedelta
 import signal
 
@@ -10,7 +12,7 @@ from monitor.config import (
     RESERVATIONS_FILE,
     POLL_INTERVAL, TANK_POLL_INTERVAL, SNAPSHOT_INTERVAL,
     RESIDUAL_PRESSURE_SECONDS, SECONDS_PER_GALLON,
-    ENABLE_PURGE, MIN_PURGE_INTERVAL,
+    ENABLE_PURGE, MIN_PURGE_INTERVAL, ENABLE_DAILY_PURGE, DAILY_PURGE_HOUR,
     ENABLE_OVERRIDE_SHUTOFF, OVERRIDE_SHUTOFF_THRESHOLD,
     OVERRIDE_ON_THRESHOLD,
     NOTIFY_OVERRIDE_SHUTOFF, NOTIFY_WELL_RECOVERY_THRESHOLD,
@@ -179,8 +181,14 @@ class SimplifiedMonitor:
         self.next_daily_status_time = None
         self.next_checkout_reminder_time = None
 
-        # Tank tracking for delta
+        # Tank tracking for delta and rolling GPH
         self.last_snapshot_tank_gallons = None
+
+        # Daily purge tracking — seeded from events.csv so restarts don't double-fire
+        self.last_purge_date = None
+        self._init_last_purge_date()
+        self._tank_gph_buffer: deque = deque()  # (timestamp_float, tank_gallons)
+        self._init_tank_gph_buffer()
 
         # Tank fetch failure tracking
         self.tank_fetch_failures = 0
@@ -215,6 +223,38 @@ class SimplifiedMonitor:
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
     
+    def _init_last_purge_date(self):
+        """Seed last_purge_date from events.csv so restarts don't fire an extra purge today."""
+        try:
+            with open(self.events_file, 'r') as f:
+                for row in csv.DictReader(f):
+                    if row.get('event_type') == 'PURGE':
+                        try:
+                            d = datetime.fromisoformat(row['timestamp']).date()
+                            if self.last_purge_date is None or d > self.last_purge_date:
+                                self.last_purge_date = d
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+    def _init_tank_gph_buffer(self):
+        """Seed the rolling GPH buffer from the last hour of snapshot history."""
+        try:
+            cutoff = time.time() - 4500  # 75 min
+            with open(self.snapshots_file, 'r') as f:
+                rows = list(csv.DictReader(f))
+            for row in rows[-8:]:
+                try:
+                    ts = datetime.fromisoformat(row['timestamp']).timestamp()
+                    gal = float(row['tank_gallons'])
+                    if ts >= cutoff:
+                        self._tank_gph_buffer.append((ts, gal))
+                except (KeyError, ValueError):
+                    continue
+        except Exception:
+            pass
+
     def signal_handler(self, signum, frame):
         """Handle shutdown signals gracefully"""
         if self.debug:
@@ -497,16 +537,26 @@ class SimplifiedMonitor:
                         if self.debug:
                             print(f"{datetime.now().strftime('%H:%M:%S')} - Pressure HIGH")
 
-                        # Pressure-timed purge: fire ~15s into the cycle if pending
+                        # Purge logic: fire ~15s into this pressure cycle.
+                        # Priority 1: externally-scheduled purge (PURGE_PENDING_FILE).
+                        # Priority 2: daily once-per-day purge after DAILY_PURGE_HOUR.
+                        _purge_reason = None
                         if PURGE_PENDING_FILE.exists():
                             PURGE_PENDING_FILE.unlink(missing_ok=True)
-                            def _delayed_purge(monitor=self):
+                            _purge_reason = 'Pressure-timed purge (15s into cycle)'
+                        elif (ENABLE_DAILY_PURGE and self.relay_control_enabled
+                              and datetime.now().hour >= DAILY_PURGE_HOUR
+                              and self.last_purge_date != datetime.now().date()):
+                            _purge_reason = 'Daily purge (15s into first cycle after {}am)'.format(DAILY_PURGE_HOUR)
+                        if _purge_reason:
+                            def _delayed_purge(monitor=self, reason=_purge_reason):
                                 time.sleep(15)
                                 from monitor.relay import purge_spindown_filter
                                 if purge_spindown_filter(debug=monitor.debug):
-                                    monitor.log_state_event('PURGE', 'Pressure-timed purge (15s into cycle)')
+                                    monitor.log_state_event('PURGE', reason)
                                     monitor.snapshot_tracker.increment_purge()
                                     monitor.last_purge_time = time.time()
+                                    monitor.last_purge_date = datetime.now().date()
                             threading.Thread(target=_delayed_purge, daemon=True, name='purge-timed').start()
 
                         # Send high pressure alert if enabled
@@ -1026,6 +1076,21 @@ class SimplifiedMonitor:
                     if self.state.tank_gallons is not None and self.last_snapshot_tank_gallons is not None:
                         tank_gallons_delta = self.state.tank_gallons - self.last_snapshot_tank_gallons
 
+                    # Rolling tank GPH (positive = filling, negative = consuming)
+                    tank_rolling_gph = None
+                    if self.state.tank_gallons is not None:
+                        now_ts = time.time()
+                        self._tank_gph_buffer.append((now_ts, self.state.tank_gallons))
+                        cutoff = now_ts - 7200  # 2-hour window
+                        while len(self._tank_gph_buffer) > 1 and self._tank_gph_buffer[0][0] < cutoff:
+                            self._tank_gph_buffer.popleft()
+                        if len(self._tank_gph_buffer) >= 2:
+                            ts0, g0 = self._tank_gph_buffer[0]
+                            ts1, g1 = self._tank_gph_buffer[-1]
+                            dt_hours = (ts1 - ts0) / 3600
+                            if dt_hours >= 0.2:  # require at least ~12 min of span
+                                tank_rolling_gph = round((g1 - g0) / dt_hours, 1)
+
                     # Check occupancy status
                     occupied_status = 'NO'
                     try:
@@ -1056,7 +1121,8 @@ class SimplifiedMonitor:
                         self.state.indoor_temp,
                         self.state.outdoor_humidity,
                         self.state.baro_abs,
-                        self.state.wind_gust
+                        self.state.wind_gust,
+                        tank_rolling_gph,
                     )
 
                     # Update last snapshot tank gallons for next delta calculation

@@ -2,6 +2,7 @@
 Logging functions for events and snapshots
 """
 import csv
+import os
 from datetime import datetime
 
 def initialize_events_csv(filepath):
@@ -18,24 +19,50 @@ def initialize_events_csv(filepath):
     except FileExistsError:
         return False
 
+SNAPSHOT_COLUMNS = [
+    'timestamp', 'duration_seconds',
+    'tank_gallons', 'tank_gallons_delta', 'tank_data_age_seconds',
+    'float_state', 'float_ever_calling', 'float_always_full',
+    'pressure_high_seconds', 'pressure_high_percent',
+    'estimated_gallons_pumped', 'purge_count',
+    'relay_bypass', 'relay_supply_override', 'occupied',
+    'outdoor_temp_f', 'indoor_temp_f', 'outdoor_humidity',
+    'baro_abs_inhg', 'wind_gust_mph',
+    'tank_rolling_gph',
+]
+
+
 def initialize_snapshots_csv(filepath):
     """Initialize snapshots CSV file with headers"""
     try:
         with open(filepath, 'x', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([
-                'timestamp', 'duration_seconds',
-                'tank_gallons', 'tank_gallons_delta', 'tank_data_age_seconds',
-                'float_state', 'float_ever_calling', 'float_always_full',
-                'pressure_high_seconds', 'pressure_high_percent',
-                'estimated_gallons_pumped', 'purge_count',
-                'relay_bypass', 'relay_supply_override', 'occupied',
-                'outdoor_temp_f', 'indoor_temp_f', 'outdoor_humidity',
-                'baro_abs_inhg', 'wind_gust_mph'
-            ])
+            writer.writerow(SNAPSHOT_COLUMNS)
         return True
     except FileExistsError:
         return False
+
+
+def migrate_snapshots_csv(filepath):
+    """Add any missing columns to an existing snapshots CSV (one-time on startup)."""
+    try:
+        with open(filepath, 'r', newline='') as f:
+            reader = csv.reader(f)
+            header = next(reader)
+            missing = [c for c in SNAPSHOT_COLUMNS if c not in header]
+            if not missing:
+                return
+            rows = list(reader)
+        new_header = header + missing
+        tmp = filepath + '.tmp'
+        with open(tmp, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(new_header)
+            for row in rows:
+                writer.writerow(row + [''] * len(missing))
+        os.replace(tmp, filepath)
+    except Exception as e:
+        print(f'Warning: could not migrate {filepath}: {e}')
 
 def log_event(filepath, event_type, pressure_state, float_state, tank_gallons,
               tank_depth, tank_percentage, estimated_gallons, relay_status, notes=''):
@@ -67,7 +94,7 @@ def log_snapshot(filepath, duration, tank_gallons, tank_gallons_delta, tank_data
                 pressure_high_seconds, pressure_high_percent,
                 estimated_gallons, purge_count, relay_status, occupied='',
                 outdoor_temp=None, indoor_temp=None, outdoor_humidity=None,
-                baro_abs=None, wind_gust=None):
+                baro_abs=None, wind_gust=None, tank_rolling_gph=None):
     """Log a snapshot to snapshots.csv"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
 
@@ -98,5 +125,6 @@ def log_snapshot(filepath, duration, tank_gallons, tank_gallons_delta, tank_data
             f'{indoor_temp:.1f}' if indoor_temp is not None else '',
             f'{outdoor_humidity:.0f}' if outdoor_humidity is not None else '',
             f'{baro_abs:.3f}' if baro_abs is not None else '',
-            f'{wind_gust:.1f}' if wind_gust is not None else ''
+            f'{wind_gust:.1f}' if wind_gust is not None else '',
+            f'{tank_rolling_gph:.1f}' if tank_rolling_gph is not None else '',
         ])
