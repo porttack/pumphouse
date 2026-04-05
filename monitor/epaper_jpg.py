@@ -539,7 +539,14 @@ def render_epaper_jpg(
         _fl_x      = _gap_left + (_gap_right - _gap_left - _fl_w) // 2
         _fl_y      = _label_y + (draw.textbbox((0,0), 'X', font=font_small)[3] - _fl_h) // 2
         _label_color = (30, 150, 60) if _full_flow else _FLOW_TEXT_COLOR
-        draw.text((_fl_x, _fl_y), _flow_label, font=font_tiny, fill=_label_color)
+        _bypass_live = rows and rows[-1].get('relay_bypass', '').upper() == 'ON'
+        if _bypass_live and _gph_str and _flow6 is not None:
+            _prefix   = f'{_flow6:.1f}% {_arrow}'
+            _prefix_w = draw.textbbox((0, 0), _prefix, font=font_tiny)[2]
+            draw.text((_fl_x, _fl_y), _prefix, font=font_tiny, fill=_label_color)
+            draw.text((_fl_x + _prefix_w, _fl_y), _gph_str, font=font_tiny, fill=_BYPASS_COLOR)
+        else:
+            draw.text((_fl_x, _fl_y), _flow_label, font=font_tiny, fill=_label_color)
     except Exception:
         pass
 
