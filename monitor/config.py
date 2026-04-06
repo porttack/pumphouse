@@ -62,7 +62,7 @@ DASHBOARD_DEFAULT_HOURS = 72  # Default time range for web dashboard (hours)
 # See EMAIL_SETUP.md and secrets.conf.template for detailed configuration instructions
 ENABLE_EMAIL_NOTIFICATIONS = True  # Enable email alerts
 EMAIL_TO = "onblackberryhill+alert@gmail.com"  # Recipient email address
-EMAIL_FROM = "onblackberryhill+pumphouse@gmail.com"  # Sender email address
+EMAIL_FROM = "onblackberryhill.alert@gmail.com"  # Sender email address
 EMAIL_FRIENDLY_NAME = "Pumphouse"  # Friendly name shown in email headers and footers
 EMAIL_SMTP_SERVER = ""  # SMTP server - loaded from secrets file
 EMAIL_SMTP_PORT = 587  # SMTP port - can be overridden in secrets file

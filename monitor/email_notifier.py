@@ -157,12 +157,23 @@ def send_email_notification(subject, message, priority='default', dashboard_url=
                 if debug:
                     print(f"Warning: Could not attach Ring snapshot: {e}", file=sys.stderr)
 
-        # Fetch and embed chart image if provided
+        # Fetch and embed chart image if provided.
+        # Always rewrite the host to 127.0.0.1 so the fetch is local — avoids
+        # DNS flakiness, DDNS propagation delays, and external network failures
+        # at the time the email is sent (e.g. 6 AM daily status).
         if chart_url:
             try:
+                import urllib.parse as _urlparse
+                _p = _urlparse.urlparse(chart_url)
+                _port = _p.port or (443 if _p.scheme == 'https' else 80)
+                _local_url = f"https://127.0.0.1:{_port}{_p.path}"
+                if _p.query:
+                    _local_url += '?' + _p.query
                 if debug:
-                    print(f"Fetching chart from: {chart_url}")
-                response = requests.get(chart_url, timeout=10)
+                    print(f"Fetching chart from: {_local_url} (rewritten from {chart_url})")
+                import urllib3
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+                response = requests.get(_local_url, timeout=15, verify=False)
                 response.raise_for_status()
 
                 _subtype = 'jpeg' if chart_url.lower().split('?')[0].endswith(('.jpg', '.jpeg')) else 'png'

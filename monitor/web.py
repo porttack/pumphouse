@@ -405,6 +405,26 @@ def get_snapshots_stats(filepath=DEFAULT_SNAPSHOTS_FILE):
             stats['last_refill_50_timestamp'] = refill_ts
             stats['last_refill_50_days'] = days_ago
 
+        # Find the most recent snapshot that had any pressure HIGH seconds
+        stats['last_pressure_high'] = None
+        for row in reversed(rows):
+            try:
+                if float(row.get('pressure_high_seconds', 0)) > 0:
+                    lph = datetime.fromisoformat(row['timestamp'])
+                    delta_days = (now.date() - lph.date()).days
+                    if delta_days == 0:
+                        prefix = 'Today'
+                    elif delta_days == 1:
+                        prefix = 'Yesterday'
+                    elif delta_days < 7:
+                        prefix = lph.strftime('%A')
+                    else:
+                        prefix = lph.strftime('%b %-d')
+                    stats['last_pressure_high'] = f"{prefix} {lph.strftime('%-I:%M %p')}"
+                    break
+            except:
+                continue
+
         return stats
 
     except Exception as e:

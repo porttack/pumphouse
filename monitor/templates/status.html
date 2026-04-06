@@ -395,6 +395,9 @@
                             <td style="padding:2px 0; text-align:center;">{{ "%.1f"|format(stats.pressure_high_pct_24hr) }}%</td>
                         </tr>
                     </table>
+                    {% if stats.last_pressure_high %}
+                    <div style="color:#888; font-size:12px; margin-top:5px; text-align:center;">Last: {{ stats.last_pressure_high }}</div>
+                    {% endif %}
                 </div>
                 {% endif %}
                 {% if next_pump_cycle %}
