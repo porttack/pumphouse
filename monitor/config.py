@@ -235,6 +235,10 @@ SECRET_TOTALS_TOKEN = ''  # Token to show income totals on dashboard
 CAMERA_USER = ''
 CAMERA_PASS = ''
 
+# Ring Camera Configuration
+RING_CAMERA_NAME = ''  # Name of Ring device to use (e.g. "Front Door"); first device if blank
+RING_TOKEN_FILE = Path.home() / '.config' / 'pumphouse' / 'ring_token.json'
+
 # Load secrets from secrets file
 SECRETS_FILE = Path.home() / '.config' / 'pumphouse' / 'secrets.conf'
 if SECRETS_FILE.exists():
@@ -275,6 +279,8 @@ if SECRETS_FILE.exists():
                         SECRET_PURGE_TOKEN = value
                     elif key == 'SECRET_TOTALS_TOKEN':
                         SECRET_TOTALS_TOKEN = value
+                    elif key == 'RING_CAMERA_NAME' and not RING_CAMERA_NAME:
+                        RING_CAMERA_NAME = value
                     elif key == 'CAMERA_USER' and not CAMERA_USER:
                         CAMERA_USER = value
                     elif key == 'CAMERA_PASS' and not CAMERA_PASS:

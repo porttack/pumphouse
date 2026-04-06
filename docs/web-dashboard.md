@@ -65,6 +65,15 @@ python -m monitor.web
 
 ## Dashboard Features
 
+### Image Row
+Three images share a full-width row on desktop at an equal computed height; on mobile they stack vertically:
+
+- **E-paper display** — current tank graph (links to full-size JPEG)
+- **Sunset snapshot** — most recent timelapse frame (links to timelapse viewer); hidden if no timelapse exists
+- **Ring camera** — live Ring snapshot with baked-in timestamp, server-cached for 60 seconds (links to Ring app on mobile, raw JPEG on desktop); only shown in `?owner` / `?manager` mode
+
+The dashboard auto-refreshes every 60 minutes.
+
 ### Sensor Panel
 - Live pressure state (HIGH/LOW)
 - Float switch state (OPEN/CLOSED)
@@ -115,17 +124,22 @@ python -m monitor.web
 | `GET /api/epaper.jpg` | Color JPEG at 4× resolution; `?hours=N`, `?public=yes`, `?tenant=no` |
 | `GET /api/ratings/YYYY-MM-DD` | JSON rating `{count, avg}` from Cloudflare KV |
 | `GET /control/<token>` | Remote relay action via secret URL (from email buttons) |
+| `GET /ring-snapshot` | Ring camera JPEG with baked-in timestamp; 60-second server cache; 503 if Ring unavailable |
 
 ---
 
-## Owner Mode (`?owner`)
+## Owner Mode (`?owner`) and Manager Mode (`?manager`)
 
-Append `?owner` to the dashboard URL to unlock owner-specific features:
+Append `?owner` or `?manager` to the dashboard URL to unlock elevated features:
 
-- **Control buttons**: Override ON/OFF, Bypass ON/OFF, Purge, Pressure-LOW watch toggle
-- **Default time range**: 120 hours (5 days) instead of 72 hours
-- **Income totals**: reservation income displayed without manual `?totals=income`
-- **Security**: secret tokens are only embedded in the HTML when `?owner` is present — plain visitors never see them
+| Feature | `?owner` | `?manager` |
+|---------|----------|------------|
+| Ring camera image | Yes | Yes |
+| Control buttons (relays, watch toggle) | Yes | No |
+| Income totals in reservations | Yes | No |
+| Extended default time range (120 h) | Yes | No |
+
+- **Security**: secret relay tokens are only embedded in the HTML when `?owner` is present — plain visitors and `?manager` users never see them.
 
 Buttons turn red when the corresponding relay/flag is active. Clicking any button redirects back to `/?owner`.
 

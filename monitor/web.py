@@ -29,6 +29,7 @@ from monitor.config import (
     SECRET_PURGE_TOKEN, MANAGEMENT_FEE_PERCENT,
     AMBIENT_WEATHER_DASHBOARD_URL,
     CAMERA_USER, CAMERA_PASS,
+    RING_TOKEN_FILE, RING_CAMERA_NAME,
     DASHBOARD_URL,
     PRESSURE_LOW_WATCH_FILE,
     OVERRIDE_MANUAL_OFF_FILE,
@@ -51,6 +52,7 @@ from monitor.occupancy import (
     load_reservations, format_date_short, get_next_reservation, get_checkin_datetime
 )
 from monitor.gph_calculator import get_cached_gph, format_gph_for_display
+from monitor import ring_camera
 
 # Matplotlib imports for chart generation
 import matplotlib
@@ -71,6 +73,7 @@ app.register_blueprint(timelapse_bp)
 USERNAME = os.environ.get('PUMPHOUSE_USER', 'admin')
 PASSWORD = os.environ.get('PUMPHOUSE_PASS', 'pumphouse')
 STARTUP_TIME = datetime.now()  # Track when web server started
+
 
 # Tokens derived from bypass_on secret — no secrets.conf changes needed
 SECRET_BYPASS_TIMED_TOKEN        = (SECRET_BYPASS_ON_TOKEN + '-4h')           if SECRET_BYPASS_ON_TOKEN else ''
@@ -1721,8 +1724,10 @@ def water2_status():
 # @requires_auth
 def index():
     """Main status page"""
-    # ?owner mode: unlocks control buttons and sets sensible owner defaults
-    owner_mode = 'owner' in request.args
+    # ?owner / ?manager mode: unlocks control buttons and shows Ring snapshot
+    owner_mode   = 'owner'   in request.args
+    manager_mode = 'manager' in request.args
+    show_ring    = owner_mode or manager_mode
 
     # Get hours parameter for filtering events by time; days=n is an alias
     hours = request.args.get('hours', type=int)
@@ -2013,6 +2018,7 @@ def index():
                          snapshot_url=DASHBOARD_URL.rstrip('/') + '/snapshot' if DASHBOARD_URL else None,
                          pressure_low_watch=PRESSURE_LOW_WATCH_FILE.exists(),
                          owner_mode=owner_mode,
+                         show_ring=show_ring,
                          token_override_on=SECRET_OVERRIDE_ON_TOKEN,
                          token_override_off=SECRET_OVERRIDE_OFF_TOKEN,
                          token_bypass_on=SECRET_BYPASS_ON_TOKEN,
@@ -2089,6 +2095,19 @@ def sunset():
     return Response(f'Camera unavailable: {last_err}', status=503)
 
 
+@app.route('/ring-snapshot')
+def ring_snapshot():
+    """
+    Proxy a Ring camera snapshot with a 60-second cache.
+    Requires ~/.config/pumphouse/ring_token.json (created by bin/ring_setup.py).
+    Returns X-Ring-Time header (Unix epoch) indicating when the snapshot was fetched.
+    """
+    img_bytes = ring_camera.get_snapshot(RING_TOKEN_FILE, RING_CAMERA_NAME)
+    if not img_bytes:
+        return Response('Ring snapshot unavailable', status=503)
+    epoch = ring_camera.get_fetched_epoch()
+    headers = {'X-Ring-Time': str(int(epoch))} if epoch else {}
+    return Response(img_bytes, status=200, mimetype='image/jpeg', headers=headers)
 
 
 @app.route('/ping')

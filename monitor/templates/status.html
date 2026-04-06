@@ -208,11 +208,19 @@
             color: #000;
             font-weight: bold;
         }
+        /* Image row — mobile: stack vertically, sunset hidden */
+        #epaper-img  { width: 100%; max-width: 500px; height: auto; border-radius: 3px; display: block; }
+        #sunset-snap { border-radius: 3px; display: none; }
+        #ring-link   { width: 100%; display: block; flex-shrink: 0; }
+        #ring-snap   { width: 100%; height: auto; border-radius: 3px; display: block; }
+        /* Desktop (≥800 px): all three images share a computed height so they fill the row */
         @media (min-width: 800px) {
-            #sunset-snap {
+            #epaper-link, #ring-link { width: auto !important; max-width: none !important; }
+            #epaper-img, #sunset-snap, #ring-snap {
                 display: block !important;
-                height: var(--epaper-h, 200px);
+                height: var(--row-h, 220px);
                 width: auto;
+                max-width: none;
             }
         }
         /* Availability Calendar */
@@ -296,22 +304,29 @@
             }, 30000);
         </script>
 
-        <!-- E-paper display + most recent sunset snapshot -->
+        <!-- E-paper display + sunset snapshot + Ring camera -->
         <div class="section" style="padding: 12px;">
             {% if tank_data.status != 'success' or tank_data.depth is none %}
             <div class="error" style="margin-bottom: 10px;">
                 ❌ Error: {{ tank_data.get('error_message', 'Could not fetch tank data') }}
             </div>
             {% endif %}
-            <div style="display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap;">
-                <a href="https://onblackberryhill2.tplinkdns.com:6443/?hours=120&totals=income" style="flex-shrink:0; width:100%; max-width:500px; display:block;">
-                <img id="epaper-img" src="/api/epaper.jpg?tenant=no&hours={{ hours }}&_t={{ epaper_cache_bust }}" alt="E-paper display"
-                     style="width:100%; border-radius:3px; display:block;"></a>
-                <a href="/timelapse?today" style="flex-shrink:0; display:contents;">
-                <img src="/timelapse/latest.jpg" alt="Most recent sunset"
-                     style="display:none; border-radius:3px;"
-                     id="sunset-snap"
-                     onerror="this.parentElement.style.display='none'"></a>
+            <div id="image-row" style="display:flex; align-items:flex-start; gap:12px; flex-wrap:wrap;">
+                <a id="epaper-link" href="https://onblackberryhill2.tplinkdns.com:6443/?hours=120&totals=income"
+                   style="flex-shrink:0; display:block; width:100%; max-width:500px;">
+                    <img id="epaper-img" src="/api/epaper.jpg?tenant=no&hours={{ hours }}&_t={{ epaper_cache_bust }}"
+                         alt="E-paper display">
+                </a>
+                <a id="sunset-link" href="/timelapse?today" style="flex-shrink:0; display:block;">
+                    <img id="sunset-snap" src="/timelapse/latest.jpg" alt="Most recent sunset"
+                         onerror="document.getElementById('sunset-link').style.display='none'">
+                </a>
+                {% if show_ring %}
+                <a id="ring-link" href="/ring-snapshot" target="_blank" style="flex-shrink:0; display:block;">
+                    <img id="ring-snap" src="/ring-snapshot" alt="Ring camera"
+                         onerror="document.getElementById('ring-link').style.display='none'">
+                </a>
+                {% endif %}
             </div>
         </div>
 
@@ -990,21 +1005,63 @@
         {% endif %}
 
     <script>
-        // Match sunset snapshot height to epaper image height on desktop
         document.addEventListener('DOMContentLoaded', function() {
-            const sunset = document.getElementById('sunset-snap');
-            const epaper = document.getElementById('epaper-img');
-            if (!sunset || !epaper) return;
-            const row = sunset.parentElement;
-            function syncHeight() {
-                if (window.innerWidth >= 800 && epaper.complete && epaper.naturalHeight) {
-                    const h = epaper.getBoundingClientRect().height;
-                    row.style.setProperty('--epaper-h', h + 'px');
+            var row   = document.getElementById('image-row');
+            // Build spec list; filter out elements absent from DOM (e.g. ring when !show_ring)
+            var specs = [
+                { img: document.getElementById('epaper-img'),  link: document.getElementById('epaper-link')  },
+                { img: document.getElementById('sunset-snap'), link: document.getElementById('sunset-link') },
+                { img: document.getElementById('ring-snap'),   link: document.getElementById('ring-link')   },
+            ].filter(function(s) { return s.img && s.link; });
+            if (!row || !specs.length) return;
+
+            // --- Row height (desktop only) ---
+            // Wait until ALL images have settled (loaded or errored) before computing,
+            // so a single fast-loading image never stretches to fill the whole row alone.
+            function computeRowHeight() {
+                if (window.innerWidth < 800) return;
+                var visible = specs.filter(function(s) {
+                    return s.link.style.display !== 'none' &&
+                           s.img.naturalWidth > 0 && s.img.naturalHeight > 0;
+                });
+                if (!visible.length) return;
+                var GAP       = 12;
+                var available = row.getBoundingClientRect().width - GAP * (visible.length - 1);
+                var totalAR   = visible.reduce(function(sum, s) {
+                    return sum + s.img.naturalWidth / s.img.naturalHeight;
+                }, 0);
+                var h = Math.floor(available / totalAR);
+                row.style.setProperty('--row-h', Math.max(h, 80) + 'px');
+            }
+
+            var settled = 0;
+            function onSettled() {
+                settled++;
+                if (settled === specs.length) {
+                    requestAnimationFrame(computeRowHeight);
                 }
             }
-            epaper.addEventListener('load', syncHeight);
-            window.addEventListener('resize', syncHeight);
-            syncHeight();
+
+            specs.forEach(function(s) {
+                if (s.img.complete) {
+                    // Already loaded (browser cache) — defer so layout is ready
+                    setTimeout(onSettled, 0);
+                } else {
+                    s.img.addEventListener('load',  onSettled);
+                    s.img.addEventListener('error', onSettled);
+                }
+            });
+            window.addEventListener('resize', computeRowHeight);
+
+            // --- Ring link: open Ring app on mobile ---
+            var ringLink = document.getElementById('ring-link');
+            if (ringLink && window.innerWidth < 800) {
+                ringLink.href   = 'https://ring.com';
+                ringLink.target = '_blank';
+            }
+
+            // --- Auto-refresh every 60 minutes ---
+            setTimeout(function() { location.reload(); }, 60 * 60 * 1000);
         });
     </script>
 </body>
