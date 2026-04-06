@@ -147,11 +147,14 @@ After scoring, frames are selected greedily: pick the highest scorer, then find 
 
 `sunset_timelapse.py` calls `monitor.pick_best.pick_best_snapshot()` immediately after MP4 assembly, before the frame temp directory is deleted. This replaces the previous fixed-offset selection (25 minutes before sunset).
 
-`pick_best_snapshot()`:
-1. Applies the night-mode cutoff to all capture frames.
-2. Tries CLIP first; falls back to OpenCV if CLIP is unavailable.
-3. Returns the single highest-scoring frame path (no diversity filter — snapshot is one image).
-4. On any exception, `sunset_timelapse.py` logs a warning and falls back to the fixed offset.
+The raw capture frames already exist on disk at this point (they are the source material for the MP4), so there is no need to re-extract from the finished video. However, at a 5-second capture interval over a 2-hour window there are ~1,440 frames — far too many for CLIP (~30 minutes). `pick_best_snapshot()` takes a `max_frames=100` parameter and **uniformly subsamples** the frame list before scoring. A step of `n / 100` gives even coverage across the full sunset arc, so no phase of the sunset is over- or under-represented.
+
+`pick_best_snapshot()` flow:
+1. Uniformly subsample to at most 100 frames.
+2. Apply the night-mode IR cutoff (drop frames below 20% of peak saturation).
+3. Try CLIP first; falls back to OpenCV if CLIP is unavailable.
+4. Return the single highest-scoring frame path (no diversity filter — snapshot is one image).
+5. On any exception, `sunset_timelapse.py` logs a warning and falls back to the fixed offset.
 
 The snapshot is still overrideable via **Set key snapshot** on any best-frame viewer page or the video snapshot button.
 

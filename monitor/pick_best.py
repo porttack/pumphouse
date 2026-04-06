@@ -316,11 +316,18 @@ def reset_best(date_str: str) -> None:
         jpg.unlink(missing_ok=True)
 
 
-def pick_best_snapshot(frame_paths: list[Path]) -> Path | None:
+def pick_best_snapshot(frame_paths: list[Path],
+                       max_frames: int = 100) -> Path | None:
     """
     Given a list of timelapse frame paths (in capture order), return the single
     frame that makes the best snapshot using CLIP, falling back to OpenCV if
     CLIP is unavailable.
+
+    The raw capture frames arrive at ~5-second intervals over a 2-hour window
+    (~1,440 frames total).  Running CLIP on all of them would take ~30 minutes,
+    so we subsample uniformly to at most max_frames before scoring.  Uniform
+    subsampling preserves coverage across the full sunset arc; no re-extraction
+    from the MP4 is needed.
 
     Applies the night-mode IR cutoff before scoring.  Returns None if the list
     is empty or all frames are dropped by the cutoff.
@@ -331,16 +338,21 @@ def pick_best_snapshot(frame_paths: list[Path]) -> Path | None:
     if not frame_paths:
         return None
 
-    # --- Night-mode cutoff (same logic as _run_job) ---
-    bgrs = []
-    for fp in frame_paths:
-        bgr = cv2.imread(str(fp))
-        bgrs.append(bgr)
+    # Uniform subsample: keep every Nth frame so we score at most max_frames.
+    n = len(frame_paths)
+    if n > max_frames:
+        step      = n / max_frames          # float step for even coverage
+        indices   = [int(i * step) for i in range(max_frames)]
+        sampled   = [frame_paths[i] for i in indices]
+    else:
+        sampled = list(frame_paths)
 
+    # --- Read images and apply night-mode IR cutoff ---
+    bgrs       = [cv2.imread(str(fp)) for fp in sampled]
     sat_values = [_mean_saturation(b) if b is not None else 0.0 for b in bgrs]
     peak_sat   = max(sat_values) if sat_values else 0.0
     cutoff     = peak_sat * 0.20
-    kept       = [(fp, bgr) for fp, bgr, sat in zip(frame_paths, bgrs, sat_values)
+    kept       = [(fp, bgr) for fp, bgr, sat in zip(sampled, bgrs, sat_values)
                   if sat >= cutoff and bgr is not None]
     if not kept:
         return None
