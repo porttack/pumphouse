@@ -173,6 +173,8 @@ class SimplifiedMonitor:
         # Pressure tracking
         self.last_pressure_state = None
         self.pressure_high_start = None
+        self.last_pressure_high_end_time = None  # when pressure last dropped LOW (for gap detection)
+        self._init_last_pressure_high_end_time()
         
         # Timing
         self.last_tank_check = 0
@@ -233,6 +235,21 @@ class SimplifiedMonitor:
                             d = datetime.fromisoformat(row['timestamp']).date()
                             if self.last_purge_date is None or d > self.last_purge_date:
                                 self.last_purge_date = d
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+    def _init_last_pressure_high_end_time(self):
+        """Seed last_pressure_high_end_time from the most recent PRESSURE_LOW event in events.csv."""
+        try:
+            with open(self.events_file, 'r') as f:
+                for row in csv.DictReader(f):
+                    if row.get('event_type') == 'PRESSURE_LOW':
+                        try:
+                            ts = datetime.fromisoformat(row['timestamp']).timestamp()
+                            if self.last_pressure_high_end_time is None or ts > self.last_pressure_high_end_time:
+                                self.last_pressure_high_end_time = ts
                         except Exception:
                             pass
         except Exception:
@@ -559,6 +576,28 @@ class SimplifiedMonitor:
                                     monitor.last_purge_date = datetime.now().date()
                             threading.Thread(target=_delayed_purge, daemon=True, name='purge-timed').start()
 
+                        # Pressure recovery alert: watch is ON + gap since last HIGH > 4 hours
+                        _RECOVERY_GAP = 4 * 3600
+                        if PRESSURE_LOW_WATCH_FILE.exists():
+                            _gap = (current_time - self.last_pressure_high_end_time
+                                    if self.last_pressure_high_end_time else None)
+                            if _gap is None or _gap >= _RECOVERY_GAP:
+                                _gap_str = (
+                                    f"{_gap / 3600:.1f}h" if _gap and _gap >= 3600
+                                    else (f"{_gap / 60:.0f}m" if _gap else "unknown")
+                                )
+                                current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
+                                self.log_state_event('PRESSURE_RECOVERY', f'Gap: {_gap_str}')
+                                send_notification(
+                                    title=f"{current_gal:.0f} gal - Pressure HIGH (after {_gap_str} gap)",
+                                    message=f"Pressure is HIGH again after a {_gap_str} low-pressure gap — well may have recovered.",
+                                    priority='high',
+                                    tags=['droplet', 'white_check_mark'],
+                                    click_url=DASHBOARD_URL,
+                                    attach_url=f"{DASHBOARD_URL}api/epaper.jpg?tenant=no",
+                                    debug=self.debug
+                                )
+
                         # Send high pressure alert if enabled
                         if NOTIFY_HIGH_PRESSURE_ENABLED and self.notification_manager.can_notify('high_pressure'):
                             current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
@@ -633,7 +672,8 @@ class SimplifiedMonitor:
                                     print(f"  → Skipping purge (min interval not met, wait {mins_to_wait} more min)")
 
                         self.pressure_high_start = None
-                    
+                        self.last_pressure_high_end_time = current_time
+
                     self.last_pressure_state = current_pressure
                 
                 # TANK POLLING
