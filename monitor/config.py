@@ -61,8 +61,8 @@ DASHBOARD_DEFAULT_HOURS = 72  # Default time range for web dashboard (hours)
 # Email Notification Configuration
 # See EMAIL_SETUP.md and secrets.conf.template for detailed configuration instructions
 ENABLE_EMAIL_NOTIFICATIONS = True  # Enable email alerts
-EMAIL_TO = "onblackberryhill+alert@gmail.com"  # Recipient email address
-EMAIL_FROM = "onblackberryhill.alert@gmail.com"  # Sender email address
+EMAIL_TO = ""   # Recipient email address - loaded from secrets file
+EMAIL_FROM = ""  # Sender email address - loaded from secrets file
 EMAIL_FRIENDLY_NAME = "Pumphouse"  # Friendly name shown in email headers and footers
 EMAIL_SMTP_SERVER = ""  # SMTP server - loaded from secrets file
 EMAIL_SMTP_PORT = 587  # SMTP port - can be overridden in secrets file
@@ -255,7 +255,11 @@ if SECRETS_FILE.exists():
                     value = value.strip()
 
                         # Load secrets into module-level variables
-                    if key == 'EMAIL_SMTP_SERVER' and not EMAIL_SMTP_SERVER:
+                    if key == 'EMAIL_TO' and not EMAIL_TO:
+                        EMAIL_TO = value
+                    elif key == 'EMAIL_FROM' and not EMAIL_FROM:
+                        EMAIL_FROM = value
+                    elif key == 'EMAIL_SMTP_SERVER' and not EMAIL_SMTP_SERVER:
                         EMAIL_SMTP_SERVER = value
                     elif key == 'EMAIL_SMTP_PORT':
                         EMAIL_SMTP_PORT = int(value)
