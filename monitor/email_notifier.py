@@ -52,7 +52,7 @@ from monitor.config import (
 )
 
 
-def send_email_notification(subject, message, priority='default', dashboard_url=None, chart_url=None, debug=False, include_status=True, inline_image_path=None, inline_image_link=None):
+def send_email_notification(subject, message, priority='default', dashboard_url=None, chart_url=None, debug=False, include_status=True, inline_image_path=None, inline_image_link=None, include_ring_snapshot=True):
     """
     Send HTML email notification with embedded chart and system status
 
@@ -110,8 +110,18 @@ def send_email_notification(subject, message, priority='default', dashboard_url=
         if include_status:
             status_data = fetch_system_status(debug=debug)
 
+        # Fetch Ring snapshot if requested
+        ring_bytes = None
+        if include_ring_snapshot:
+            try:
+                from monitor import ring_camera
+                from monitor.config import RING_TOKEN_FILE, RING_CAMERA_NAME
+                ring_bytes = ring_camera.get_snapshot(RING_TOKEN_FILE, RING_CAMERA_NAME)
+            except Exception:
+                pass  # Ring unavailable; omit silently
+
         # Build HTML body
-        html_body = build_html_email(subject, message, priority, dashboard_url, chart_url, status_data, inline_image_link=inline_image_link)
+        html_body = build_html_email(subject, message, priority, dashboard_url, chart_url, status_data, inline_image_link=inline_image_link, ring_snapshot=ring_bytes is not None)
 
         # Attach HTML
         html_part = MIMEText(html_body, 'html')
@@ -133,6 +143,19 @@ def send_email_notification(subject, message, priority='default', dashboard_url=
             except Exception as e:
                 if debug:
                     print(f"Warning: Could not attach inline image: {e}", file=sys.stderr)
+
+        # Embed Ring snapshot if fetched
+        if ring_bytes:
+            try:
+                ring_part = MIMEImage(ring_bytes, _subtype='jpeg')
+                ring_part.add_header('Content-ID', '<ring_image>')
+                ring_part.add_header('Content-Disposition', 'inline', filename='ring.jpg')
+                msg.attach(ring_part)
+                if debug:
+                    print(f"Ring snapshot attached ({len(ring_bytes):,} bytes)")
+            except Exception as e:
+                if debug:
+                    print(f"Warning: Could not attach Ring snapshot: {e}", file=sys.stderr)
 
         # Fetch and embed chart image if provided
         if chart_url:
@@ -197,20 +220,27 @@ def get_snapshots_stats(filepath=DEFAULT_SNAPSHOTS_FILE):
             return None
 
         now = datetime.now()
-        one_hour_ago = now.timestamp() - 3600
+        one_hour_ago         = now.timestamp() - 3600
+        two_hours_ago        = now.timestamp() - 7200
+        twelve_hours_ago     = now.timestamp() - 43200
         twenty_four_hours_ago = now.timestamp() - 86400
 
         stats = {
             'tank_change_1hr': None,
             'tank_change_24hr': None,
             'pressure_high_pct_1hr': None,
+            'pressure_high_pct_2hr': None,
+            'pressure_high_pct_12hr': None,
+            'pressure_high_pct_24hr': None,
             'pressure_high_min_24hr': None,
             'last_refill_50_days': None,
             'last_refill_50_timestamp': None
         }
 
         # Parse timestamps and filter rows
-        rows_1hr = []
+        rows_1hr  = []
+        rows_2hr  = []
+        rows_12hr = []
         rows_24hr = []
 
         for row in rows:
@@ -218,6 +248,10 @@ def get_snapshots_stats(filepath=DEFAULT_SNAPSHOTS_FILE):
                 ts = datetime.fromisoformat(row['timestamp']).timestamp()
                 if ts >= one_hour_ago:
                     rows_1hr.append(row)
+                if ts >= two_hours_ago:
+                    rows_2hr.append(row)
+                if ts >= twelve_hours_ago:
+                    rows_12hr.append(row)
                 if ts >= twenty_four_hours_ago:
                     rows_24hr.append(row)
             except:
@@ -240,29 +274,26 @@ def get_snapshots_stats(filepath=DEFAULT_SNAPSHOTS_FILE):
             except:
                 pass
 
-        # Calculate pressure HIGH percentages/minutes
-        if len(rows_1hr) > 0:
-            try:
-                total_seconds = 0
-                high_seconds = 0
-                for row in rows_1hr:
-                    duration = float(row['duration_seconds'])
-                    high = float(row['pressure_high_seconds'])
-                    total_seconds += duration
-                    high_seconds += high
-                if total_seconds > 0:
-                    stats['pressure_high_pct_1hr'] = (high_seconds / total_seconds) * 100
-            except:
-                pass
+        # Calculate pressure HIGH percentages for each window
+        def _pressure_pct(bucket):
+            total, high = 0.0, 0.0
+            for row in bucket:
+                try:
+                    total += float(row['duration_seconds'])
+                    high  += float(row['pressure_high_seconds'])
+                except Exception:
+                    pass
+            return (high / total * 100) if total > 0 else None
 
-        if len(rows_24hr) > 0:
+        stats['pressure_high_pct_1hr']  = _pressure_pct(rows_1hr)
+        stats['pressure_high_pct_2hr']  = _pressure_pct(rows_2hr)
+        stats['pressure_high_pct_12hr'] = _pressure_pct(rows_12hr)
+        stats['pressure_high_pct_24hr'] = _pressure_pct(rows_24hr)
+
+        if rows_24hr:
             try:
-                total_high_seconds = 0
-                for row in rows_24hr:
-                    high = float(row['pressure_high_seconds'])
-                    total_high_seconds += high
-                stats['pressure_high_min_24hr'] = total_high_seconds / 60
-            except:
+                stats['pressure_high_min_24hr'] = sum(float(r['pressure_high_seconds']) for r in rows_24hr) / 60
+            except Exception:
                 pass
 
         # Find last time tank increased by 50+ gallons
@@ -490,6 +521,80 @@ def fetch_system_status(debug=False):
             if debug:
                 print(f"Warning: Could not get outdoor weather: {e}", file=sys.stderr)
 
+        # Predict next pump cycle from recent PRESSURE_HIGH events
+        from datetime import timedelta
+        import csv as _csv
+        next_pump_cycle = None
+        try:
+            _high_times = []
+            with open(EVENTS_FILE) as _f:
+                for _row in _csv.DictReader(_f):
+                    if _row.get('event_type') == 'PRESSURE_HIGH':
+                        try:
+                            _high_times.append(datetime.fromisoformat(_row['timestamp']))
+                        except Exception:
+                            pass
+            if len(_high_times) >= 4:
+                _intervals = [(_high_times[i+1] - _high_times[i]).total_seconds()
+                              for i in range(len(_high_times) - 1)]
+                _median = sorted(_intervals)[len(_intervals) // 2]
+                _typical = [iv for iv in _intervals if abs(iv - _median) < 120]
+                if _typical:
+                    _avg = sum(_typical) / len(_typical)
+                    _predicted = _high_times[-1] + timedelta(seconds=_avg)
+                    if _predicted > datetime.now():
+                        next_pump_cycle = _predicted
+        except Exception:
+            pass
+
+        # Predict next backflush from historical NOTIFY_BACKFLUSH events
+        next_backflush = None
+        try:
+            from monitor.config import NOTIFY_BACKFLUSH_TIME_START, NOTIFY_BACKFLUSH_TIME_END
+            _bf_start = sum(int(x) * m for x, m in zip(NOTIFY_BACKFLUSH_TIME_START.split(':'), (60, 1)))
+            _bf_end   = sum(int(x) * m for x, m in zip(NOTIFY_BACKFLUSH_TIME_END.split(':'),   (60, 1)))
+            _bf_dates = []
+            with open(EVENTS_FILE) as _f:
+                for _row in _csv.DictReader(_f):
+                    if _row.get('event_type') == 'NOTIFY_BACKFLUSH':
+                        try:
+                            _ts = datetime.fromisoformat(_row['timestamp'])
+                            _t  = _ts.hour * 60 + _ts.minute
+                            if _bf_start <= _t <= _bf_end:
+                                _d = _ts.date()
+                                if not _bf_dates or (_d - _bf_dates[-1]).days > 3:
+                                    _bf_dates.append(_d)
+                        except Exception:
+                            pass
+            if len(_bf_dates) >= 2:
+                _intervals = [(_bf_dates[i+1] - _bf_dates[i]).days for i in range(len(_bf_dates) - 1)]
+                _median_interval = sorted(_intervals)[len(_intervals) // 2]
+                from datetime import date as _date, datetime as _dt
+                next_backflush = _dt.combine(_bf_dates[-1], _dt.min.time()) + timedelta(days=_median_interval)
+        except Exception:
+            pass
+
+        # Estimate time to reach full tank based on 24h fill rate
+        time_to_full = None
+        try:
+            _current_gal = tank_data.get('gallons') if tank_data and tank_data.get('status') == 'success' else None
+            if _current_gal is not None and _current_gal < TANK_CAPACITY_GALLONS:
+                if stats and stats.get('tank_change_24hr') is not None and stats['tank_change_24hr'] > 0:
+                    _rate_gph = stats['tank_change_24hr'] / 24.0
+                    _hrs = (TANK_CAPACITY_GALLONS - _current_gal) / _rate_gph
+                    if 0 < _hrs < 168:
+                        time_to_full = datetime.now() + timedelta(hours=_hrs)
+        except Exception:
+            pass
+
+        # Wind forecast
+        wind_forecast = None
+        try:
+            from monitor.weather_api import get_wind_forecast
+            wind_forecast = get_wind_forecast()
+        except Exception:
+            pass
+
         return {
             'tank': tank_data,
             'pressure': pressure,
@@ -501,7 +606,11 @@ def fetch_system_status(debug=False):
             'reservations': reservation_list,
             'ecobee_temp': ecobee_temp,
             'gph_metrics': gph_metrics,
-            'outdoor_weather': outdoor_weather
+            'outdoor_weather': outdoor_weather,
+            'next_pump_cycle': next_pump_cycle,
+            'next_backflush': next_backflush,
+            'time_to_full': time_to_full,
+            'wind_forecast': wind_forecast,
         }
     except Exception as e:
         if debug:
@@ -524,7 +633,67 @@ def format_pressure_state(state):
         return "LOW (<10 PSI)"
 
 
-def build_html_email(subject, message, priority, dashboard_url, chart_url, status_data=None, inline_image_link=None):
+def _get_daily_summary(n=14):
+    """
+    Return (display_headers, formatted_rows) for the last n days of daily.csv,
+    newest-first, using a curated subset of columns suitable for email.
+    """
+    import csv as _csv
+    from monitor.config import DAILY_CSV
+
+    if not DAILY_CSV.exists():
+        return [], []
+    try:
+        with open(DAILY_CSV) as f:
+            rows = list(_csv.DictReader(f))
+        if not rows:
+            return [], []
+
+        rows = rows[-n:][::-1]  # last n days, newest first
+
+        has_income  = any(r.get('checkout_net_income')  for r in rows)
+        has_weather = any(r.get('outdoor_temp_max')      for r in rows)
+
+        def _fmt_date(v):
+            try:
+                return datetime.strptime(v, '%Y-%m-%d').strftime('%a %-d')
+            except Exception:
+                return v
+
+        cols = [
+            ('date',                      'Date',   _fmt_date),
+            ('occupied_pct',              'Occ%',   lambda v: f"{float(v):.0f}" if v else ''),
+            ('gallons_end',               'Gal',    lambda v: f"{float(v):.0f}" if v else ''),
+            ('gallons_net_change',         'Δ Gal', lambda v: f"{float(v):+.0f}" if v else ''),
+            ('tank_rolling_gph_avg',      'GPH',    lambda v: f"{float(v):.1f}" if v else ''),
+            ('pressure_high_pct_overall', 'P-Hi%',  lambda v: f"{float(v):.1f}" if v else ''),
+        ]
+        if has_income:
+            cols.append(('checkout_net_income', 'Income',
+                         lambda v: f"${float(v):.0f}" if v else ''))
+        if has_weather:
+            cols.append(('outdoor_temp_min', 'Lo°F',
+                         lambda v: f"{float(v):.0f}" if v else ''))
+            cols.append(('outdoor_temp_max', 'Hi°F',
+                         lambda v: f"{float(v):.0f}" if v else ''))
+
+        headers = [c[1] for c in cols]
+        formatted_rows = []
+        for row in rows:
+            cells = []
+            for key, _, fmt in cols:
+                try:
+                    cells.append(fmt(row.get(key, '')))
+                except Exception:
+                    cells.append('')
+            formatted_rows.append(cells)
+
+        return headers, formatted_rows
+    except Exception:
+        return [], []
+
+
+def build_html_email(subject, message, priority, dashboard_url, chart_url, status_data=None, inline_image_link=None, ring_snapshot=False):
     """Build HTML email body with styling similar to status.html and full system status"""
 
     # Determine priority color
@@ -803,6 +972,13 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
             </div>
 """
 
+    if ring_snapshot:
+        html += """
+            <div style="margin: 10px 0 15px; text-align: center;">
+                <img src="cid:ring_image" alt="Ring Camera" style="max-width: 100%; height: auto; border: 1px solid #444; border-radius: 4px;">
+            </div>
+"""
+
     # Add relay warnings if any are ON
     if relay_status:
         warnings = []
@@ -842,11 +1018,32 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
 
     # Add sensor status if available
     if pressure is not None or float_state is not None:
+        now_dt = datetime.now()
         html += """
             <div class="section">
                 <h2>SENSORS</h2>
                 <div class="status-grid">
 """
+        # Tank Data (age + deltas)
+        if stats and (stats.get('tank_change_1hr') is not None or stats.get('tank_change_24hr') is not None):
+            last_updated = tank_data.get('last_updated') if tank_data else None
+            age_note = ''
+            if last_updated:
+                if isinstance(last_updated, str):
+                    last_updated = datetime.fromisoformat(last_updated)
+                age_min = int((now_dt - last_updated).total_seconds() / 60)
+                age_note = f' <span style="color:#888;font-size:11px;">({age_min} min ago)</span>'
+            c1  = stats.get('tank_change_1hr')
+            c24 = stats.get('tank_change_24hr')
+            c1_s  = (f'<span style="color:{"#4CAF50" if c1  >= 0 else "#f44336"};font-weight:bold;">{c1:+.0f}</span>' if c1  is not None else '—')
+            c24_s = (f'<span style="color:{"#4CAF50" if c24 >= 0 else "#f44336"};font-weight:bold;">{c24:+.0f}</span>' if c24 is not None else '—')
+            html += f"""
+                    <div class="status-item">
+                        <div class="status-label">Tank Data{age_note}</div>
+                        <div style="font-size:13px;margin-top:4px;">1h: {c1_s} gal &nbsp; 24h: {c24_s} gal</div>
+                    </div>
+"""
+        # Depth
         if tank_data and tank_data.get('status') == 'success' and tank_data.get('depth') is not None:
             depth = tank_data['depth']
             percentage = tank_data['percentage']
@@ -856,6 +1053,7 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
                         <div class="status-value">{depth:.2f}" / {TANK_HEIGHT_INCHES}" ({percentage:.1f}%)</div>
                     </div>
 """
+        # Float switch
         if float_state is not None:
             from monitor.gpio_helpers import FLOAT_STATE_FULL
             float_color = '#4CAF50' if float_state == FLOAT_STATE_FULL else '#ff9800'
@@ -865,6 +1063,7 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
                         <div class="status-value">{format_float_state(float_state)}</div>
                     </div>
 """
+        # Pressure
         if pressure is not None:
             pressure_color = '#4CAF50' if pressure else '#ff9800'
             html += f"""
@@ -873,38 +1072,96 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
                         <div class="status-value">{format_pressure_state(pressure)}</div>
                     </div>
 """
-        if stats and stats.get('pressure_high_pct_1hr') is not None:
+        # Pressure HIGH — 2h/12h/24h table (matches dashboard)
+        if stats and stats.get('pressure_high_pct_24hr') is not None:
+            p2h  = f"{stats['pressure_high_pct_2hr']:.1f}%"  if stats.get('pressure_high_pct_2hr')  is not None else '—'
+            p12h = f"{stats['pressure_high_pct_12hr']:.1f}%" if stats.get('pressure_high_pct_12hr') is not None else '—'
+            p24h = f"{stats['pressure_high_pct_24hr']:.1f}%"
             html += f"""
                     <div class="status-item">
-                        <div class="status-label">Pressure HIGH (1 hour)</div>
-                        <div class="status-value">{stats['pressure_high_pct_1hr']:.1f}%</div>
+                        <div class="status-label">Pressure HIGH</div>
+                        <table style="border-collapse:collapse;margin-top:6px;font-size:13px;width:100%;table-layout:fixed;">
+                            <tr style="color:#888;"><td style="text-align:center;padding:2px 0;">2h</td><td style="text-align:center;padding:2px 0;">12h</td><td style="text-align:center;padding:2px 0;">24h</td></tr>
+                            <tr style="font-weight:bold;color:#e0e0e0;font-size:15px;">
+                                <td style="text-align:center;padding:2px 0;">{p2h}</td><td style="text-align:center;padding:2px 0;">{p12h}</td><td style="text-align:center;padding:2px 0;">{p24h}</td>
+                            </tr>
+                        </table>
                     </div>
 """
-        if stats and stats.get('pressure_high_min_24hr') is not None:
+        # Next pump cycle
+        next_pump_cycle = status_data.get('next_pump_cycle') if status_data else None
+        if next_pump_cycle:
+            mins_away = int((next_pump_cycle - now_dt).total_seconds() / 60)
             html += f"""
                     <div class="status-item">
-                        <div class="status-label">Pressure HIGH (24 hours)</div>
-                        <div class="status-value">{stats['pressure_high_min_24hr']:.0f} min</div>
+                        <div class="status-label">Next Pump Cycle</div>
+                        <div class="status-value">{next_pump_cycle.strftime('%-I:%M %p')} <span style="color:#888;font-size:12px;">(in {mins_away} min)</span></div>
                     </div>
 """
-        # Add GPH metrics if available
-        gph_metrics = status_data.get('gph_metrics')
+        # Next backflush
+        next_backflush = status_data.get('next_backflush') if status_data else None
+        if next_backflush:
+            bf_days = (next_backflush - now_dt).total_seconds() / 86400
+            if bf_days < -1:
+                bf_note = f'<span style="color:#f44336;font-size:12px;">({int(-bf_days)}d overdue)</span>'
+            elif bf_days < 0:
+                bf_note = '<span style="color:#ff9800;font-size:12px;">(today)</span>'
+            else:
+                bf_note = f'<span style="color:#888;font-size:12px;">(in {int(bf_days)}d)</span>'
+            html += f"""
+                    <div class="status-item">
+                        <div class="status-label">Next Backflush</div>
+                        <div class="status-value">{next_backflush.strftime('%a %b %-d')} {bf_note}</div>
+                    </div>
+"""
+        # Well GPH
+        gph_metrics = status_data.get('gph_metrics') if status_data else None
         if gph_metrics and (gph_metrics.get('slow_fill_gph') or gph_metrics.get('fast_fill_gph')):
             gph_parts = []
-            if gph_metrics.get('slow_fill_gph'):
-                gph_parts.append(f"Slow: {gph_metrics['slow_fill_gph']:.0f} GPH")
-            else:
-                gph_parts.append("Slow: N/A")
-            if gph_metrics.get('fast_fill_gph'):
-                gph_parts.append(f"Fast: {gph_metrics['fast_fill_gph']:.0f} GPH")
-            else:
-                gph_parts.append("Fast: N/A")
+            gph_parts.append(f"Slow: {gph_metrics['slow_fill_gph']:.0f} GPH" if gph_metrics.get('slow_fill_gph') else "Slow: N/A")
+            gph_parts.append(f"Fast: {gph_metrics['fast_fill_gph']:.0f} GPH" if gph_metrics.get('fast_fill_gph') else "Fast: N/A")
             html += f"""
                     <div class="status-item">
                         <div class="status-label">Well GPH (3-week avg)</div>
                         <div class="status-value" style="font-size: 12px;">{' • '.join(gph_parts)}</div>
                     </div>
 """
+        # Est. time to full
+        time_to_full = status_data.get('time_to_full') if status_data else None
+        if time_to_full:
+            hrs_left = (time_to_full - now_dt).total_seconds() / 3600
+            eta_str = (f"in {int(hrs_left)}h {int((hrs_left % 1) * 60)}m" if hrs_left >= 1
+                       else f"in {int(hrs_left * 60)}m")
+            html += f"""
+                    <div class="status-item">
+                        <div class="status-label">Est. Time to Full</div>
+                        <div class="status-value">{time_to_full.strftime('%-I:%M %p')}</div>
+                        <div style="margin-top:4px;font-size:12px;color:#888;">{time_to_full.strftime('%a %b %-d')} · {eta_str}</div>
+                        <div style="margin-top:2px;font-size:11px;color:#555;">at 24h fill rate</div>
+                    </div>
+"""
+        # Relays
+        if relay_status:
+            def _relay_color(state):
+                return '#ff9800' if state == 'ON' else ('#4CAF50' if state == 'OFF' else '#888')
+            relay_rows_html = ''.join(
+                f'<tr><td style="color:#888;padding:2px 6px 2px 0;white-space:nowrap;">{lbl}</td>'
+                f'<td style="font-weight:bold;color:{_relay_color(st)};padding:2px 0;">{st}</td></tr>'
+                for lbl, st in [
+                    ('Bypass',  relay_status.get('bypass', '—')),
+                    ('Supply',  relay_status.get('supply_override', '—')),
+                    ('Purge',   relay_status.get('purge', '—')),
+                ]
+            )
+            html += f"""
+                    <div class="status-item">
+                        <div class="status-label">Relays</div>
+                        <table style="border-collapse:collapse;margin-top:6px;font-size:13px;width:100%;">
+                            {relay_rows_html}
+                        </table>
+                    </div>
+"""
+        # Occupancy
         if occupancy_status:
             occupancy_color = '#ff9800' if occupancy_status.get('occupied') else '#4CAF50'
             html += f"""
@@ -921,44 +1178,85 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
             html += """
                     </div>
 """
-        # Add Ecobee temperature if available
+        # House temps (Ecobee)
         if ecobee_temp and ecobee_temp.get('thermostats'):
             cache_time = datetime.fromisoformat(ecobee_temp['timestamp'])
-            age_minutes = (datetime.now() - cache_time).total_seconds() / 60
+            age_minutes = (now_dt - cache_time).total_seconds() / 60
             age_str = f"{int(age_minutes)}m ago" if age_minutes < 60 else f"{age_minutes/60:.1f}h ago"
-
-            # Combine all temps into one box
-            temps = []
-            for name, data in ecobee_temp['thermostats'].items():
-                temp = data.get('temperature')
-                if temp is not None:
-                    temps.append(f"{temp:.0f}°F")
-
+            temps = [f"{d['temperature']:.0f}°F" for d in ecobee_temp['thermostats'].values()
+                     if d.get('temperature') is not None]
             if temps:
-                temps_str = " / ".join(temps)
                 html += f"""
                     <div class="status-item" style="border-left-color: #FF9800;">
                         <div class="status-label">House Temps</div>
-                        <div class="status-value">{temps_str}</div>
-                        <div class="status-label" style="margin-top: 4px; font-size: 10px; color: #666;">
-                            Updated {age_str}
-                        </div>
+                        <div class="status-value">{" / ".join(temps)}</div>
+                        <div class="status-label" style="margin-top: 4px; font-size: 10px; color: #666;">Updated {age_str}</div>
                     </div>
 """
-        # Add outdoor weather if available
+        # Outdoor weather
         outdoor_weather = status_data.get('outdoor_weather') if status_data else None
         if outdoor_weather and outdoor_weather.get('temp') is not None:
-            weather_url = AMBIENT_WEATHER_DASHBOARD_URL
             html += f"""
                     <div class="status-item" style="border-left-color: #2196F3;">
                         <div class="status-label">Outdoor Weather</div>
                         <div class="status-value">{outdoor_weather['temp']:.0f}°F / {outdoor_weather['humidity']:.0f}%</div>
                         <div class="status-label" style="margin-top: 4px; font-size: 10px;">
-                            <a href="{weather_url}" style="color: #2196F3;">View Dashboard ↗</a>
+                            <a href="{AMBIENT_WEATHER_DASHBOARD_URL}" style="color: #2196F3;">View Dashboard ↗</a>
                         </div>
                     </div>
 """
+        # Wind forecast
+        wind_forecast = status_data.get('wind_forecast') if status_data else None
+        if wind_forecast:
+            wind_lines = ''
+            for period, label in [('tonight', 'Tonight'), ('tomorrow', 'Tomorrow')]:
+                w = wind_forecast.get(period)
+                if w:
+                    gust = f', gusts {w["gust_max"]}' if w.get('gust_max', 0) > w.get('speed_max', 0) else ''
+                    wind_lines += f'<div style="font-size:13px;margin-top:4px;">{label}: {w.get("direction","")} {w.get("speed_min","")}–{w.get("speed_max","")} mph{gust}</div>'
+            if wind_lines:
+                html += f"""
+                    <div class="status-item" style="border-left-color: #9C27B0;">
+                        <div class="status-label">Wind Forecast</div>
+                        {wind_lines}
+                    </div>
+"""
         html += """
+                </div>
+            </div>
+"""
+
+    # Daily summary table
+    daily_headers, daily_rows = _get_daily_summary(14)
+    if daily_headers and daily_rows:
+        th_style = ('background:#1a1a1a; color:#888; font-size:11px; font-weight:normal;'
+                    ' padding:6px 8px; text-align:right; white-space:nowrap; border-bottom:1px solid #444;')
+        td_base  = 'font-size:12px; padding:5px 8px; text-align:right; border-bottom:1px solid #333;'
+        head_html = ''.join(f'<th style="{th_style}">{h}</th>' for h in daily_headers)
+        body_html = ''
+        for r_idx, row in enumerate(daily_rows):
+            row_bg = '#2a2a2a' if r_idx % 2 == 0 else '#242424'
+            cells = ''
+            for c_idx, cell in enumerate(row):
+                if cell.startswith('+'):
+                    color = 'color:#4CAF50;'
+                elif cell.startswith('-'):
+                    color = 'color:#f44336;'
+                elif c_idx == 0:
+                    color = 'color:#e0e0e0;'
+                else:
+                    color = 'color:#ccc;'
+                align = 'text-align:left;' if c_idx == 0 else ''
+                cells += f'<td style="{td_base}{color}{align}">{cell}</td>'
+            body_html += f'<tr style="background:{row_bg};">{cells}</tr>'
+        html += f"""
+            <div class="section">
+                <h2>DAILY SUMMARY (Last {len(daily_rows)} days)</h2>
+                <div class="table-container">
+                    <table style="border-collapse:collapse; width:100%; font-family:monospace;">
+                        <thead><tr style="background:#1a1a1a;">{head_html}</tr></thead>
+                        <tbody>{body_html}</tbody>
+                    </table>
                 </div>
             </div>
 """

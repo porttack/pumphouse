@@ -9,9 +9,15 @@ Rich HTML email alerts with embedded charts, sensor readings, and one-click rela
 - HTML emails with full system status and tank chart
 - Dashboard link at the top of every email
 - Tank level bar (percentage + gallons)
-- Current sensor readings (float switch, pressure)
-- 1-hour and 24-hour tank change statistics
+- Tank data pane: sensor age, 1-hour and 24-hour delta with color coding
+- Pressure HIGH percentage over the last 2 h / 12 h / 24 h
+- Next predicted pump cycle and next backflush (based on historical intervals)
+- Estimated time to full (current level + 24 h fill rate)
+- Relay state table (Bypass / Supply / Purge)
+- Wind forecast (Tonight / Tomorrow from NWS)
 - Embedded tank level history chart (default: 3 days)
+- Ring camera snapshot embedded below the chart (if Ring is configured)
+- 14-day daily summary table (gallons, occupancy, temperature)
 - Priority-based formatting (green / orange / red)
 - One-click relay control buttons (override, bypass, purge)
 - Daily status email at configurable time (default: 6 AM)
