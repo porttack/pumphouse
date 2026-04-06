@@ -15,8 +15,14 @@ Daily sunset timelapses captured from the pumphouse Amcrest camera at Newport, O
 | `/timelapse/latest.jpg` | Redirects to the most recent snapshot JPEG |
 | `/timelapse/YYYY-MM-DD/snapshot` | Snapshot JPEG (~35 min after sunset) used as list thumbnail |
 | `/timelapse/YYYY-MM-DD/set-snapshot` | `POST` — save a JPEG as the key snapshot for that date (direct access only) |
+| `/timelapse/YYYY-MM-DD/set-snapshot-file` | `POST` — set snapshot from a saved best-frame file server-side; body `{"filename":"cv_001.jpg"}` (direct access only) |
 | `/timelapse/YYYY-MM-DD/frame-view` | `POST` — display a POSTed frame JPEG in a full viewer page (direct access only) |
 | `/timelapse/YYYY-MM-DD/frame-view-client` | `GET` — static frame viewer that reads image from `localStorage` (Cloudflare-safe) |
+| `POST /timelapse/YYYY-MM-DD/pick-best` | Start background best-frame scoring job (`?rerun=1` to force). Direct access only. |
+| `GET /timelapse/YYYY-MM-DD/best-frames` | JSON status of scoring job: `none`, `running`, `error`, or `done` with manifest. |
+| `GET /timelapse/best/YYYY-MM-DD/cv_NNN.jpg` | Serve a saved OpenCV best-frame JPEG. |
+| `GET /timelapse/best/YYYY-MM-DD/cl_NNN.jpg` | Serve a saved CLIP best-frame JPEG. |
+| `GET /timelapse/best/YYYY-MM-DD/FILENAME/view` | Full-page viewer for a saved best-frame with Set key snapshot button. |
 | `/api/ratings/YYYY-MM-DD` | JSON aggregate rating `{count, avg}` (served by Cloudflare Worker) |
 | `/snapshot` | Live camera frame with weather panel and date; `?info=0` for raw JPEG |
 | `/frame` | Alias for `/snapshot` (backwards compat) |
@@ -136,6 +142,8 @@ The Cloudflare path avoids a DoS vector: without it, every public Snapshot click
 
 On direct access, the frame-view page also shows a **Set key snapshot** button that `POST`s the displayed frame to `/timelapse/DATE/set-snapshot`, saving it as `timelapses/snapshots/YYYY-MM-DD.jpg`. This replaces whatever image the timelapse daemon saved automatically and updates the thumbnail in the "All timelapses" list.
 
+Best-frame viewer pages (`/timelapse/best/DATE/FILE/view`) use `set-snapshot-file` instead, which does a server-side file copy — no large JPEG round-trip through the browser (avoids "Request Entity Too Large" on full-resolution frames).
+
 ### Download button
 
 Both the frame-view page and the `/snapshot` live-camera page include a **⬇ Download** button that uses the HTML5 `download` attribute on an `<a>` pointing at the embedded data URL — works on desktop and mobile without a round-trip to the server.
@@ -243,7 +251,12 @@ The previous code used `immutable` on all past pages (`date < today`), which cau
 timelapses/
   YYYY-MM-DD_HHMM.mp4       # Daily timelapse (sunset time in filename)
   snapshots/
-    YYYY-MM-DD.jpg           # Snapshot JPEG ~35 min after sunset
+    YYYY-MM-DD.jpg           # Snapshot JPEG — best frame chosen by CLIP/OpenCV
+  best/
+    YYYY-MM-DD/
+      cv_001.jpg … cv_004.jpg  # OpenCV best-frame picks
+      cl_001.jpg … cl_004.jpg  # CLIP best-frame picks
+      manifest.json            # Scores and metadata
   weather/
     YYYY-MM-DD.json          # Cached weather for that day
   ratings.json               # Local ratings mirror (canonical store is Cloudflare KV)
@@ -252,6 +265,8 @@ cloudflare/
   ratings-worker.js          # Cloudflare Worker source
   wrangler.toml              # Wrangler deploy config
 ```
+
+See [best-frames.md](best-frames.md) for full documentation of the scoring algorithms, prompt tuning, and calibration notes.
 
 ---
 

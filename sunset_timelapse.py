@@ -361,17 +361,30 @@ def run_todays_timelapse(start_dt=None, end_dt=None, frames_root=None):
         # Save a snapshot JPEG from the assembled frames.
         # Custom windows (e.g. moonset): midpoint of window; never overwrite an
         # existing snapshot so a later sunset run can always claim the date image.
-        # Standard sunset run: always write, overwriting any earlier custom snapshot.
+        # Standard sunset run: use CLIP (falling back to OpenCV) to pick the most
+        # visually interesting frame rather than a fixed time offset.
         SNAPSHOT_DIR.mkdir(exist_ok=True)
         snapshot_path = SNAPSHOT_DIR / f'{date_str}.jpg'
         if frames and (not custom or not snapshot_path.exists()):
             if custom:
                 offset_secs = duration // 2
+                frame_idx   = max(0, min(int(offset_secs / effective_interval), len(frames) - 2))
+                best_frame  = frames[frame_idx]
+                log.info(f"Saved snapshot (custom midpoint): frame {frame_idx} → {snapshot_path.name}")
             else:
-                offset_secs = (WINDOW_BEFORE - SNAPSHOT_MINUTES_BEFORE_SUNSET) * 60
-            frame_idx = max(0, min(int(offset_secs / effective_interval), len(frames) - 2))
-            shutil.copy2(str(frames[frame_idx]), str(snapshot_path))
-            log.info(f"Saved snapshot: frame {frame_idx} → {snapshot_path.name}")
+                try:
+                    from monitor.pick_best import pick_best_snapshot
+                    best_frame = pick_best_snapshot(frames)
+                    if best_frame is None:
+                        raise ValueError('pick_best_snapshot returned None')
+                    log.info(f"Saved snapshot (CLIP/CV pick): {best_frame.name} → {snapshot_path.name}")
+                except Exception as e:
+                    log.warning(f"pick_best_snapshot failed ({e}), falling back to fixed offset")
+                    offset_secs = (WINDOW_BEFORE - SNAPSHOT_MINUTES_BEFORE_SUNSET) * 60
+                    frame_idx   = max(0, min(int(offset_secs / effective_interval), len(frames) - 2))
+                    best_frame  = frames[frame_idx]
+                    log.info(f"Saved snapshot (fixed offset fallback): frame {frame_idx} → {snapshot_path.name}")
+            shutil.copy2(str(best_frame), str(snapshot_path))
 
         cleanup_old(RETENTION_DAYS)
         if not custom:

@@ -8,6 +8,7 @@ import os
 from flask import Blueprint, Response, request, redirect, send_file
 from monitor.config import CAMERA_USER, CAMERA_PASS, DEFAULT_SNAPSHOTS_FILE
 from monitor.weather_api import _WMO, _QUIPS, current_weather_desc
+from monitor.pick_best import start_pick_best, get_status as _best_status, reset_best, BEST_DIR
 
 timelapse_bp = Blueprint('timelapse', __name__)
 
@@ -831,6 +832,107 @@ def timelapse_frame_view_client(date_str):
                     headers={'Cache-Control': 'public, max-age=3600, stale-if-error=86400'})
 
 
+@timelapse_bp.route('/timelapse/best/<date_str>/<filename>/view')
+def timelapse_best_frame_view(date_str, filename):
+    """Full-page viewer for a saved best-frame JPEG (no data upload needed)."""
+    import re as _re, base64 as _b64
+    if not _re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_str):
+        return Response('Invalid date', status=400)
+    if not _re.fullmatch(r'(cv_|cl_)?\d{3}\.jpg', filename):
+        return Response('Invalid filename', status=400)
+    path = os.path.join(BEST_DIR, date_str, filename)
+    if not os.path.exists(path):
+        return Response('Not found', status=404)
+
+    img_b64   = _b64.b64encode(open(path, 'rb').read()).decode()
+    is_direct = 'onblackberryhill.com' not in request.host.lower()
+    dash_btn  = '<a class="btn" href="/">Dashboard</a>' if is_direct else ''
+    set_key_btn = (
+        f'<button id="set-key-btn" class="btn" onclick="setKeySnapshot()">Set key snapshot</button>'
+        if is_direct else ''
+    )
+    scorer = 'CLIP' if filename.startswith('cl_') else 'OpenCV'
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Best frame &mdash; {date_str}</title>
+  <style>
+    * {{ box-sizing: border-box; }}
+    body {{ font-family: monospace; background: #1a1a1a; color: #e0e0e0; margin: 0; padding: 16px; }}
+    h2 {{ color: #fff; margin: 0 0 12px; font-size: 1.1em; font-weight: normal; }}
+    .frame-wrap {{ margin: 0 auto; }}
+    .frame-wrap img {{ width: 100%; height: auto; display: block; border-radius: 4px; }}
+    .actions {{ display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }}
+    .btn {{ background: #2a2a2a; color: #4CAF50; border: 1px solid #444;
+            padding: 6px 16px; border-radius: 4px; text-decoration: none;
+            font-family: monospace; font-size: .95em; cursor: pointer; }}
+    .btn:hover {{ background: #333; color: #fff; }}
+    .btn:disabled {{ opacity: .5; cursor: default; }}
+  </style>
+</head>
+<body>
+  <h2>Best frame ({scorer}) &mdash; {date_str}</h2>
+  <div class="frame-wrap">
+    <img id="frame-img" src="data:image/jpeg;base64,{img_b64}" alt="Frame">
+  </div>
+  <div class="actions">
+    <a class="btn" href="/timelapse/{date_str}">&#9654; Timelapse</a>
+    {dash_btn}
+    <a class="btn" href="data:image/jpeg;base64,{img_b64}" download="frame-{date_str}-{filename}">&#8681; Download</a>
+    {set_key_btn}
+  </div>
+  <script>
+  function setKeySnapshot() {{
+    var btn = document.getElementById('set-key-btn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    // Use the server-side file directly — no need to round-trip through the browser
+    fetch('/timelapse/{date_str}/set-snapshot-file', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{filename: '{filename}'}})
+    }}).then(function(r) {{ return r.json(); }}).then(function(d) {{
+      btn.textContent = d.ok ? 'Saved!' : ('Error: ' + (d.error || '?'));
+    }}).catch(function() {{ btn.textContent = 'Failed'; }});
+  }}
+  </script>
+</body>
+</html>"""
+    return Response(html, status=200, mimetype='text/html',
+                    headers={'Cache-Control': 'no-store'})
+
+
+@timelapse_bp.route('/timelapse/<date_str>/set-snapshot-file', methods=['POST'])
+def timelapse_set_snapshot_file(date_str):
+    """Copy a saved best-frame file directly to the snapshot for date_str.
+    Avoids the browser round-trip that causes Request Entity Too Large."""
+    import re as _re, json as _json, shutil
+    if not _re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_str):
+        return Response(_json.dumps({'ok': False, 'error': 'Invalid date'}), status=400,
+                        mimetype='application/json')
+    if 'onblackberryhill.com' in request.host.lower():
+        return Response(_json.dumps({'ok': False, 'error': 'Not available via CDN'}),
+                        mimetype='application/json')
+    try:
+        data     = request.get_json(force=True) or {}
+        filename = data.get('filename', '')
+        if not _re.fullmatch(r'(cv_|cl_)?\d{3}\.jpg', filename):
+            raise ValueError('Invalid filename')
+        src  = os.path.join(BEST_DIR, date_str, filename)
+        if not os.path.exists(src):
+            raise FileNotFoundError(f'{filename} not found')
+        dest = os.path.join(SNAPSHOT_DIR, f'{date_str}.jpg')
+        os.makedirs(SNAPSHOT_DIR, exist_ok=True)
+        shutil.copy2(src, dest)
+        return Response(_json.dumps({'ok': True}), mimetype='application/json')
+    except Exception as e:
+        return Response(_json.dumps({'ok': False, 'error': str(e)}),
+                        mimetype='application/json')
+
+
 @timelapse_bp.route('/timelapse/<date_str>/frame-view', methods=['POST'])
 def timelapse_frame_view(date_str):
     """Display a POSTed JPEG frame in a styled page (no weather panel)."""
@@ -1012,6 +1114,62 @@ def timelapse_test_mp4():
     return send_file(path, mimetype='video/mp4', max_age=0)
 
 
+@timelapse_bp.route('/timelapse/<date_str>/pick-best', methods=['POST'])
+def timelapse_pick_best(date_str):
+    """
+    Start a background job that scores all frames in the day's timelapse and
+    saves the best 1–6 to /home/pi/timelapses/best/<date_str>/.
+
+    Only available via direct (non-Cloudflare) access.
+
+    POST ?rerun=1  to force a re-run even if results already exist.
+    """
+    import re, json as _json
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_str):
+        return Response('Invalid date', status=400, mimetype='text/plain')
+    if request.headers.get('CF-Ray'):
+        return Response('Not available via Cloudflare', status=403, mimetype='text/plain')
+
+    mp4_name = _mp4_for_date(date_str)
+    if not mp4_name:
+        return Response(_json.dumps({'status': 'error', 'message': 'No MP4 for this date'}),
+                        status=404, mimetype='application/json')
+    mp4_path = os.path.join(TIMELAPSE_DIR, mp4_name)
+
+    rerun = request.args.get('rerun', '0') == '1'
+    if rerun:
+        reset_best(date_str)
+
+    result = start_pick_best(date_str, mp4_path, n=6)
+    return Response(_json.dumps({'status': result}),
+                    status=200, mimetype='application/json')
+
+
+@timelapse_bp.route('/timelapse/<date_str>/best-frames')
+def timelapse_best_frames_status(date_str):
+    """Return JSON status of the best-frames job for date_str."""
+    import re, json as _json
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_str):
+        return Response('Invalid date', status=400, mimetype='text/plain')
+    data = _best_status(date_str)
+    return Response(_json.dumps(data), status=200, mimetype='application/json',
+                    headers={'Cache-Control': 'no-store'})
+
+
+@timelapse_bp.route('/timelapse/best/<date_str>/<filename>')
+def timelapse_best_frame(date_str, filename):
+    """Serve a saved best-frame JPEG.  Only .jpg filenames accepted."""
+    import re
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_str):
+        return Response('Invalid date', status=400, mimetype='text/plain')
+    if not re.fullmatch(r'(cv_|cl_)?\d{3}\.jpg', filename):
+        return Response('Invalid filename', status=400, mimetype='text/plain')
+    path = os.path.join(BEST_DIR, date_str, filename)
+    if not os.path.exists(path):
+        return Response('Not found', status=404, mimetype='text/plain')
+    return send_file(path, mimetype='image/jpeg', max_age=3600)
+
+
 @timelapse_bp.route('/timelapse/<date_or_file>')
 def timelapse_view(date_or_file):
     """
@@ -1126,6 +1284,8 @@ def timelapse_view(date_or_file):
                   if zoom_name else '')
     now_btn      = '<a href="/snapshot" class="speed-btn dl-btn">Now</a>'
     dash_btn     = '<a href="/" class="speed-btn dl-btn">Dashboard</a>' if is_direct else ''
+    best_btn     = ('<button id="best-btn" class="speed-btn dl-btn">&#9733; Best Frames</button>'
+                    if is_direct else '')
     public_link  = (f'&middot; (<a href="https://onblackberryhill.com/timelapse/{date_str}">public site</a>)'
                     if is_direct else '')
 
@@ -1147,6 +1307,7 @@ def timelapse_view(date_or_file):
         f'{zoom_btn}'
         f'{now_btn}'
         f'{dash_btn}'
+        f'{best_btn}'
         f'</div>'
         f'</div>'
         if has_video else
@@ -1332,6 +1493,29 @@ def timelapse_view(date_or_file):
       .speed-btns {{ display:flex; align-items:center; gap:6px; }}
       .ctrl-btns  {{ display:flex; gap:6px; }}
     }}
+    .best-frames {{ max-width:960px; margin:12px 0; }}
+    .best-frames-header {{ display:flex; align-items:center; gap:10px; margin-bottom:8px; }}
+    .best-frames-label {{ color:#888; font-size:0.9em; }}
+    .best-frames-msg   {{ color:#aaa; font-size:0.85em; font-style:italic; }}
+    .best-scorer-row   {{ display:flex; flex-direction:column; gap:12px; }}
+    .best-scorer       {{ display:flex; flex-direction:column; gap:6px; }}
+    .best-scorer-label {{ font-size:0.8em; color:#666; text-transform:uppercase;
+                          letter-spacing:0.05em; }}
+    .best-scorer-label span {{ color:#888; font-weight:normal; text-transform:none;
+                               letter-spacing:0; margin-left:6px; }}
+    .best-frames-grid  {{ display:flex; flex-wrap:wrap; gap:8px; }}
+    .best-frame-item   {{ position:relative; cursor:pointer; }}
+    .best-frame-item img {{ display:block; border-radius:4px; border:2px solid #444;
+                            width:180px; height:101px; object-fit:cover; }}
+    .best-frame-item img:hover {{ border-color:#4CAF50; }}
+    .best-frame-score  {{ position:absolute; top:4px; left:4px; background:rgba(0,0,0,0.6);
+                           color:#f5c518; font-size:0.75em; padding:1px 4px; border-radius:3px; }}
+    .best-rerun-btn    {{ background:none; border:none; color:#555; font-size:0.8em;
+                           cursor:pointer; padding:0; font-family:monospace; }}
+    .best-rerun-btn:hover {{ color:#aaa; }}
+    @media (max-width:600px) {{
+      .best-frame-item img {{ width:44vw; height:calc(44vw * 9 / 16); }}
+    }}
   </style>
 </head>
 <body>
@@ -1354,6 +1538,24 @@ def timelapse_view(date_or_file):
   </div>
   {video_html}
   {wx_html}
+  <div class="best-frames" id="best-frames-panel" style="display:none">
+    <div class="best-frames-header">
+      <span class="best-frames-label">&#9733; Best frames</span>
+      <span class="best-frames-msg" id="best-frames-msg"></span>
+      <button class="best-rerun-btn" id="best-rerun-btn" style="display:none"
+              title="Re-run scoring">&#8635; re-run</button>
+    </div>
+    <div class="best-scorer-row">
+      <div class="best-scorer" id="best-scorer-cv">
+        <div class="best-scorer-label">OpenCV<span id="cv-meta"></span></div>
+        <div class="best-frames-grid" id="best-frames-grid-cv"></div>
+      </div>
+      <div class="best-scorer" id="best-scorer-cl" style="display:none">
+        <div class="best-scorer-label">CLIP<span id="cl-meta"></span></div>
+        <div class="best-frames-grid" id="best-frames-grid-cl"></div>
+      </div>
+    </div>
+  </div>
   <div class="rating" id="rating-widget">
     <span class="rating-label">Rate:</span>
     <div class="stars" id="stars">
@@ -1677,6 +1879,157 @@ def timelapse_view(date_or_file):
         }});
       }}
     }})();
+    // Best-frames picker — direct Pi access only (button hidden from CF users)
+    (function() {{
+      if (!{is_direct_js}) return;
+      const bestBtn   = document.getElementById('best-btn');
+      const panel     = document.getElementById('best-frames-panel');
+      const msg       = document.getElementById('best-frames-msg');
+      const rerunBtn  = document.getElementById('best-rerun-btn');
+      if (!bestBtn) return;
+
+      let pollTimer = null;
+
+      function renderGrid(gridEl, frames) {{
+        gridEl.innerHTML = '';
+        const ts = Date.now();
+        frames.forEach(function(f) {{
+          const item = document.createElement('div');
+          item.className = 'best-frame-item';
+
+          const img = document.createElement('img');
+          img.src     = '/timelapse/best/{date_str}/' + f.file + '?_t=' + ts;
+          img.loading = 'lazy';
+          img.title   = 'Click to set as snapshot for {date_str}';
+
+          const badge = document.createElement('span');
+          badge.className   = 'best-frame-score';
+          badge.textContent = 'frame ' + (f.time_s + 1) + ' \u00b7 ' + Math.round(f.score * 100) + '%';
+
+          img.addEventListener('click', function() {{
+            window.open('/timelapse/best/{date_str}/' + f.file + '/view', '_blank');
+          }});
+
+          item.appendChild(img);
+          item.appendChild(badge);
+          gridEl.appendChild(item);
+        }});
+      }}
+
+      function renderDone(data) {{
+        const cvGrid  = document.getElementById('best-frames-grid-cv');
+        const clGrid  = document.getElementById('best-frames-grid-cl');
+        const cvMeta  = document.getElementById('cv-meta');
+        const clMeta  = document.getElementById('cl-meta');
+        const clRow   = document.getElementById('best-scorer-cl');
+
+        const cv = data.opencv_frames || [];
+        const cl = data.clip_frames   || [];
+
+        if (cv.length === 0 && cl.length === 0) {{
+          msg.textContent = 'No good frames found.';
+          return;
+        }}
+
+        msg.textContent = data.n_scored + ' frames scored'
+                        + (data.n_dropped ? ', ' + data.n_dropped + ' IR dropped' : '');
+        rerunBtn.style.display = '';
+
+        if (cv.length > 0) {{
+          cvMeta.textContent = ' \u2014 ' + cv.length + ' picks';
+          renderGrid(cvGrid, cv);
+        }}
+
+        if (cl.length > 0) {{
+          clRow.style.display = '';
+          clMeta.textContent  = ' \u2014 ' + cl.length + ' picks';
+          renderGrid(clGrid, cl);
+        }} else if (data.clip_available === false) {{
+          clRow.style.display = '';
+          clMeta.textContent  = ' \u2014 unavailable';
+        }}
+      }}
+
+      function poll() {{
+        fetch('/timelapse/{date_str}/best-frames')
+          .then(function(r) {{ return r.json(); }})
+          .then(function(data) {{
+            if (data.status === 'running') {{
+              msg.textContent = 'Scoring\u2026';
+              pollTimer = setTimeout(poll, 3000);
+            }} else if (data.status === 'done') {{
+              bestBtn.textContent = '\u2605 Best Frames';
+              bestBtn.disabled = false;
+              renderDone(data);
+            }} else if (data.status === 'error') {{
+              bestBtn.disabled = false;
+              msg.textContent = 'Error: ' + (data.message || 'unknown');
+            }} else {{
+              // none — job hasn't started yet, try again briefly
+              pollTimer = setTimeout(poll, 1000);
+            }}
+          }})
+          .catch(function() {{
+            pollTimer = setTimeout(poll, 5000);
+          }});
+      }}
+
+      function startJob(rerun) {{
+        if (pollTimer) {{ clearTimeout(pollTimer); pollTimer = null; }}
+        panel.style.display = '';
+        document.getElementById('best-frames-grid-cv').innerHTML = '';
+        document.getElementById('best-frames-grid-cl').innerHTML = '';
+        document.getElementById('best-scorer-cl').style.display = 'none';
+        rerunBtn.style.display = 'none';
+        msg.textContent = 'Starting\u2026';
+        bestBtn.disabled = true;
+        bestBtn.textContent = '\u2605 Working\u2026';
+
+        const url = '/timelapse/{date_str}/pick-best' + (rerun ? '?rerun=1' : '');
+        fetch(url, {{method: 'POST'}})
+          .then(function(r) {{ return r.json(); }})
+          .then(function(data) {{
+            if (data.status === 'already_done' && !rerun) {{
+              // Pre-existing results — render immediately
+              fetch('/timelapse/{date_str}/best-frames')
+                .then(function(r) {{ return r.json(); }})
+                .then(function(d) {{
+                  bestBtn.textContent = '\u2605 Best Frames';
+                  bestBtn.disabled = false;
+                  renderDone(d);
+                }});
+            }} else {{
+              poll();
+            }}
+          }})
+          .catch(function() {{
+            bestBtn.disabled = false;
+            bestBtn.textContent = '\u2605 Best Frames';
+            msg.textContent = 'Request failed';
+          }});
+      }}
+
+      bestBtn.addEventListener('click', function() {{ startJob(false); }});
+      rerunBtn.addEventListener('click', function() {{ startJob(true); }});
+
+      // Auto-show if results already exist on page load
+      fetch('/timelapse/{date_str}/best-frames')
+        .then(function(r) {{ return r.json(); }})
+        .then(function(data) {{
+          if (data.status === 'done') {{
+            panel.style.display = '';
+            renderDone(data);
+          }} else if (data.status === 'running') {{
+            panel.style.display = '';
+            msg.textContent = 'Scoring\u2026';
+            bestBtn.disabled = true;
+            bestBtn.textContent = '\u2605 Working\u2026';
+            poll();
+          }}
+        }})
+        .catch(function() {{}});
+    }})();
+
     // Zoom toggle — swaps between full-frame and cropped version.
     // State persisted in localStorage so it survives day navigation.
     // Exposed as window.toggleZoom for the keyboard handler.
