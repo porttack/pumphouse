@@ -576,27 +576,47 @@ class SimplifiedMonitor:
                                     monitor.last_purge_date = datetime.now().date()
                             threading.Thread(target=_delayed_purge, daemon=True, name='purge-timed').start()
 
-                        # Pressure recovery alert: watch is ON + gap since last HIGH > 4 hours
+                        # Compute gap since pressure last dropped LOW (used for both alert + pumpoff rebuild)
+                        _gap = (current_time - self.last_pressure_high_end_time
+                                if self.last_pressure_high_end_time else None)
+                        _gap_str = (
+                            f"{_gap / 3600:.1f}h" if _gap and _gap >= 3600
+                            else (f"{_gap / 60:.0f}m" if _gap else "unknown")
+                        )
+
+                        # Pressure recovery alert: watch is ON + gap >= 4 hours
                         _RECOVERY_GAP = 4 * 3600
-                        if PRESSURE_LOW_WATCH_FILE.exists():
-                            _gap = (current_time - self.last_pressure_high_end_time
-                                    if self.last_pressure_high_end_time else None)
-                            if _gap is None or _gap >= _RECOVERY_GAP:
-                                _gap_str = (
-                                    f"{_gap / 3600:.1f}h" if _gap and _gap >= 3600
-                                    else (f"{_gap / 60:.0f}m" if _gap else "unknown")
-                                )
-                                current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
-                                self.log_state_event('PRESSURE_RECOVERY', f'Gap: {_gap_str}')
-                                send_notification(
-                                    title=f"{current_gal:.0f} gal - Pressure HIGH (after {_gap_str} gap)",
-                                    message=f"Pressure is HIGH again after a {_gap_str} low-pressure gap — well may have recovered.",
-                                    priority='high',
-                                    tags=['droplet', 'white_check_mark'],
-                                    click_url=DASHBOARD_URL,
-                                    attach_url=f"{DASHBOARD_URL}api/epaper.jpg?tenant=no",
-                                    debug=self.debug
-                                )
+                        if PRESSURE_LOW_WATCH_FILE.exists() and (_gap is None or _gap >= _RECOVERY_GAP):
+                            current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
+                            self.log_state_event('PRESSURE_RECOVERY', f'Gap: {_gap_str}')
+                            send_notification(
+                                title=f"{current_gal:.0f} gal - Pressure HIGH (after {_gap_str} gap)",
+                                message=f"Pressure is HIGH again after a {_gap_str} low-pressure gap — well may have recovered.",
+                                priority='high',
+                                tags=['droplet', 'white_check_mark'],
+                                click_url=DASHBOARD_URL,
+                                attach_url=f"{DASHBOARD_URL}api/epaper.jpg?tenant=no",
+                                debug=self.debug
+                            )
+
+                        # Rebuild pumpoff.csv after a pump outage (gap >= 24h), confirmed by
+                        # 90 seconds of sustained pressure before writing.
+                        _PUMPOFF_GAP = 24 * 3600
+                        if _gap is not None and _gap >= _PUMPOFF_GAP:
+                            def _rebuild_pumpoff(monitor=self):
+                                time.sleep(90)
+                                if read_pressure():  # still HIGH — recovery is real
+                                    import subprocess as _sp, sys as _sys
+                                    from pathlib import Path as _Path
+                                    _script = _Path(__file__).parent.parent / 'build_pumpoff.py'
+                                    result = _sp.run([_sys.executable, str(_script)],
+                                                     capture_output=True, text=True)
+                                    if monitor.debug:
+                                        print(f"Rebuilt pumpoff.csv: {result.stdout.strip()}")
+                                elif monitor.debug:
+                                    print("Skipped pumpoff rebuild — pressure dropped again within 90s")
+                            threading.Thread(target=_rebuild_pumpoff, daemon=True,
+                                             name='pumpoff-rebuild').start()
 
                         # Send high pressure alert if enabled
                         if NOTIFY_HIGH_PRESSURE_ENABLED and self.notification_manager.can_notify('high_pressure'):
