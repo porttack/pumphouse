@@ -179,43 +179,67 @@ def snapshot():
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Snapshot &mdash; {title_date} &mdash; {now_str} (cached until {cached_until_str})</title>
+  <script>
+    (function(){{ var p=new URLSearchParams(location.search).get('theme'),t=p||localStorage.getItem('tl_theme'); if(t==='dark') document.documentElement.setAttribute('data-theme','dark'); }})();
+  </script>
   <style>
+    :root {{
+      --bg:#fdf8f3; --bg2:#f0e8dd; --bg3:#e8ddd0;
+      --border-light:#e8e0d8; --border:#ddd0c2;
+      --text:#2c2117; --muted:#7e6e60; --dim:#b0a090;
+      --accent:#2d6a4f; --hover-text:#1a3d2a;
+      --wx-desc:#1a4a75;
+      --font: system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    }}
+    [data-theme="dark"] {{
+      --bg:#1a1a1a; --bg2:#222; --bg3:#2a2a2a;
+      --border-light:#333; --border:#444;
+      --text:#e0e0e0; --muted:#888; --dim:#555;
+      --accent:#4CAF50; --hover-text:#fff;
+      --wx-desc:#aed6f1;
+      --font: monospace;
+    }}
     * {{ box-sizing: border-box; }}
-    body {{ font-family: monospace; background:#1a1a1a; color:#e0e0e0;
+    body {{ font-family: var(--font); background: var(--bg); color: var(--text);
            margin:0; padding:16px; }}
-    h2   {{ margin:0; color:#fff; }}
+    h2   {{ margin:0; color: var(--text); }}
     .site-header {{ max-width:960px; padding:4px 0 10px; margin-bottom:4px;
-                    border-bottom:1px solid #333; display:flex;
+                    border-bottom:1px solid var(--border-light); display:flex;
                     flex-wrap:wrap; align-items:baseline; gap:0 10px; }}
-    .site-name {{ font-size:1.2em; color:#fff; font-weight:bold; }}
-    .site-sub  {{ font-size:0.85em; color:#888; }}
-    .site-sub a {{ color:#4CAF50; text-decoration:none; }}
-    .site-sub a:hover {{ color:#fff; }}
+    .site-name {{ font-size:1.2em; color: var(--text); font-weight:bold; }}
+    .site-sub  {{ font-size:0.85em; color: var(--muted); }}
+    .site-sub a {{ color: var(--accent); text-decoration:none; }}
+    .site-sub a:hover {{ color: var(--hover-text); }}
+    .theme-btn {{ margin-left:auto; background: var(--bg3); color: var(--muted);
+                  border:1px solid var(--border); padding:3px 10px; border-radius:4px;
+                  font-family:monospace; font-size:0.8em; cursor:pointer; white-space:nowrap; }}
+    .theme-btn:hover {{ color: var(--text); }}
     .page-header {{ max-width:860px; display:flex; justify-content:center;
                     align-items:center; margin:12px 0; }}
     .snapshot-wrap {{ max-width:860px; margin:12px 0; }}
     .snapshot-wrap img {{ width:100%; display:block; border-radius:4px;
                           cursor:pointer; }}
     .snapshot-wrap img:hover {{ opacity:0.92; }}
-    .weather {{ max-width:860px; background:#222; border:1px solid #333;
+    .weather {{ max-width:860px; background: var(--bg2); border:1px solid var(--border-light);
                 border-radius:4px; padding:12px 16px; margin:12px 0;
                 display:flex; flex-direction:column; gap:8px; }}
-    .wx-desc  {{ font-size:1.05em; color:#aed6f1; font-weight:bold; }}
-    .wx-quip  {{ font-size:0.9em; color:#888; font-weight:normal; font-style:italic; }}
+    .wx-desc  {{ font-size:1.05em; color: var(--wx-desc); font-weight:bold; }}
+    .wx-quip  {{ font-size:0.9em; color: var(--muted); font-weight:normal; font-style:italic; }}
     .wx-group {{ display:flex; flex-wrap:wrap; gap:12px; }}
     .stat {{ display:flex; flex-direction:column; min-width:80px; }}
-    .lbl  {{ font-size:0.75em; color:#888; text-transform:uppercase; }}
-    .val  {{ font-size:1.1em; color:#e0e0e0; }}
+    .lbl  {{ font-size:0.75em; color: var(--muted); text-transform:uppercase; }}
+    .val  {{ font-size:1.1em; color: var(--text); }}
     .actions {{ max-width:860px; display:flex; flex-wrap:wrap;
                 align-items:center; gap:10px; margin:10px 0; }}
-    .btn {{ background:#2a2a2a; color:#4CAF50; border:1px solid #444;
+    .btn {{ background: var(--bg3); color: var(--accent); border:1px solid var(--border);
             padding:6px 16px; border-radius:4px; text-decoration:none;
             font-family:monospace; font-size:0.95em; cursor:pointer; }}
-    .btn:hover {{ background:#333; color:#fff; }}
-    .captured-at {{ color:#666; font-size:0.85em; }}
+    .btn:hover {{ background: var(--border-light); color: var(--hover-text); }}
+    .captured-at {{ color: var(--muted); font-size:0.85em; }}
     @media (max-width:600px) {{
       .page-header h2 {{ font-size:1.0em; }}
       .site-sub {{ font-size:0.78em; }}
+      .theme-btn {{ display:none; }}
     }}
   </style>
 </head>
@@ -227,6 +251,7 @@ def snapshot():
       &middot; <a href="https://www.airbnb.com/rooms/894278114876445404" target="_blank" rel="noopener">Airbnb</a>
       &middot; <a href="https://www.vrbo.com/9829179ha" target="_blank" rel="noopener">Vrbo</a>
     </span>
+    <button id="theme-toggle" class="theme-btn" onclick="toggleTheme()">&#9790; Dark</button>
   </header>
   <div class="page-header">
     <h2>Snapshot &mdash; {title_date} &mdash; {now_str} (cached until {cached_until_str})</h2>
@@ -244,6 +269,24 @@ def snapshot():
     <a class="btn" href="data:image/jpeg;base64,{img_b64}" download="snapshot-{date_str}.jpg">&#8681; Download</a>
     <span class="captured-at">Captured {now_str} &middot; {src_note}</span>
   </div>
+  <script>
+  function toggleTheme() {{
+    var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    if (isDark) {{
+      document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('tl_theme', 'light');
+      document.getElementById('theme-toggle').textContent = '\u263e Dark';
+    }} else {{
+      document.documentElement.setAttribute('data-theme', 'dark');
+      localStorage.setItem('tl_theme', 'dark');
+      document.getElementById('theme-toggle').textContent = '\u2600 Light';
+    }}
+  }}
+  (function(){{
+    if (document.documentElement.getAttribute('data-theme') === 'dark')
+      document.getElementById('theme-toggle').textContent = '\u2600 Light';
+  }})();
+  </script>
 </body>
 </html>"""
 
@@ -1080,8 +1123,8 @@ def timelapse_rate(date_str):
         rating = int(request.get_json(force=True).get('rating', 0))
     except Exception:
         return Response('Bad request', status=400)
-    if rating not in (3, 4, 5):
-        return Response('Rating must be 3, 4, or 5', status=400)
+    if rating not in range(1, 6):
+        return Response('Rating must be 1–5', status=400)
 
     with _ratings_lock:
         data  = _read_ratings()
@@ -1218,10 +1261,11 @@ def timelapse_view(date_or_file):
     wx  = _day_weather_summary(date_str)   # local snapshots (humidity)
     om  = _open_meteo_weather(date_str)    # Open-Meteo archive
 
-    def stat(label, val, unit=''):
+    def stat(label, val, unit='', xc=''):
         if val is None:
             return ''
-        return f'<div class="stat"><span class="lbl">{label}</span><span class="val">{val}{unit}</span></div>'
+        c = f'stat {xc}' if xc else 'stat'
+        return f'<div class="{c}"><span class="lbl">{label}</span><span class="val">{val}{unit}</span></div>'
 
     wx_html = ''
     if om:
@@ -1255,10 +1299,10 @@ def timelapse_view(date_or_file):
           <div class="wx-group">
             {stat('Sunset',    om['sunset'],  '')}
             {stat('High/Low',  hi_lo_str,     '°F')}
-            {stat('Rain',      precip_str,    '')}
+            {stat('Rain',      precip_str,    '', 'wx-extra')}
             {stat('Wind',      wind_str,      ' mph')}
-            {stat('Cloud',     om['cloud'],   '%')}
-            {stat('Radiation', radiation_str, '')}
+            {stat('Cloud',     om['cloud'],   '%', 'wx-extra')}
+            {stat('Radiation', radiation_str, '', 'wx-extra')}
             {stat('Humidity',  humidity,      '%')}
           </div>
         </div>"""
@@ -1394,127 +1438,204 @@ def timelapse_view(date_or_file):
         for d in reversed(dates)
     )
 
+    # Light-mode photo grid — 24 most recent dates that have a snapshot on disk
+    _grid_dates = [d for d in reversed(dates)
+                   if os.path.exists(os.path.join(SNAPSHOT_DIR, f'{d}.jpg'))][:24]
+    def _snap_stars(d):
+        r = all_ratings.get(d, {})
+        count = r.get('count', 0)
+        if not count:
+            return ''
+        n_lit = min(5, max(0, round(r['sum'] / count)))
+        return (f'<span class="snap-stars">'
+                f'{"&#9733;" * n_lit}'
+                f'<span class="snap-stars-count">({count})</span>'
+                f'</span>')
+    snap_grid_items = ''.join(
+        f'<a href="/timelapse/{d}" title="{_date.fromisoformat(d).strftime("%b %-d, %Y")}">'
+        f'<img src="/timelapse/{d}/snapshot" loading="lazy" alt="Sunset {d}"'
+        f' onerror="this.parentElement.style.display=\'none\'">'
+        f'{_snap_stars(d)}'
+        f'</a>'
+        for d in _grid_dates
+    )
+
     html = f"""<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sunset {title_date}</title>
+  <script>
+    (function(){{ var p=new URLSearchParams(location.search).get('theme'),t=p||localStorage.getItem('tl_theme'); if(t==='dark') document.documentElement.setAttribute('data-theme','dark'); }})();
+  </script>
   <style>
+    :root {{
+      --bg:#fdf8f3; --bg2:#f0e8dd; --bg3:#e8ddd0;
+      --border-light:#e8e0d8; --border:#ddd0c2;
+      --text:#2c2117; --muted:#7e6e60; --dim:#b0a090;
+      --accent:#2d6a4f; --hover-text:#1a3d2a;
+      --wx-desc:#1a4a75;
+      --font: system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    }}
+    [data-theme="dark"] {{
+      --bg:#1a1a1a; --bg2:#222; --bg3:#2a2a2a;
+      --border-light:#333; --border:#444;
+      --text:#e0e0e0; --muted:#888; --dim:#555;
+      --accent:#4CAF50; --hover-text:#fff;
+      --wx-desc:#aed6f1;
+      --font: monospace;
+    }}
     * {{ box-sizing: border-box; }}
-    body {{ font-family: monospace; background:#1a1a1a; color:#e0e0e0;
+    body {{ font-family: var(--font); background: var(--bg); color: var(--text);
            margin:0; padding:16px; }}
-    h2   {{ margin:0; color:#fff; }}
+    h2   {{ margin:0; color: var(--text); }}
     video {{ width:100%; max-width:960px; display:block;
              background:#000; border-radius:4px; }}
-    .no-video {{ color:#888; font-style:italic; }}
+    .no-video {{ color: var(--muted); font-style:italic; }}
     .site-header {{ max-width:960px; padding:4px 0 10px; margin-bottom:4px;
-                    border-bottom:1px solid #333; display:flex;
+                    border-bottom:1px solid var(--border-light); display:flex;
                     flex-wrap:wrap; align-items:baseline; gap:0 10px; }}
-    .site-name {{ font-size:1.2em; color:#fff; font-weight:bold; }}
-    .site-sub  {{ font-size:0.85em; color:#888; }}
-    .site-sub a {{ color:#4CAF50; text-decoration:none; }}
-    .site-sub a:hover {{ color:#fff; }}
+    .site-name {{ font-size:1.2em; color: var(--text); font-weight:bold; }}
+    .site-sub  {{ font-size:0.85em; color: var(--muted); }}
+    .site-sub a {{ color: var(--accent); text-decoration:none; }}
+    .site-sub a:hover {{ color: var(--hover-text); }}
+    .theme-btn {{ margin-left:auto; background: var(--bg3); color: var(--muted);
+                  border:1px solid var(--border); padding:3px 10px; border-radius:4px;
+                  font-family:monospace; font-size:0.8em; cursor:pointer; white-space:nowrap; }}
+    .theme-btn:hover {{ color: var(--text); }}
     .nav {{ display:flex; justify-content:space-between; align-items:center;
             max-width:960px; margin:12px 0; }}
     .nav-center {{ flex:1; text-align:center; }}
-    .swipe-hint {{ display:none; color:#666; font-size:0.8em; margin-top:3px; }}
-    .nav-btn {{ background:#2a2a2a; color:#4CAF50; border:1px solid #444;
+    .nav-btn {{ background: var(--bg3); color: var(--accent); border:1px solid var(--border);
                 padding:8px 20px; border-radius:4px; text-decoration:none;
                 white-space:nowrap; font-size:1.05em; }}
-    .nav-btn.disabled {{ color:#555; border-color:#333; cursor:default; }}
-    .nav-btn:hover:not(.disabled) {{ background:#333; }}
-    .weather {{ max-width:960px; background:#222; border:1px solid #333;
+    .nav-btn.disabled {{ color: var(--dim); border-color: var(--border-light); cursor:default; }}
+    .nav-btn:hover:not(.disabled) {{ background: var(--border-light); }}
+    .weather {{ max-width:960px; background: var(--bg2); border:1px solid var(--border-light);
                 border-radius:4px; padding:12px 16px; margin:12px 0;
                 display:flex; flex-direction:column; gap:8px; }}
-    .wx-desc  {{ font-size:1.05em; color:#aed6f1; font-weight:bold; }}
-    .wx-quip  {{ font-size:0.9em; color:#888; font-weight:normal; font-style:italic; }}
+    .wx-desc  {{ font-size:1.05em; color: var(--wx-desc); font-weight:bold; }}
+    .wx-quip  {{ font-size:0.9em; color: var(--muted); font-weight:normal; font-style:italic; }}
     .wx-group {{ display:flex; flex-wrap:wrap; gap:12px; }}
     .stat {{ display:flex; flex-direction:column; min-width:80px; }}
-    .lbl  {{ font-size:0.75em; color:#888; text-transform:uppercase; }}
-    .val  {{ font-size:1.1em; color:#e0e0e0; }}
+    .lbl  {{ font-size:0.75em; color: var(--muted); text-transform:uppercase; }}
+    .val  {{ font-size:1.1em; color: var(--text); }}
     .ctrl-row   {{ max-width:960px; display:flex; flex-wrap:wrap;
                    align-items:center; gap:6px; margin:8px 0; }}
     .speed-btns {{ display:contents; }}
     .ctrl-btns  {{ display:contents; }}
-    .speed-lbl  {{ color:#888; font-size:0.85em; margin-right:4px; }}
-    .speed-btn  {{ background:#2a2a2a; color:#4CAF50; border:1px solid #444;
+    .speed-lbl  {{ color: var(--muted); font-size:0.85em; margin-right:4px; }}
+    .speed-btn  {{ background: var(--bg3); color: var(--accent); border:1px solid var(--border);
                    padding:4px 10px; border-radius:4px; cursor:pointer;
-                   font-family:monospace; font-size:0.9em; }}
-    .speed-btn:hover  {{ background:#333; }}
+                   font-family: var(--font); font-size:0.9em; }}
+    .speed-btn:hover  {{ background: var(--border-light); }}
     .speed-btn.active {{ background:#4CAF50; color:#000; border-color:#4CAF50; }}
-    .pause-btn        {{ color:#aaa; border-color:#555; }}
+    .pause-btn        {{ color: var(--muted); border-color: var(--dim); }}
     .pause-btn.paused {{ background:#e57373; color:#000; border-color:#e57373; }}
-    .dl-btn           {{ color:#aaa; border-color:#555; }}
+    .dl-btn           {{ color: var(--muted); border-color: var(--dim); }}
     details {{ max-width:960px; margin-top:16px; }}
-    summary {{ cursor:pointer; color:#4CAF50; }}
+    summary {{ cursor:pointer; color: var(--accent); }}
     ul {{ list-style:none; padding:0; margin:8px 0; }}
     li {{ display:flex; align-items:center; padding:4px 0; }}
     li a.list-main {{ display:flex; align-items:center; gap:10px; flex:1;
-                      color:#4CAF50; text-decoration:none; }}
-    li.current a.list-main {{ color:#fff; font-weight:bold; }}
-    li a.list-main:hover {{ color:#fff; }}
-    li.kbd-focus a.list-main {{ color:#fff; background:#2a2a2a; border-radius:3px;
+                      color: var(--accent); text-decoration:none; }}
+    li.current a.list-main {{ color: var(--text); font-weight:bold; }}
+    li a.list-main:hover {{ color: var(--hover-text); }}
+    li.kbd-focus a.list-main {{ color: var(--hover-text); background: var(--bg3); border-radius:3px;
                                 padding:2px 4px; }}
-    .snap-link {{ color:#555; font-size:0.85em; white-space:nowrap;
+    .snap-link {{ color: var(--dim); font-size:0.85em; white-space:nowrap;
                   text-decoration:none; padding:2px 8px; }}
-    .snap-link:hover {{ color:#aaa; }}
+    .snap-link:hover {{ color: var(--muted); }}
     .thumb {{ width:{THUMB_WIDTH}px; height:{THUMB_WIDTH * 9 // 16}px; object-fit:cover; border-radius:3px;
-               opacity:0.8; flex-shrink:0; background:#111; }}
-    li.current .thumb {{ opacity:1; outline:2px solid #4CAF50; }}
+               opacity:0.8; flex-shrink:0; background: var(--bg2); }}
+    li.current .thumb {{ opacity:1; outline:2px solid var(--accent); }}
     .list-info  {{ display:flex; flex-direction:column; gap:3px; }}
     .list-line1 {{ font-size:1.0em; }}
-    .list-rating {{ font-size:1.0em; color:#ccc; }}
+    .list-rating {{ font-size:1.0em; color: var(--muted); }}
     .list-stars {{ letter-spacing:1px; }}
-    .ls {{ font-size:2em; color:#555; }}
+    .ls {{ font-size:2em; color: var(--dim); }}
     .ls.lit {{ color:#f5c518; }}
-    .list-cond  {{ font-size:0.9em; color:#888; font-style:italic; }}
+    .list-cond  {{ font-size:0.9em; color: var(--muted); font-style:italic; }}
     .rating {{ max-width:960px; display:flex; align-items:center; gap:10px; margin:8px 0; }}
-    .rating-label {{ color:#888; font-size:0.9em; white-space:nowrap; }}
+    .rating-label {{ color: var(--muted); font-size:0.9em; white-space:nowrap; }}
     .stars {{ display:flex; gap:1px; line-height:1; }}
-    .star {{ font-size:2em; color:#666; cursor:default;
+    .star {{ font-size:2em; color: var(--dim); cursor:default;
              transition:color 0.1s; user-select:none; }}
     .star.clickable {{ cursor:pointer; }}
     .star.clickable:hover {{ color:#f5c518; }}
     .star.lit {{ color:#f5c518; }}
-    .rating-info {{ color:#aaa; font-size:0.85em; }}
+    .rating-info {{ color: var(--muted); font-size:0.85em; }}
     .newport-links {{ max-width:960px; margin:8px 0; font-size:0.85em;
-                      color:#888; flex-wrap:wrap; }}
+                      color: var(--muted); flex-wrap:wrap; }}
     .newport-lbl {{ margin-right:4px; }}
-    .newport-links a {{ color:#4CAF50; text-decoration:none; }}
-    .newport-links a:hover {{ color:#fff; }}
+    .newport-links a {{ color: var(--accent); text-decoration:none; }}
+    .newport-links a:hover {{ color: var(--hover-text); }}
     @media (max-width:600px) {{
       .nav-label  {{ display:none; }}
       .nav-center h2 {{ font-size:1.0em; }}
-      .swipe-hint {{ display:block; }}
       .thumb {{ width:44vw; height:calc(44vw * 9 / 16); }}
       .site-sub {{ font-size:0.78em; }}
       .ctrl-row   {{ flex-direction:column; align-items:flex-start; }}
       .speed-btns {{ display:flex; align-items:center; gap:6px; }}
       .ctrl-btns  {{ display:flex; gap:6px; }}
+      .theme-btn  {{ display:none; }}
+      .sunset-prefix {{ display:none; }}
     }}
     .best-frames {{ max-width:960px; margin:12px 0; }}
     .best-frames-header {{ display:flex; align-items:center; gap:10px; margin-bottom:8px; }}
-    .best-frames-label {{ color:#888; font-size:0.9em; }}
-    .best-frames-msg   {{ color:#aaa; font-size:0.85em; font-style:italic; }}
+    .best-frames-label {{ color: var(--muted); font-size:0.9em; }}
+    .best-frames-msg   {{ color: var(--muted); font-size:0.85em; font-style:italic; }}
     .best-scorer-row   {{ display:flex; flex-direction:column; gap:12px; }}
     .best-scorer       {{ display:flex; flex-direction:column; gap:6px; }}
-    .best-scorer-label {{ font-size:0.8em; color:#666; text-transform:uppercase;
+    .best-scorer-label {{ font-size:0.8em; color: var(--dim); text-transform:uppercase;
                           letter-spacing:0.05em; }}
-    .best-scorer-label span {{ color:#888; font-weight:normal; text-transform:none;
+    .best-scorer-label span {{ color: var(--muted); font-weight:normal; text-transform:none;
                                letter-spacing:0; margin-left:6px; }}
     .best-frames-grid  {{ display:flex; flex-wrap:wrap; gap:8px; }}
     .best-frame-item   {{ position:relative; cursor:pointer; }}
-    .best-frame-item img {{ display:block; border-radius:4px; border:2px solid #444;
+    .best-frame-item img {{ display:block; border-radius:4px; border:2px solid var(--border);
                             width:180px; height:101px; object-fit:cover; }}
     .best-frame-item img:hover {{ border-color:#4CAF50; }}
     .best-frame-score  {{ position:absolute; top:4px; left:4px; background:rgba(0,0,0,0.6);
                            color:#f5c518; font-size:0.75em; padding:1px 4px; border-radius:3px; }}
-    .best-rerun-btn    {{ background:none; border:none; color:#555; font-size:0.8em;
+    .best-rerun-btn    {{ background:none; border:none; color: var(--dim); font-size:0.8em;
                            cursor:pointer; padding:0; font-family:monospace; }}
-    .best-rerun-btn:hover {{ color:#aaa; }}
+    .best-rerun-btn:hover {{ color: var(--muted); }}
     @media (max-width:600px) {{
       .best-frame-item img {{ width:44vw; height:calc(44vw * 9 / 16); }}
+    }}
+    /* ── Light mode: guest-facing layout ── */
+    html:not([data-theme="dark"]) .site-name {{
+      font-size: 1.6em; font-weight: 700; letter-spacing: -0.02em;
+    }}
+    html:not([data-theme="dark"]) .nav-extras {{ display: flex; }}
+    .nav-extras {{ display: none; justify-content: center; gap: 20px;
+                   font-size: 0.85em; margin-top: 5px; }}
+    .nav-extras a {{ color: var(--muted); text-decoration: none; }}
+    .nav-extras a:hover {{ color: var(--accent); }}
+    html:not([data-theme="dark"]) .wx-extra   {{ display: none; }}
+    html:not([data-theme="dark"]) .ctrl-row   {{ display: none; }}
+    html:not([data-theme="dark"]) .best-frames {{ display: none; }}
+    html:not([data-theme="dark"]) details      {{ display: none; }}
+    html:not([data-theme="dark"]) .snap-grid-section {{ display: block; }}
+    /* ── Snap grid (light mode only) ── */
+    .snap-grid-section {{ display: none; max-width: 960px; margin: 20px 0; }}
+    .snap-grid-label   {{ font-size: 0.75em; color: var(--muted); text-transform: uppercase;
+                          letter-spacing: 0.07em; margin: 0 0 10px; font-weight: 600; }}
+    .snap-grid {{ display: grid;
+                  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }}
+    .snap-grid a   {{ display: block; border-radius: 6px; overflow: hidden; position: relative; }}
+    .snap-grid img {{ width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block;
+                      transition: opacity 0.15s; }}
+    .snap-grid a:hover img {{ opacity: 0.82; }}
+    .snap-stars {{ position: absolute; bottom: 0; left: 0; right: 0; pointer-events: none;
+                   background: linear-gradient(transparent, rgba(0,0,0,0.55));
+                   padding: 14px 6px 5px; color: #f5c518;
+                   font-size: 0.85em; letter-spacing: 1px; }}
+    .snap-stars-count {{ color: rgba(255,255,255,0.65); font-size: 0.85em; margin-left: 2px; }}
+    @media (max-width:600px) {{
+      .snap-grid {{ grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 5px; }}
     }}
   </style>
 </head>
@@ -1527,12 +1648,16 @@ def timelapse_view(date_or_file):
       &middot; <a href="https://www.vrbo.com/9829179ha" target="_blank" rel="noopener">Vrbo</a>
       {public_link}
     </span>
+    <button id="theme-toggle" class="theme-btn" onclick="toggleTheme()">&#9790; Dark</button>
   </header>
   <div class="nav">
     {prev_btn}
     <div class="nav-center">
-      <h2>Sunset &mdash; {title_date}</h2>
-      <div class="swipe-hint">swipe to change days</div>
+      <h2><span class="sunset-prefix">Sunset &mdash; </span>{title_date}</h2>
+      <div class="nav-extras">
+        <a href="/snapshot">Live</a>
+        {'<a href="/timelapse/' + dates[-1] + '">Latest</a>' if next_date else ''}
+      </div>
     </div>
     {next_btn}
   </div>
@@ -1557,15 +1682,14 @@ def timelapse_view(date_or_file):
     </div>
   </div>
   <div class="rating" id="rating-widget">
-    <span class="rating-label">Rate:</span>
     <div class="stars" id="stars">
-      <span class="star" data-val="1" title="Min rating is 3 stars">&#9733;</span>
-      <span class="star" data-val="2" title="Min rating is 3 stars">&#9733;</span>
+      <span class="star clickable" data-val="1" title="1 star">&#9733;</span>
+      <span class="star clickable" data-val="2" title="2 stars">&#9733;</span>
       <span class="star clickable" data-val="3" title="3 stars">&#9733;</span>
       <span class="star clickable" data-val="4" title="4 stars">&#9733;</span>
       <span class="star clickable" data-val="5" title="5 stars">&#9733;</span>
     </div>
-    <span id="rating-info"></span>
+    <span id="rating-info" class="rating-info"></span>
   </div>
   <div class="newport-links">
     <span class="newport-lbl">Links:</span>
@@ -1579,6 +1703,10 @@ def timelapse_view(date_or_file):
     <summary>All timelapses ({len(dates)})</summary>
     <ul>{list_items}</ul>
   </details>
+  <div class="snap-grid-section">
+    <p class="snap-grid-label">Recent Sunsets</p>
+    <div class="snap-grid">{snap_grid_items}</div>
+  </div>
   <script>
     const vid = document.getElementById('vid');
 
@@ -1598,7 +1726,8 @@ def timelapse_view(date_or_file):
     document.querySelectorAll('.speed-btn[data-rate]').forEach(btn =>
       btn.addEventListener('click', () => setSpeed(parseFloat(btn.dataset.rate))));
 
-    // Pause / play — persisted in localStorage
+    // Pause / play — persisted in sessionStorage (survives day navigation in
+    // the same tab, but resets when the tab is closed so autoplay isn't stuck)
     const pauseBtn = document.getElementById('pause-btn');
     function setPause(paused) {{
       if (!vid) return;
@@ -1609,11 +1738,11 @@ def timelapse_view(date_or_file):
         vid.play();
         if (pauseBtn) {{ pauseBtn.innerHTML = '&#9646;&#9646; Pause'; pauseBtn.classList.remove('paused'); }}
       }}
-      try {{ localStorage.setItem('tl_paused', paused ? 'true' : 'false'); }} catch(e) {{}}
+      try {{ sessionStorage.setItem('tl_paused', paused ? 'true' : 'false'); }} catch(e) {{}}
     }}
     if (pauseBtn && vid) {{
       pauseBtn.addEventListener('click', () => setPause(!vid.paused));
-      if (localStorage.getItem('tl_paused') === 'true') {{
+      if (sessionStorage.getItem('tl_paused') === 'true') {{
         vid.addEventListener('canplay', () => setPause(true), {{ once: true }});
       }}
     }}
@@ -1813,8 +1942,8 @@ def timelapse_view(date_or_file):
         if (e.deltaY < 0 && starPrev) {{ wheelCooldown = now; location.href = '/timelapse/' + starPrev; }}
       }}, {{passive: true}});
     }})();
-    // Star rating widget (3–5 stars only; one rating per day via cookie)
-    // Fully client-side so the HTML page is cacheable by Cloudflare.
+    // Star rating — combined display + click-to-rate.
+    // Stars show the current average; hovering previews your vote; clicking submits.
     (function() {{
       const dateStr = '{date_str}';
       function getCookie(name) {{
@@ -1822,7 +1951,8 @@ def timelapse_view(date_or_file):
         return m ? decodeURIComponent(m[1]) : null;
       }}
       let userRated = parseInt(getCookie('tl_rated_' + dateStr)) || null;
-      const starsEl = document.querySelectorAll('#stars .star');
+      let baseVal   = userRated || 0;   // what stars revert to on mouseout
+      const starsEl = Array.from(document.querySelectorAll('#stars .star'));
       const infoEl  = document.getElementById('rating-info');
 
       function setLit(upTo) {{
@@ -1830,53 +1960,43 @@ def timelapse_view(date_or_file):
           s.classList.toggle('lit', +s.dataset.val <= upTo);
         }});
       }}
-      function showInfo(rated, count, avg) {{
-        if (!count || avg === null) {{
-          infoEl.innerHTML = rated ? 'You rated ' + rated + '\u2605' : '';
-          infoEl.style.color = '#f5c518';
-          return;
-        }}
-        const nLit = Math.min(5, Math.max(0, Math.round(avg)));
-        const stars = [1,2,3,4,5].map(function(i) {{
-          return '<span class="ls' + (i <= nLit ? ' lit' : '') + '">&#9733;</span>';
-        }}).join('');
-        infoEl.innerHTML = avg.toFixed(1) + '&thinsp;<span class="list-stars">' + stars + '</span>&thinsp;(' + count + ')';
-        infoEl.style.color = '#ccc';
-      }}
-      function freeze(val) {{
-        starsEl.forEach(function(s) {{ s.style.pointerEvents = 'none'; }});
-        setLit(val);
+      function applyState(avg, count) {{
+        baseVal = userRated || (avg !== null ? Math.round(avg) : 0);
+        setLit(baseVal);
+        infoEl.textContent = count > 0 ? '(' + count + ')' : '';
       }}
 
-      showInfo(userRated, null, null);
-      if (userRated) freeze(userRated);
-
-      // Fetch live aggregate from API (served by Cloudflare Worker or Pi /api/ratings/DATE)
+      // Render immediately from cookie, then refresh from API
+      setLit(baseVal);
       fetch('/api/ratings/' + dateStr)
         .then(function(r) {{ return r.json(); }})
-        .then(function(d) {{ showInfo(userRated, d.count || 0, d.avg); }})
+        .then(function(d) {{ applyState(d.avg, d.count || 0); }})
         .catch(function() {{}});
 
       if (!userRated) {{
         starsEl.forEach(function(s) {{
-          if (!s.classList.contains('clickable')) return;
           s.addEventListener('mouseenter', function() {{ setLit(+s.dataset.val); }});
-          s.addEventListener('mouseleave', function() {{ setLit(0); }});
+          s.addEventListener('mouseleave', function() {{ setLit(baseVal); }});
           s.addEventListener('click', function() {{
             const v = +s.dataset.val;
+            userRated = v; baseVal = v;
+            setLit(v);
+            starsEl.forEach(function(s2) {{ s2.style.pointerEvents = 'none'; }});
             fetch('/timelapse/' + dateStr + '/rate', {{
               method: 'POST',
               headers: {{'Content-Type': 'application/json'}},
               body: JSON.stringify({{rating: v}})
             }})
             .then(function(r) {{ return r.json(); }})
-            .then(function(d) {{ freeze(v); userRated = v; showInfo(v, d.count, d.avg); }})
+            .then(function(d) {{ applyState(d.avg, d.count || 0); }})
             .catch(function() {{
-              infoEl.textContent = 'Rating failed \u2014 try again';
+              infoEl.textContent = 'Failed \u2014 try again';
               infoEl.style.color = '#e57373';
             }});
           }});
         }});
+      }} else {{
+        starsEl.forEach(function(s) {{ s.style.pointerEvents = 'none'; }});
       }}
     }})();
     // Best-frames picker — direct Pi access only (button hidden from CF users)
@@ -2064,6 +2184,24 @@ def timelapse_view(date_or_file):
 
       window.toggleZoom = function() {{ zoomed = !zoomed; applyZoom(); }};
       zoomBtn.addEventListener('click', window.toggleZoom);
+    }})();
+
+    // Light/dark theme toggle — persisted in localStorage
+    function toggleTheme() {{
+      var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      if (isDark) {{
+        document.documentElement.removeAttribute('data-theme');
+        localStorage.setItem('tl_theme', 'light');
+        document.getElementById('theme-toggle').textContent = '\u263e Dark';
+      }} else {{
+        document.documentElement.setAttribute('data-theme', 'dark');
+        localStorage.setItem('tl_theme', 'dark');
+        document.getElementById('theme-toggle').textContent = '\u2600 Light';
+      }}
+    }}
+    (function(){{
+      if (document.documentElement.getAttribute('data-theme') === 'dark')
+        document.getElementById('theme-toggle').textContent = '\u2600 Light';
     }})();
   </script>
 </body>
