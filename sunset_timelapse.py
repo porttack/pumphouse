@@ -125,7 +125,7 @@ def assemble_timelapse(frames_dir, output_path, fps=OUTPUT_FPS):
         '-i', pattern,
         '-frames:v', str(n),   # only the completed frames
         '-c:v', 'libx264',
-        '-pix_fmt', 'yuv420p',
+        '-vf', 'scale=in_range=full:out_range=tv,format=yuv420p',
         '-crf', str(OUTPUT_CRF),
         '-movflags', '+faststart',
         str(tmp),
@@ -152,9 +152,9 @@ def _generate_zoom(source: Path) -> None:
     tmp = zoom_path.with_suffix('.tmp.mp4')
     cmd = [
         'ffmpeg', '-y', '-i', str(source),
-        '-vf', ZOOM_CROP,
+        '-vf', ZOOM_CROP + ',scale=in_range=full:out_range=tv,format=yuv420p',
         '-c:v', 'libx264', '-crf', str(OUTPUT_CRF), '-preset', 'fast',
-        '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
+        '-movflags', '+faststart',
         str(tmp),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
