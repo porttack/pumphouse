@@ -358,33 +358,26 @@ def run_todays_timelapse(start_dt=None, end_dt=None, frames_root=None):
         assemble_timelapse(frames_dir, output)
         _generate_zoom(output)
 
-        # Save a snapshot JPEG from the assembled frames.
+        # Save a snapshot JPEG from the assembled frames using a fixed time offset.
         # Custom windows (e.g. moonset): midpoint of window; never overwrite an
         # existing snapshot so a later sunset run can always claim the date image.
-        # Standard sunset run: use CLIP (falling back to OpenCV) to pick the most
-        # visually interesting frame rather than a fixed time offset.
+        #
+        # NOTE: CLIP-based snapshot selection was removed from this path because
+        # loading the CLIP model (~500 MB) immediately after a 180-minute capture
+        # session caused an OOM reboot on Pi 4.  Instead, the best-frames background
+        # job (triggered from the web UI or pick_best.start_pick_best) runs CLIP
+        # safely in a lower-priority detached thread well after assembly completes.
+        # Use "Set key snapshot" in the best-frames viewer to promote a CLIP pick.
         SNAPSHOT_DIR.mkdir(exist_ok=True)
         snapshot_path = SNAPSHOT_DIR / f'{date_str}.jpg'
         if frames and (not custom or not snapshot_path.exists()):
             if custom:
                 offset_secs = duration // 2
-                frame_idx   = max(0, min(int(offset_secs / effective_interval), len(frames) - 2))
-                best_frame  = frames[frame_idx]
-                log.info(f"Saved snapshot (custom midpoint): frame {frame_idx} → {snapshot_path.name}")
             else:
-                try:
-                    from monitor.pick_best import pick_best_snapshot
-                    best_frame = pick_best_snapshot(frames)
-                    if best_frame is None:
-                        raise ValueError('pick_best_snapshot returned None')
-                    log.info(f"Saved snapshot (CLIP/CV pick): {best_frame.name} → {snapshot_path.name}")
-                except Exception as e:
-                    log.warning(f"pick_best_snapshot failed ({e}), falling back to fixed offset")
-                    offset_secs = (WINDOW_BEFORE - SNAPSHOT_MINUTES_BEFORE_SUNSET) * 60
-                    frame_idx   = max(0, min(int(offset_secs / effective_interval), len(frames) - 2))
-                    best_frame  = frames[frame_idx]
-                    log.info(f"Saved snapshot (fixed offset fallback): frame {frame_idx} → {snapshot_path.name}")
-            shutil.copy2(str(best_frame), str(snapshot_path))
+                offset_secs = (WINDOW_BEFORE - SNAPSHOT_MINUTES_BEFORE_SUNSET) * 60
+            frame_idx = max(0, min(int(offset_secs / effective_interval), len(frames) - 2))
+            shutil.copy2(str(frames[frame_idx]), str(snapshot_path))
+            log.info(f"Saved snapshot: frame {frame_idx} → {snapshot_path.name}")
 
         cleanup_old(RETENTION_DAYS)
         if not custom:
@@ -397,6 +390,67 @@ def run_todays_timelapse(start_dt=None, end_dt=None, frames_root=None):
         if frames_dir.exists():
             shutil.rmtree(frames_dir)
             log.info("Cleaned up frames")
+
+    # After frames are cleaned up (freeing ~320 MB of tmpfs), start the
+    # best-frames CLIP job from the finished MP4.  This is safe because
+    # _run_job only extracts ~75 frames at 1fps (~11 MB), not the full 2160.
+    # When done, promote CLIP's top pick to replace the fixed-offset snapshot.
+    if not custom:
+        _start_auto_clip(date_str, output, snapshot_path)
+
+
+# ---------------------------------------------------------------------------
+# Post-assembly CLIP best-frame selection
+# ---------------------------------------------------------------------------
+def _start_auto_clip(date_str: str, mp4_path: Path, snapshot_path: Path) -> None:
+    """
+    Spin up the best-frames background job (CLIP + OpenCV) in a daemon thread.
+    Called only AFTER the raw frames have been cleaned up, so CLIP loads into
+    ~320 MB of newly freed RAM instead of competing with the full frame set.
+
+    When the job finishes, CLIP's highest-scoring frame is copied over the
+    fixed-offset snapshot so the thumbnail and timelapse email attachment are
+    upgraded automatically.  Any failure is logged and silently ignored —
+    the fixed-offset snapshot is always saved first.
+    """
+    def _worker():
+        try:
+            from monitor.pick_best import start_pick_best, get_status, BEST_DIR
+            import time
+            from pathlib import Path as _Path
+
+            result = start_pick_best(date_str, str(mp4_path))
+            log.info(f"Auto best-frames job: {result}")
+            if result == 'already_running':
+                return   # web UI triggered it first; let it run
+
+            # Wait up to 5 minutes for completion
+            for _ in range(100):
+                time.sleep(3)
+                st = get_status(date_str)
+                if st['status'] in ('done', 'error'):
+                    break
+
+            st = get_status(date_str)
+            if st['status'] != 'done':
+                log.warning(f"Auto best-frames: {st}")
+                return
+
+            cl_frames = st.get('clip_frames', [])
+            if not cl_frames:
+                log.info("Auto best-frames: no CLIP frames, keeping fixed-offset snapshot")
+                return
+
+            best    = max(cl_frames, key=lambda f: f['score'])
+            src     = _Path(BEST_DIR) / date_str / best['file']
+            if src.exists():
+                shutil.copy2(str(src), str(snapshot_path))
+                log.info(f"Snapshot upgraded to CLIP pick: {best['file']} ({best['score']:.0%})")
+        except Exception as exc:
+            log.warning(f"Auto best-frames failed: {exc}")
+
+    t = threading.Thread(target=_worker, daemon=True, name=f'auto-clip-{date_str}')
+    t.start()
 
 
 # ---------------------------------------------------------------------------
