@@ -1773,6 +1773,7 @@ def index():
     # Read CSV files
     snapshot_headers, snapshot_rows = read_csv_tail(DEFAULT_SNAPSHOTS_FILE, max_rows=DASHBOARD_SNAPSHOT_COUNT)
     daily_headers, daily_rows = read_csv_tail(str(DAILY_CSV), max_rows=62)
+    pumpoff_headers, pumpoff_rows = read_csv_tail(str(DAILY_CSV.parent / 'pumpoff.csv'), max_rows=50)
     event_headers, event_rows = read_events_by_time(EVENTS_FILE, hours=hours)
 
     # Filter events based on DASHBOARD_HIDE_EVENT_TYPES
@@ -2007,6 +2008,8 @@ def index():
                          snapshot_rows=snapshot_rows,
                          daily_headers=daily_headers,
                          daily_rows=daily_rows,
+                         pumpoff_headers=pumpoff_headers,
+                         pumpoff_rows=pumpoff_rows,
                          event_headers=event_headers,
                          event_rows=event_rows,
                          stats=stats,

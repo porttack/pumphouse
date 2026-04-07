@@ -179,6 +179,13 @@
         .negative {
             color: #ff9800;
         }
+        .highlight-row td {
+            background-color: rgba(255, 200, 100, 0.12);
+        }
+        td.pumpoff-comments {
+            min-width: 320px;
+            white-space: normal;
+        }
         .url {
             color: #2196F3;
             font-size: 12px;
@@ -764,6 +771,48 @@
                         <tr>
                             {% for cell in row %}
                             <td>
+                                {% if cell.startswith('+') %}
+                                <span class="positive">{{ cell }}</span>
+                                {% elif cell.startswith('-') %}
+                                <span class="negative">{{ cell }}</span>
+                                {% else %}
+                                {{ cell }}
+                                {% endif %}
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Pump-Off Outages Section -->
+        {% if owner_mode and pumpoff_headers %}
+        <div class="section">
+            <h2>PUMP-OFF OUTAGES (&gt;24 hrs)</h2>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            {% for header in pumpoff_headers %}
+                            <th>
+                                {% if header == 'Comments' %}
+                                {{ header }}
+                                {% else %}
+                                <div class="vertical-text">{{ header }}</div>
+                                {% endif %}
+                            </th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in pumpoff_rows|reverse %}
+                        {% set checked = row[pumpoff_headers.index('Checked')] if 'Checked' in pumpoff_headers else '' %}
+                        <tr{% if checked == 'Yes' %} class="highlight-row"{% endif %}>
+                            {% for cell in row %}
+                            <td{% if loop.last %} class="pumpoff-comments"{% endif %}>
                                 {% if cell.startswith('+') %}
                                 <span class="positive">{{ cell }}</span>
                                 {% elif cell.startswith('-') %}
