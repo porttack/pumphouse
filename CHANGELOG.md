@@ -2,6 +2,36 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.24.0] - 2026-04-07
+
+### Added — Public Timelapse Website, iOS Video Fix, Pump-Off Outage Tracking
+
+#### Timelapse: Light/Dark Mode & Public-Facing Design
+- **Warm light mode as default**: timelapse viewer and snapshot pages now default to a warm off-white color scheme (`#fdf8f3` background, `#2c2117` text, `#2d6a4f` accent) suited for guests; dark monospace mode remains fully featured and accessible via the toggle button
+- **`?theme=dark` / `?theme=light` URL params**: override `localStorage` without changing the stored preference — useful for mobile testing
+- **Theme toggle hidden on mobile**: phones always get light mode; no button cluttering the header
+- **Snap grid** (light mode): replaces the developer-oriented list with a 4-column photo grid of the 24 most recent sunset snapshots; click any to navigate to that day
+- **Star ratings on snap grid**: thumbnails show an overlay with average rating and count if rated
+- **Light mode hides developer controls**: `.ctrl-row` (speed/zoom/snapshot buttons), `.best-frames` panel, and `<details>` elements are all `display:none` in light mode via CSS — no server-side branching
+- **Combined star rating widget**: single set of 5 stars shows the current average; unrated visitors can click to rate 1–5 stars (previously, 1–2 stars were blocked); after rating, stars lock to show the new average
+- **Live / Latest nav links** in light mode header: "Live" → `/snapshot`, "Latest" → most recent timelapse date
+- **"Swipe to change days" hint removed**: was never surfaced in practice; gesture is still fully functional
+
+#### Timelapse: Mobile Improvements
+- Date heading shortened on mobile: "Sunset — Monday, March 30" → "Mon, Mar 30" (`.sunset-prefix` hidden via media query)
+- Weather panel simplified in light mode: radiation, rain, and cloud coverage hidden (`.wx-extra` class); temperature, wind, and weather description remain
+- Theme toggle hidden on snapshot/live page on mobile (consistent with timelapse pages)
+
+#### Timelapse: iOS Video Fix
+- **Root cause**: all timelapse and zoom MP4s were encoded with `yuvj420p` (JPEG full-range chroma), which iOS Safari refuses to play — it requires limited-range `yuv420p` (`color_range=tv`)
+- **Encoding fix**: `assemble_timelapse()` and `_generate_zoom()` now use `-vf scale=in_range=full:out_range=tv,format=yuv420p` instead of `-pix_fmt yuv420p` so new videos are correctly tagged at encode time
+- **Batch fix for existing files**: applied `h264_metadata=video_full_range_flag=0` bitstream filter (lossless, no re-encode) to all 40 existing main MP4s and all 33 older zoom MP4s
+- **Corrupted zoom files**: 12 zoom files (2026-03-24 through 2026-04-05) and the 2026-03-31 zoom were found with `Duration: N/A` (broken moov atom); deleted and regenerated from the corresponding main MP4s
+- **`tl_paused` persistence fix**: switched from `localStorage` to `sessionStorage` so a paused video doesn't stay paused on the next page visit
+
+#### Dashboard: Pump-Off Outages
+- **Pump-off outage table** on owner dashboard: reads `pumpoff.csv` from the data directory and renders a styled table (reversed chronological order) with highlighted rows for checked entries; visible only in `?owner` mode
+
 ## [2.23.0] - 2026-03-15
 
 ### Added — Owner Mode, Wind Forecast, Data Rotation, Mobile Fixes

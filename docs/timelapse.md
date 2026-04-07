@@ -60,6 +60,43 @@ Buttons on the viewer page: **¼x · ½x · 1x · 2x · 4x · 8x** and **Pause**
 
 ---
 
+## iOS / Safari Video Requirements
+
+iOS Safari is stricter than desktop browsers about H.264 color encoding. Two things are required for videos to play:
+
+1. **Limited color range** (`color_range=tv`, `yuv420p`): iOS refuses full-range `yuvj420p` (JPEG chroma). The encoding pipeline uses `-vf scale=in_range=full:out_range=tv,format=yuv420p` to convert at encode time.
+2. **`moov` atom at the front** (`-movflags +faststart`): required for streaming; without it the browser must download the entire file before it can start playing.
+
+### Fixing existing files (lossless)
+
+If a file was encoded with `yuvj420p`, the color range flag can be flipped without re-encoding:
+
+```bash
+ffmpeg -i input.mp4 -c copy -bsf:v h264_metadata=video_full_range_flag=0 output.mp4
+```
+
+This changes only a single bit in the bitstream — no quality loss, no re-encode. Apply to batches:
+
+```bash
+for f in *.mp4; do
+  ffmpeg -y -i "$f" -c copy -bsf:v h264_metadata=video_full_range_flag=0 "${f%.mp4}_fixed.mp4" && mv "${f%.mp4}_fixed.mp4" "$f"
+done
+```
+
+### Diagnosing broken videos
+
+```bash
+ffprobe -v error -select_streams v:0 \
+  -show_entries stream=pix_fmt,color_range \
+  -of default=nw=1 file.mp4
+# Good: pix_fmt=yuv420p  color_range=tv
+# Bad:  pix_fmt=yuvj420p color_range=pc
+```
+
+If `ffprobe` returns `Duration: N/A` with no stream info, the file's moov atom is missing or corrupted — regenerate from source frames.
+
+---
+
 ## Capture Configuration (`sunset_timelapse.py`)
 
 | Parameter | Value | Description |
@@ -181,12 +218,47 @@ Weather is shown per day using two sources:
 
 ---
 
+## Light / Dark Mode
+
+The timelapse viewer and snapshot pages support two visual modes, toggled by a button in the header.
+
+### Default (light / warm mode)
+Intended for guests and general visitors. Warm off-white palette (`#fdf8f3` background, `#2c2117` text, `#2d6a4f` accent). Features shown:
+- Snap grid: 4-column photo grid of the 24 most recent sunsets with star-rating overlays
+- Simplified weather panel (temperature, wind, description; radiation/rain/cloud hidden)
+- Live and Latest nav links
+- Combined star rating widget (click to rate, shows average)
+
+### Dark / developer mode
+Full-featured monospace layout with all controls visible: speed buttons, zoom toggle, snapshot extraction, best-frames panel, and the full weather strip including radiation and cloud coverage.
+
+### Persistence and URL override
+- Preference stored in `localStorage` (`tl_theme`)
+- `?theme=dark` or `?theme=light` in the URL overrides localStorage for that visit without changing the stored value — useful for mobile testing without a toggle button
+- Theme toggle is hidden on mobile (`max-width: 600px`); phones always get light mode
+- An anti-flash inline script in `<head>` reads the value before first paint to prevent a white flash on dark-mode page loads
+
+### CSS implementation
+All layout differences are CSS-only using a `data-theme="dark"` attribute on `<html>`. No server-side branching; the same HTML is served to all visitors.
+
+```css
+/* light-mode-only rules */
+html:not([data-theme="dark"]) .snap-grid-section { display: block; }
+html:not([data-theme="dark"]) .ctrl-row          { display: none; }
+html:not([data-theme="dark"]) .best-frames        { display: none; }
+html:not([data-theme="dark"]) .wx-extra           { display: none; }
+```
+
+---
+
 ## Ratings
 
-- Visitors rate each day 3–5 stars (1–2 star ratings not allowed)
+- Visitors rate each day 1–5 stars
 - One rating per day per browser (cookie stored for 1 year)
 - Aggregate data stored in **Cloudflare KV** (`RATINGS` namespace); `ratings.json` kept in sync for direct Pi access
 - Rating widget is fully client-side — cookie read via JS, count/avg fetched from `/api/ratings/DATE` — so HTML pages are cacheable by Cloudflare
+- Single set of stars: shows current average; unrated visitors can click to rate; after submitting, stars lock to show the updated average
+- In light mode the widget appears below the video; snap-grid thumbnails show a smaller overlay with the average and count
 
 ---
 

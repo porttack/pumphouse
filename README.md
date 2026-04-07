@@ -19,7 +19,7 @@ Remote monitoring and control system for a well-water pump house serving an Airb
 - **Automated maintenance**: Automatic spindown filter purging reduced service visits from weekly to every 6–8 months (~$2,400/year savings).
 - **Opportunistic filling**: Well pump power is controlled by the highest-elevation tank in the system (not ours). Override lets us fill whenever power happens to be on, not just when our float switch calls for water.
 - **Guest water guidance**: An e-paper display at the property shows guests current water availability and when to delay laundry or other high-use activities — reducing the risk of running low during a stay.
-- **Marketing**: Daily sunset timelapses are published at [onblackberryhill.com](https://onblackberryhill.com/timelapse) to showcase the property.
+- **Marketing**: Daily sunset timelapses are published at [onblackberryhill.com](https://onblackberryhill.com/timelapse) to showcase the property. The public site uses a warm light-mode design with a photo grid of recent sunsets; a dark developer mode with full controls is one toggle away.
 
 ## How: Three Daemons
 
