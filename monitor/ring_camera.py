@@ -75,8 +75,12 @@ def get_snapshot(token_file: Path, camera_name: str = '') -> Optional[bytes]:
 
     try:
         loop = asyncio.new_event_loop()
-        data = loop.run_until_complete(_fetch())
-        loop.close()
+        asyncio.set_event_loop(loop)
+        try:
+            data = loop.run_until_complete(_fetch())
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None)
     except Exception as e:
         logger.error('Ring snapshot error: %s', e)
         return None
