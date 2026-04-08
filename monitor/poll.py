@@ -604,7 +604,7 @@ class SimplifiedMonitor:
                         _PUMPOFF_GAP = 24 * 3600
                         if _gap is not None and _gap >= _PUMPOFF_GAP:
                             def _rebuild_pumpoff(monitor=self):
-                                time.sleep(90)
+                                time.sleep(20 * 60)  # wait 20 min for a snapshot + is_ongoing to clear
                                 if read_pressure():  # still HIGH — recovery is real
                                     import subprocess as _sp, sys as _sys
                                     from pathlib import Path as _Path
