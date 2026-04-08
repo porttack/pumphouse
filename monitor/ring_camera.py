@@ -16,7 +16,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-_CACHE_TTL = 60  # seconds
+_CACHE_TTL = 300  # seconds (5 minutes — Ring rate-limits frequent fetches)
 
 _lock             = threading.Lock()
 _cached_bytes:    Optional[bytes] = None
