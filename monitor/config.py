@@ -238,6 +238,8 @@ CAMERA_PASS = ''
 # Ring Camera Configuration
 RING_CAMERA_NAME = ''  # Name of Ring device to use (e.g. "Front Door"); first device if blank
 RING_TOKEN_FILE = Path.home() / '.config' / 'pumphouse' / 'ring_token.json'
+RING_CACHE_FILE = Path.home() / '.config' / 'pumphouse' / 'ring_snapshot_cache.jpg'
+RING_CACHE_MINUTES = 10  # How long to cache the Ring snapshot (shared across all processes)
 
 # Load secrets from secrets file
 SECRETS_FILE = Path.home() / '.config' / 'pumphouse' / 'secrets.conf'

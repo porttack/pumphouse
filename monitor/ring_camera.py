@@ -1,14 +1,16 @@
 """
-Shared Ring camera snapshot fetcher with in-memory cache.
+Shared Ring camera snapshot fetcher with file-based cache.
 
-Used by both the web dashboard (/ring-snapshot route) and the email notifier
-so each can fetch Ring snapshots without duplicating async/auth logic.
-Each OS process keeps its own 60-second cache independently.
+The JPEG is cached to RING_CACHE_FILE on disk, shared across all processes
+(gunicorn workers, monitor daemon, email notifier). A lock file prevents
+multiple processes from hitting the Ring API simultaneously.
+
+Cache TTL is controlled by RING_CACHE_MINUTES in config.py.
 """
 import asyncio
+import fcntl
 import json
 import logging
-import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -16,27 +18,55 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-_CACHE_TTL = 300  # seconds (5 minutes — Ring rate-limits frequent fetches)
-
-_lock             = threading.Lock()
-_cached_bytes:    Optional[bytes] = None
-_cached_at_mono:  float = 0.0   # time.monotonic() when last fetched
-_cached_at_epoch: float = 0.0   # time.time() when last fetched (for X-Ring-Time header)
-
 
 def get_snapshot(token_file: Path, camera_name: str = '') -> Optional[bytes]:
     """
-    Return a Ring camera JPEG as bytes, using a 60-second in-memory cache.
-    Returns None if the token file is missing, Ring is unreachable, or no
-    cameras are found.
+    Return a Ring camera JPEG as bytes, using a file-based shared cache.
+    All processes (gunicorn workers, monitor daemon) share the same cache file
+    so Ring is only called once per RING_CACHE_MINUTES regardless of load.
+    Returns None if the token file is missing or Ring is unreachable.
     """
-    global _cached_bytes, _cached_at_mono, _cached_at_epoch
+    from monitor.config import RING_CACHE_FILE, RING_CACHE_MINUTES
 
-    now_mono = time.monotonic()
-    with _lock:
-        if _cached_bytes is not None and (now_mono - _cached_at_mono) < _CACHE_TTL:
-            return _cached_bytes
+    cache_ttl = RING_CACHE_MINUTES * 60
+    lock_file = RING_CACHE_FILE.with_suffix('.lock')
 
+    # Fast path: cache file is fresh — no lock needed
+    if RING_CACHE_FILE.exists():
+        age = time.time() - RING_CACHE_FILE.stat().st_mtime
+        if age < cache_ttl:
+            return RING_CACHE_FILE.read_bytes()
+
+    # Cache is stale or missing — acquire lock and fetch
+    lock_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_file, 'w') as lf:
+        try:
+            fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            # Another process is fetching — wait for it then return whatever exists
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            fcntl.flock(lf, fcntl.LOCK_UN)
+            return RING_CACHE_FILE.read_bytes() if RING_CACHE_FILE.exists() else None
+
+        try:
+            # Re-check after acquiring lock (another process may have just fetched)
+            if RING_CACHE_FILE.exists():
+                age = time.time() - RING_CACHE_FILE.stat().st_mtime
+                if age < cache_ttl:
+                    return RING_CACHE_FILE.read_bytes()
+
+            data = _fetch_from_ring(token_file, camera_name)
+            if data:
+                data = _stamp_timestamp(data)
+                RING_CACHE_FILE.write_bytes(data)
+                logger.info('Ring snapshot fetched and cached (%d bytes)', len(data))
+            return data
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
+
+
+def _fetch_from_ring(token_file: Path, camera_name: str) -> Optional[bytes]:
+    """Fetch a raw JPEG from the Ring API. No caching."""
     if not token_file.exists():
         logger.warning('Ring token file not found: %s', token_file)
         return None
@@ -77,7 +107,7 @@ def get_snapshot(token_file: Path, camera_name: str = '') -> Optional[bytes]:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            data = loop.run_until_complete(_fetch())
+            return loop.run_until_complete(_fetch())
         finally:
             loop.close()
             asyncio.set_event_loop(None)
@@ -85,20 +115,10 @@ def get_snapshot(token_file: Path, camera_name: str = '') -> Optional[bytes]:
         logger.error('Ring snapshot error: %s', e)
         return None
 
-    if data:
-        data = _stamp_timestamp(data)
-        with _lock:
-            _cached_bytes    = data
-            _cached_at_mono  = time.monotonic()
-            _cached_at_epoch = time.time()
-
-    return data
-
 
 def _stamp_timestamp(jpeg_bytes: bytes) -> bytes:
     """
     Overlay the current time on the bottom-left of the JPEG image.
-    Uses a black drop-shadow behind white text for readability on any background.
     Falls back to the original bytes if cv2 is unavailable or decoding fails.
     """
     try:
@@ -113,9 +133,9 @@ def _stamp_timestamp(jpeg_bytes: bytes) -> bytes:
         return jpeg_bytes
 
     h, w  = img.shape[:2]
-    label = datetime.now().strftime('%-I:%M %p')   # e.g. "2:34 PM"
+    label = datetime.now().strftime('%-I:%M %p')
     font  = cv2.FONT_HERSHEY_SIMPLEX
-    scale = max(0.65, w / 2200)                     # scales with image width
+    scale = max(0.65, w / 2200)
     thick = max(1, round(scale * 2))
 
     (tw, th), baseline = cv2.getTextSize(label, font, scale, thick)
@@ -123,21 +143,18 @@ def _stamp_timestamp(jpeg_bytes: bytes) -> bytes:
     x = margin
     y = h - margin
 
-    # Semi-transparent dark background rectangle for contrast
     pad = margin // 2
     overlay = img.copy()
     cv2.rectangle(overlay, (x - pad, y - th - pad), (x + tw + pad, y + baseline + pad),
                   (0, 0, 0), cv2.FILLED)
     cv2.addWeighted(overlay, 0.45, img, 0.55, 0, img)
-
-    # White text
     cv2.putText(img, label, (x, y), font, scale, (255, 255, 255), thick, cv2.LINE_AA)
 
     _, buf = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 88])
     return buf.tobytes()
 
 
-def get_fetched_epoch() -> Optional[float]:
-    """Return the Unix timestamp when the cached snapshot was last fetched, or None."""
-    with _lock:
-        return _cached_at_epoch if _cached_bytes is not None else None
+def get_cache_mtime() -> Optional[float]:
+    """Return the mtime of the cache file, or None if it doesn't exist."""
+    from monitor.config import RING_CACHE_FILE
+    return RING_CACHE_FILE.stat().st_mtime if RING_CACHE_FILE.exists() else None

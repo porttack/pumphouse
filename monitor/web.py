@@ -2121,15 +2121,15 @@ def sunset():
 @app.route('/ring-snapshot')
 def ring_snapshot():
     """
-    Proxy a Ring camera snapshot with a 60-second cache.
-    Requires ~/.config/pumphouse/ring_token.json (created by bin/ring_setup.py).
-    Returns X-Ring-Time header (Unix epoch) indicating when the snapshot was fetched.
+    Proxy a Ring camera snapshot with a shared file-based cache.
+    All processes share the same cache file so Ring is only called once
+    per RING_CACHE_MINUTES regardless of how many workers handle requests.
     """
     img_bytes = ring_camera.get_snapshot(RING_TOKEN_FILE, RING_CAMERA_NAME)
     if not img_bytes:
         return Response('Ring snapshot unavailable', status=503)
-    epoch = ring_camera.get_fetched_epoch()
-    headers = {'X-Ring-Time': str(int(epoch))} if epoch else {}
+    mtime = ring_camera.get_cache_mtime()
+    headers = {'X-Ring-Time': str(int(mtime))} if mtime else {}
     return Response(img_bytes, status=200, mimetype='image/jpeg', headers=headers)
 
 
