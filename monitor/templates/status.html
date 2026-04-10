@@ -1056,6 +1056,81 @@
         </div>
         {% endif %}
 
+        <!-- Prior 6-Month History -->
+        {% if prior_calendar_months and show_totals %}
+        <div class="section">
+            <h2>HISTORY — PRIOR 6 MONTHS</h2>
+            <div class="cal-grid">
+                {% for month in prior_calendar_months %}
+                <div class="cal-month">
+                    <div class="cal-month-name">{{ month.name }}{% if month.income %} <span style="color:#888; font-weight:normal;">{{ month.income }}</span>{% endif %}</div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Su</th><th>Mo</th><th>Tu</th><th>We</th>
+                                <th>Th</th><th>Fr</th><th>Sa</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for week in month.weeks %}
+                            <tr>
+                                {% for cell in week %}
+                                <td class="{{ cell.cls }}{% if cell.today %} cal-today{% endif %}"{% if cell.style %} style="{{ cell.style }}"{% endif %}>{{ cell.day or '' }}</td>
+                                {% endfor %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endfor %}
+            </div>
+            {% if past_reservation_list %}
+            <div class="table-container" style="margin-top:12px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Check-In</th>
+                            <th>Check-Out</th>
+                            <th>Nights</th>
+                            <th>Guest Type</th>
+                            <th>Repeat</th>
+                            <th>Booking</th>
+                            <th>Gross</th>
+                            <th>Net</th>
+                            <th>Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% set ns = namespace(prev_month='') %}
+                        {% for res in past_reservation_list %}
+                        {% set checkout_month = res['Checkout'][:7] %}
+                        {% if checkout_month != ns.prev_month %}
+                        {% set ns.prev_month = checkout_month %}
+                        <tr style="color:#444; font-size:0.8em;">
+                            <td colspan="9" style="padding-top:8px; border-top:1px solid #333;">
+                                {{ res['Checkout']|format_month_year }}
+                            </td>
+                        </tr>
+                        {% endif %}
+                        <tr style="color:#555e72;">
+                            <td>{{ format_date_short(res['Check-In']) }}</td>
+                            <td>{{ format_date_short(res['Checkout']) }}</td>
+                            <td style="text-align:center;">{{ res['Nights'] }}</td>
+                            <td>{{ 'Owner' if 'Owner' in res['Type'] else 'Guest' }}</td>
+                            <td style="text-align:center;">{{ res.get('repeat_guest', '?') }}</td>
+                            <td>{{ res['Type'] }}</td>
+                            <td style="text-align:right;">${{ "%.0f"|format(res.get('gross_income', 0)) }}</td>
+                            <td style="text-align:right;">${{ "%.0f"|format(res.get('net_income', 0)) }}</td>
+                            <td style="text-align:right; font-weight:bold;">${{ "%.0f"|format(res.get('monthly_total', 0)) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             var row   = document.getElementById('image-row');

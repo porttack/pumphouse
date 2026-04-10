@@ -169,6 +169,15 @@ def _bypass_timer_watchdog():
 threading.Thread(target=_bypass_timer_watchdog, daemon=True, name='bypass-timer').start()
 
 # Custom Jinja filter for human-friendly timestamp formatting
+@app.template_filter('format_month_year')
+def format_month_year_filter(date_str):
+    """Convert 'YYYY-MM-DD' to 'Month YYYY' (e.g., 'March 2026')"""
+    try:
+        return datetime.strptime(date_str[:7], '%Y-%m').strftime('%B %Y')
+    except Exception:
+        return date_str
+
+
 @app.template_filter('human_time')
 def human_time_filter(timestamp_str):
     """Convert timestamp to 3-letter day and HH:MM format (e.g., 'Mon 14:23')"""
@@ -433,8 +442,84 @@ def get_snapshots_stats(filepath=DEFAULT_SNAPSHOTS_FILE):
     except Exception as e:
         return None
 
-def build_calendar_months(all_reservations, num_months=19):
-    """Build calendar data for the availability calendar (current month + 18 more).
+def _build_prior_calendar(all_reservations, num_months=6):
+    """Return calendar months for the prior 6 complete months, oldest first."""
+    from datetime import date as _date
+    today = _date.today()
+    # Step back num_months months from the first of this month
+    yr, mo = today.year, today.month
+    for _ in range(num_months):
+        mo -= 1
+        if mo < 1:
+            mo = 12
+            yr -= 1
+    return build_calendar_months(
+        all_reservations,
+        num_months=num_months,
+        start_year=yr,
+        start_month=mo,
+        show_past_detail=True,
+    )
+
+
+def _build_past_reservations(all_reservations, management_fee_pct, guest_counts):
+    """Return reservation rows (with gross/net/monthly_total) for checkouts in the prior 6 months."""
+    from datetime import date as _date
+    from monitor.occupancy import parse_date
+    today = _date.today()
+    # Start of the month 6 months ago
+    yr, mo = today.year, today.month
+    for _ in range(6):
+        mo -= 1
+        if mo < 1:
+            mo = 12
+            yr -= 1
+    window_start = parse_date(f'{yr:04d}-{mo:02d}-01')
+    # End = start of this month
+    window_end = parse_date(today.replace(day=1).isoformat())
+
+    rows = []
+    for res in all_reservations:
+        checkout_date = parse_date(res.get('Checkout'))
+        if not checkout_date:
+            continue
+        if not (window_start <= checkout_date < window_end):
+            continue
+        try:
+            gross = float(res.get('Income', '0') or 0)
+            net = gross * (1 - management_fee_pct / 100)
+        except (ValueError, TypeError):
+            gross = net = 0
+        res = dict(res)
+        res['gross_income'] = gross
+        res['net_income'] = net
+        guest = res.get('Guest', '')
+        res['repeat_guest'] = 'Yes' if guest and guest_counts.get(guest, 0) > 1 else 'No'
+        rows.append(res)
+
+    rows.sort(key=lambda x: parse_date(x.get('Checkout')) or datetime.min)
+
+    # Running monthly totals
+    running_total = 0
+    current_month = None
+    for res in rows:
+        checkout_date = parse_date(res.get('Checkout'))
+        month_key = checkout_date.strftime('%Y-%m') if checkout_date else None
+        if month_key != current_month:
+            running_total = 0
+            current_month = month_key
+        running_total += res.get('net_income', 0)
+        res['monthly_total'] = running_total
+
+    return rows
+
+
+def build_calendar_months(all_reservations, num_months=19, start_year=None, start_month=None, show_past_detail=False):
+    """Build calendar data for the availability calendar.
+
+    start_year/start_month: override the starting month (default: current month).
+    show_past_detail: when True, past days outside the current month still show
+                      booking colors (used for the prior-months history section).
 
     Each cell dict: {'day': int|None, 'cls': str, 'style': str|None, 'today': bool}
     Split days use inline linear-gradient style:
@@ -493,8 +578,8 @@ def build_calendar_months(all_reservations, num_months=19):
 
     def _cell_appearance(d, is_past, is_current_month):
         """Return (cls, style) for a day cell."""
-        # Past days outside the current month: always dim, no booking detail
-        if is_past and not is_current_month:
+        # Past days outside the current month: dim unless showing history detail
+        if is_past and not is_current_month and not show_past_detail:
             return 'cal-past', None
 
         info = day_info.get(d, {})
@@ -524,9 +609,9 @@ def build_calendar_months(all_reservations, num_months=19):
         return ('cal-past' if is_past else 'cal-free'), None
 
     months = []
-    yr, mo = today.year, today.month
+    yr, mo = (start_year or today.year), (start_month or today.month)
     cal = _cal.Calendar(firstweekday=6)  # Sunday-first
-    is_current_month = True
+    is_current_month = (_date(yr, mo, 1) == _date(today.year, today.month, 1))
     for _ in range(num_months):
         first = _date(yr, mo, 1)
         week_rows = []
@@ -2060,7 +2145,9 @@ def index():
                          token_purge_next=SECRET_PURGE_NEXT_TOKEN,
                          token_purge_cancel_next=SECRET_PURGE_CANCEL_NEXT_TOKEN,
                          purge_pending=get_purge_pending(),
-                         calendar_months=build_calendar_months(all_reservations))
+                         calendar_months=build_calendar_months(all_reservations),
+                         prior_calendar_months=_build_prior_calendar(all_reservations),
+                         past_reservation_list=_build_past_reservations(all_reservations, MANAGEMENT_FEE_PERCENT, guest_counts))
 
 @app.route('/sunset')
 def sunset():
