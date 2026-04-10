@@ -106,7 +106,7 @@ NOTIFY_BACKFLUSH_TIME_START = "00:00"  # Start of backflush window (HH:MM)
 NOTIFY_BACKFLUSH_TIME_END = "04:30"  # End of backflush window (HH:MM)
 
 # Full-Flow Detection (pressure_high_percent ~100%)
-NOTIFY_FULL_FLOW_ENABLED = True  # Enable full-flow detection and notifications
+NOTIFY_FULL_FLOW_ENABLED = False  # Enable full-flow detection and notifications
 NOTIFY_FULL_FLOW_PRESSURE_THRESHOLD = 90.0  # Pressure % to count as full-flow (default: 90%)
 NOTIFY_FULL_FLOW_DELAY_MINUTES = 30  # Minutes after full-flow starts before notifying (default: 30)
 NOTIFY_FULL_FLOW_LOOKBACK_HOURS = 24  # How far back to check for full-flow periods (default: 24)
@@ -129,7 +129,7 @@ MAX_PRESSURE_LOG_INTERVAL = 1800  # Log at least every 30 minutes when pressure 
 # Web Dashboard Configuration
 # List of event types to EXCLUDE from the Recent Events table on the web dashboard
 # Common types: TANK_LEVEL, PRESSURE_HIGH, PRESSURE_LOW, INIT, SHUTDOWN, FLOAT_CALLING, FLOAT_FULL
-DASHBOARD_HIDE_EVENT_TYPES = ['TANK_LEVEL', 'PRESSURE_LOW', 'PRESSURE_HIGH', 'SHUTDOWN']  # Hide noisy tank level change events
+DASHBOARD_HIDE_EVENT_TYPES = ['TANK_LEVEL', 'PRESSURE_LOW', 'PRESSURE_HIGH', 'SHUTDOWN', 'FULL_FLOW']  # Hide noisy tank level change events
 DASHBOARD_MAX_EVENTS = 200  # Maximum number of events to show in dashboard and emails (~3 days)
 DASHBOARD_SNAPSHOT_COUNT = 97  # Number of snapshots to show (97 = 24 hours at 15-min intervals)
 
