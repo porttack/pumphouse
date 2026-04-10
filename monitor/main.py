@@ -2,6 +2,7 @@
 Main entry point for simplified monitoring system
 """
 import argparse
+import logging
 
 from monitor import __version__
 from monitor.config import (
@@ -48,7 +49,9 @@ def main():
                        version=f'%(prog)s {__version__}')
     
     args = parser.parse_args()
-    
+
+    logging.basicConfig(level=logging.WARNING, format='%(name)s %(levelname)s %(message)s')
+
     # Initialize GPIO
     if not init_gpio():
         print("Warning: Could not initialize GPIO")

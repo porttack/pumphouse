@@ -809,128 +809,10 @@ class SimplifiedMonitor:
                                          f"Float: Tank full")
                             last_float_state = self.state.float_state
 
-                        # Check for float confirmation (CLOSED→OPEN for N consecutive times)
-                        # This serves as backup if override is disabled or already off
+                        # Check for float confirmation (CALLING→FULL for N consecutive readings)
+                        # Backup alert if override is disabled or already off
                         if self.notification_manager.check_float_confirmation(self.state.float_state):
                             current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
-                            # Only alert if not suppressed (tank must drop below 90% to re-alert)
-                            if (self.notification_manager.can_notify('tank_full') and
-                                not self.notification_manager.should_suppress_tank_full(current_gal)):
-                                self.send_alert(
-                                    'NOTIFY_TANK_FULL',
-                                    f"{current_gal:.0f} gal - Tank Full",
-                                    "Float sensor confirmed FULL for 3+ readings"
-                                )
-                                self.notification_manager.record_tank_full_alert(current_gal)
-                        # Check for float confirmation (CLOSED→OPEN for N consecutive times)
-                        # This serves as backup if override is disabled or already off
-                        if self.notification_manager.check_float_confirmation(self.state.float_state):
-                            current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
-                            # Only alert if not suppressed (tank must drop below 90% to re-alert)
-                            if (self.notification_manager.can_notify('tank_full') and
-                                not self.notification_manager.should_suppress_tank_full(current_gal)):
-                                self.send_alert(
-                                    'NOTIFY_TANK_FULL',
-                                    f"{current_gal:.0f} gal - Tank Full",
-                                    "Float sensor confirmed FULL for 3+ readings"
-                                )
-                                self.notification_manager.record_tank_full_alert(current_gal)
-                        # Check for float confirmation (CLOSED→OPEN for N consecutive times)
-                        # This serves as backup if override is disabled or already off
-                        if self.notification_manager.check_float_confirmation(self.state.float_state):
-                            current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
-                            # Only alert if not suppressed (tank must drop below 90% to re-alert)
-                            if (self.notification_manager.can_notify('tank_full') and
-                                not self.notification_manager.should_suppress_tank_full(current_gal)):
-                                self.send_alert(
-                                    'NOTIFY_TANK_FULL',
-                                    f"{current_gal:.0f} gal - Tank Full",
-                                    "Float sensor confirmed FULL for 3+ readings"
-                                )
-                                self.notification_manager.record_tank_full_alert(current_gal)
-                        # Check for float confirmation (CLOSED→OPEN for N consecutive times)
-                        # This serves as backup if override is disabled or already off
-                        if self.notification_manager.check_float_confirmation(self.state.float_state):
-                            current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
-                            # Only alert if not suppressed (tank must drop below 90% to re-alert)
-                            if (self.notification_manager.can_notify('tank_full') and
-                                not self.notification_manager.should_suppress_tank_full(current_gal)):
-                                self.send_alert(
-                                    'NOTIFY_TANK_FULL',
-                                    f"{current_gal:.0f} gal - Tank Full",
-                                    "Float sensor confirmed FULL for 3+ readings"
-                                )
-                                self.notification_manager.record_tank_full_alert(current_gal)
-                        # Check for float confirmation (CLOSED→OPEN for N consecutive times)
-                        # This serves as backup if override is disabled or already off
-                        if self.notification_manager.check_float_confirmation(self.state.float_state):
-                            current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
-                            # Only alert if not suppressed (tank must drop below 90% to re-alert)
-                            if (self.notification_manager.can_notify('tank_full') and
-                                not self.notification_manager.should_suppress_tank_full(current_gal)):
-                                self.send_alert(
-                                    'NOTIFY_TANK_FULL',
-                                    f"{current_gal:.0f} gal - Tank Full",
-                                    "Float sensor confirmed FULL for 3+ readings"
-                                )
-                                self.notification_manager.record_tank_full_alert(current_gal)
-                        # Check for float confirmation (CLOSED→OPEN for N consecutive times)
-                        # This serves as backup if override is disabled or already off
-                        if self.notification_manager.check_float_confirmation(self.state.float_state):
-                            current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
-                            # Only alert if not suppressed (tank must drop below 90% to re-alert)
-                            if (self.notification_manager.can_notify('tank_full') and
-                                not self.notification_manager.should_suppress_tank_full(current_gal)):
-                                self.send_alert(
-                                    'NOTIFY_TANK_FULL',
-                                    f"{current_gal:.0f} gal - Tank Full",
-                                    "Float sensor confirmed FULL for 3+ readings"
-                                )
-                                self.notification_manager.record_tank_full_alert(current_gal)
-                        # Check for float confirmation (CLOSED→OPEN for N consecutive times)
-                        # This serves as backup if override is disabled or already off
-                        if self.notification_manager.check_float_confirmation(self.state.float_state):
-                            current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
-                            # Only alert if not suppressed (tank must drop below 90% to re-alert)
-                            if (self.notification_manager.can_notify('tank_full') and
-                                not self.notification_manager.should_suppress_tank_full(current_gal)):
-                                self.send_alert(
-                                    'NOTIFY_TANK_FULL',
-                                    f"{current_gal:.0f} gal - Tank Full",
-                                    "Float sensor confirmed FULL for 3+ readings"
-                                )
-                                self.notification_manager.record_tank_full_alert(current_gal)
-                        # Check for float confirmation (CLOSED→OPEN for N consecutive times)
-                        # This serves as backup if override is disabled or already off
-                        if self.notification_manager.check_float_confirmation(self.state.float_state):
-                            current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
-                            # Only alert if not suppressed (tank must drop below 90% to re-alert)
-                            if (self.notification_manager.can_notify('tank_full') and
-                                not self.notification_manager.should_suppress_tank_full(current_gal)):
-                                self.send_alert(
-                                    'NOTIFY_TANK_FULL',
-                                    f"{current_gal:.0f} gal - Tank Full",
-                                    "Float sensor confirmed FULL for 3+ readings"
-                                )
-                                self.notification_manager.record_tank_full_alert(current_gal)
-                        # Check for float confirmation (CLOSED→OPEN for N consecutive times)
-                        # This serves as backup if override is disabled or already off
-                        if self.notification_manager.check_float_confirmation(self.state.float_state):
-                            current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
-                            # Only alert if not suppressed (tank must drop below 90% to re-alert)
-                            if (self.notification_manager.can_notify('tank_full') and
-                                not self.notification_manager.should_suppress_tank_full(current_gal)):
-                                self.send_alert(
-                                    'NOTIFY_TANK_FULL',
-                                    f"{current_gal:.0f} gal - Tank Full",
-                                    "Float sensor confirmed FULL for 3+ readings"
-                                )
-                                self.notification_manager.record_tank_full_alert(current_gal)
-                        # Check for float confirmation (CLOSED→OPEN for N consecutive times)
-                        # This serves as backup if override is disabled or already off
-                        if self.notification_manager.check_float_confirmation(self.state.float_state):
-                            current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
-                            # Only alert if not suppressed (tank must drop below 90% to re-alert)
                             if (self.notification_manager.can_notify('tank_full') and
                                 not self.notification_manager.should_suppress_tank_full(current_gal)):
                                 self.send_alert(
@@ -1241,6 +1123,25 @@ class SimplifiedMonitor:
                         subject = f"{current_gal:.0f} gal - Daily Status"
                         message = f"Daily status report for {datetime.now().strftime('%A, %B %d, %Y')}"
 
+                    # Find yesterday's best sunset frame to attach
+                    sunset_image_path = None
+                    sunset_image_link = None
+                    try:
+                        import glob as _glob
+                        yesterday_str = (datetime.now().date() - timedelta(days=1)).isoformat()
+                        best_dir = f'/home/pi/timelapses/best/{yesterday_str}'
+                        # Prefer CLIP-scored (cl_) frames; fall back to CV-scored (cv_)
+                        candidates = (sorted(_glob.glob(f'{best_dir}/cl_*.jpg')) or
+                                      sorted(_glob.glob(f'{best_dir}/cv_*.jpg')))
+                        if candidates:
+                            sunset_image_path = candidates[0]
+                            sunset_image_link = f'{DASHBOARD_URL}timelapse/{yesterday_str}' if DASHBOARD_URL else None
+                            if self.debug:
+                                print(f"  Attaching sunset frame: {sunset_image_path}")
+                    except Exception as e:
+                        if self.debug:
+                            print(f"  Could not find sunset frame: {e}")
+
                     # Send daily status email
                     send_email_notification(
                         subject=subject,
@@ -1249,7 +1150,9 @@ class SimplifiedMonitor:
                         dashboard_url=DASHBOARD_URL,
                         chart_url=f"{DASHBOARD_URL}api/epaper.jpg?tenant=no",
                         debug=self.debug,
-                        include_status=True
+                        include_status=True,
+                        inline_image_path=sunset_image_path,
+                        inline_image_link=sunset_image_link,
                     )
 
                     # Log the daily status email
