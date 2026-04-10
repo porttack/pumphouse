@@ -60,6 +60,8 @@ def get_snapshot(token_file: Path, camera_name: str = '') -> Optional[bytes]:
                 data = _stamp_timestamp(data)
                 RING_CACHE_FILE.write_bytes(data)
                 logger.info('Ring snapshot fetched and cached (%d bytes)', len(data))
+            else:
+                logger.warning('Ring snapshot fetch returned nothing; endpoint will return unavailable')
             return data
         finally:
             fcntl.flock(lf, fcntl.LOCK_UN)

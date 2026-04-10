@@ -117,6 +117,9 @@ def send_email_notification(subject, message, priority='default', dashboard_url=
                 from monitor import ring_camera
                 from monitor.config import RING_TOKEN_FILE, RING_CAMERA_NAME
                 ring_bytes = ring_camera.get_snapshot(RING_TOKEN_FILE, RING_CAMERA_NAME)
+                if ring_bytes is None:
+                    import logging as _logging
+                    _logging.getLogger(__name__).warning('Ring snapshot unavailable for email (get_snapshot returned None)')
             except Exception as _ring_err:
                 import logging as _logging
                 _logging.getLogger(__name__).warning('Ring snapshot failed for email: %s: %s',

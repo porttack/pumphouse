@@ -2127,6 +2127,7 @@ def ring_snapshot():
     """
     img_bytes = ring_camera.get_snapshot(RING_TOKEN_FILE, RING_CAMERA_NAME)
     if not img_bytes:
+        app.logger.warning('Ring snapshot unavailable (get_snapshot returned None)')
         return Response('Ring snapshot unavailable', status=503)
     mtime = ring_camera.get_cache_mtime()
     headers = {'X-Ring-Time': str(int(mtime))} if mtime else {}
