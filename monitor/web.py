@@ -2301,8 +2301,8 @@ def control(token):
         action_taken = f"Bypass ON until {expiry.strftime('%-I:%M %p')}"
     elif token == SECRET_BYPASS_CANCEL_TIMER_TOKEN and SECRET_BYPASS_CANCEL_TIMER_TOKEN:
         _cancel_all_bypass_modes()
-        success = True
-        action_taken = "Bypass timer cancelled (bypass stays ON)"
+        success = set_bypass('OFF', debug=False)
+        action_taken = "Bypass timer cancelled, bypass turned OFF"
     elif token == SECRET_BYPASS_CYCLE_TOKEN and SECRET_BYPASS_CYCLE_TOKEN:
         cycle_info = get_bypass_cycle_info()
         if cycle_info:

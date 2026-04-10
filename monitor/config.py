@@ -117,7 +117,7 @@ NOTIFY_HIGH_PRESSURE_USE_EMAIL = True  # Send email alerts (default: False, use 
 NOTIFY_PRESSURE_LOW_ENABLED = False  # Send alert when pressure goes LOW with duration info
 
 # Tank Data Outage Detection
-NOTIFY_TANK_OUTAGE_ENABLED = True  # Enable tank data outage detection and notification
+NOTIFY_TANK_OUTAGE_ENABLED = False  # Enable tank data outage detection and notification
 NOTIFY_TANK_OUTAGE_THRESHOLD_MINUTES = 60  # Minimum outage duration (in minutes) to trigger notification
 
 # Notification Cooldowns (prevent spam)
