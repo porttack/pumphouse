@@ -67,10 +67,10 @@ All Ring activity is logged to the systemd journal. Filter with:
 
 ```bash
 # Live (both services)
-sudo journalctl -u pumphouse-web -u pumphouse-monitor -f --grep -i "ring"
+sudo journalctl -u pumphouse-web -u pumphouse-monitor -f | grep -i "ring"
 
 # History only
-sudo journalctl -u pumphouse-web -u pumphouse-monitor --grep -i "ring"
+sudo journalctl -u pumphouse-web -u pumphouse-monitor | grep -i "ring"
 ```
 
 Log levels: **INFO** on successful fetch, **WARNING** on recoverable issues (missing token, no devices, None returned), **ERROR** on API failures.
