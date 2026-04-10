@@ -114,6 +114,7 @@ def snapshot():
     cached_until_str = _exp_dt.strftime('%-I:%M %p')
     src_note  = 'from timelapse' if from_timelapse else 'live grab'
     is_direct = 'onblackberryhill.com' not in request.host.lower()
+    is_cf     = bool(request.headers.get('CF-Ray'))
     img_b64   = _base64.b64encode(jpeg_bytes).decode()
 
     # Weather data
@@ -173,12 +174,18 @@ def snapshot():
     tl_dates  = _timelapse_dates()
     tl_link   = f'/timelapse/{tl_dates[-1]}' if tl_dates else '/timelapse'
 
+    snap_rotator_html, snap_photos_js_a, snap_photos_js_b = _hero_rotator_parts()
+    try:
+        title_date_short = today.strftime('%a, %B %-d')
+    except Exception:
+        title_date_short = date_str
+
     html = f"""<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Snapshot &mdash; {title_date} &mdash; {now_str} (cached until {cached_until_str})</title>
+  <title>Live Webcam &mdash; On Blackberry Hill</title>
   <script>
     (function(){{ var p=new URLSearchParams(location.search).get('theme'),t=p||localStorage.getItem('tl_theme'); if(t==='dark') document.documentElement.setAttribute('data-theme','dark'); }})();
   </script>
@@ -205,56 +212,85 @@ def snapshot():
     h2   {{ margin:0; color: var(--text); }}
     .site-header {{ max-width:960px; padding:4px 0 10px; margin-bottom:4px;
                     border-bottom:1px solid var(--border-light); display:flex;
-                    flex-wrap:wrap; align-items:baseline; gap:0 10px; }}
-    .site-name {{ font-size:1.2em; color: var(--text); font-weight:bold; }}
+                    align-items:flex-start; gap:12px; }}
+    .site-header-text {{ display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; padding-top:2px; }}
+    .site-name    {{ font-size:1.2em; color: var(--text); font-weight:bold; }}
+    .site-tagline {{ display:none; font-size:0.82em; color: var(--muted); font-style:italic; letter-spacing:-0.01em; }}
+    .site-location {{ display:none; font-size:0.95em; color: var(--muted); }}
     .site-sub  {{ font-size:0.85em; color: var(--muted); }}
     .site-sub a {{ color: var(--accent); text-decoration:none; }}
     .site-sub a:hover {{ color: var(--hover-text); }}
-    .theme-btn {{ margin-left:auto; background: var(--bg3); color: var(--muted);
-                  border:1px solid var(--border); padding:3px 10px; border-radius:4px;
-                  font-family:monospace; font-size:0.8em; cursor:pointer; white-space:nowrap; }}
-    .theme-btn:hover {{ color: var(--text); }}
-    .page-header {{ max-width:860px; display:flex; justify-content:center;
-                    align-items:center; margin:12px 0; }}
-    .snapshot-wrap {{ max-width:860px; margin:12px 0; }}
-    .snapshot-wrap img {{ width:100%; display:block; border-radius:4px;
-                          cursor:pointer; }}
+    #theme-toggle {{ color: var(--muted); text-decoration:none; }}
+    #theme-toggle:hover {{ color: var(--accent); }}
+    html:not([data-theme="dark"]) .site-name     {{ font-size:2em; font-weight:700; letter-spacing:-0.02em; white-space:nowrap; }}
+    html:not([data-theme="dark"]) .site-tagline  {{ display:block; }}
+    html:not([data-theme="dark"]) .site-location {{ display:block; }}
+    html:not([data-theme="dark"]) .site-sub      {{ font-size:0.9em; }}
+    .page-header {{ max-width:960px; margin:12px 0; }}
+    .page-header h2 {{ font-size:1.1em; }}
+    .captured-at {{ color: var(--muted); font-size:0.78em; margin-top:3px; }}
+    html:not([data-theme="dark"]) .admin-note {{ display:none; }}
+    .snapshot-wrap {{ max-width:960px; margin:12px 0; }}
+    .snapshot-wrap img {{ width:100%; display:block; border-radius:4px; cursor:pointer; }}
     .snapshot-wrap img:hover {{ opacity:0.92; }}
-    .weather {{ max-width:860px; background: var(--bg2); border:1px solid var(--border-light);
+    .weather {{ max-width:960px; background: var(--bg2); border:1px solid var(--border-light);
                 border-radius:4px; padding:12px 16px; margin:12px 0;
                 display:flex; flex-direction:column; gap:8px; }}
-    .wx-desc  {{ font-size:1.05em; color: var(--wx-desc); font-weight:bold; }}
+    .wx-desc  {{ font-size:0.9em; color: var(--wx-desc); font-weight:bold; }}
     .wx-quip  {{ font-size:0.9em; color: var(--muted); font-weight:normal; font-style:italic; }}
     .wx-group {{ display:flex; flex-wrap:wrap; gap:12px; }}
-    .stat {{ display:flex; flex-direction:column; min-width:80px; }}
-    .lbl  {{ font-size:0.75em; color: var(--muted); text-transform:uppercase; }}
-    .val  {{ font-size:1.1em; color: var(--text); }}
-    .actions {{ max-width:860px; display:flex; flex-wrap:wrap;
+    .stat {{ display:flex; flex-direction:column; min-width:60px; }}
+    .lbl  {{ font-size:0.7em; color: var(--muted); text-transform:uppercase; }}
+    .val  {{ font-size:0.9em; color: var(--text); }}
+    .actions {{ max-width:960px; display:flex; flex-wrap:wrap;
                 align-items:center; gap:10px; margin:10px 0; }}
     .btn {{ background: var(--bg3); color: var(--accent); border:1px solid var(--border);
             padding:6px 16px; border-radius:4px; text-decoration:none;
             font-family:monospace; font-size:0.95em; cursor:pointer; }}
     .btn:hover {{ background: var(--border-light); color: var(--hover-text); }}
-    .captured-at {{ color: var(--muted); font-size:0.85em; }}
+    .btn-admin {{ display:inline-block; }}
+    html:not([data-theme="dark"]) .btn-admin {{ display:none; }}
+    /* ── Hero photo rotator ── */
+    @keyframes kenburns-a {{
+      0%   {{ transform: scale(1.0)  translate(0%,    0%); }}
+      50%  {{ transform: scale(1.25) translate(-4%,  -3%); }}
+      100% {{ transform: scale(1.0)  translate(0%,    0%); }}
+    }}
+    .hero-rotator {{ display:none; flex-shrink:0; border-radius:8px; overflow:hidden;
+                     text-decoration:none; width:200px; height:200px; }}
+    html:not([data-theme="dark"]) .hero-rotator {{ display:block; }}
+    .hero-rotator-inner {{ width:100%; height:100%; }}
+    #hero-rotator-a .hero-rotator-inner {{ animation: kenburns-a 14s ease-in-out infinite; }}
+    .hero-rotator img {{ width:100%; height:100%; object-fit:cover; display:block;
+                         transition: opacity 0.8s ease; }}
     @media (max-width:600px) {{
-      .page-header h2 {{ font-size:1.0em; }}
-      .site-sub {{ font-size:0.78em; }}
-      .theme-btn {{ display:none; }}
+      .hero-rotator {{ width:31vw; height:31vw; }}
+      .hero-rotator-b {{ display:none !important; }}
+      html:not([data-theme="dark"]) .site-name     {{ font-size:1.3em; }}
+      html:not([data-theme="dark"]) .site-location {{ font-size:0.8em; }}
+      html:not([data-theme="dark"]) .site-tagline  {{ font-size:0.72em; }}
+      html:not([data-theme="dark"]) .site-sub      {{ font-size:0.78em; }}
     }}
   </style>
 </head>
 <body>
   <header class="site-header">
-    <span class="site-name">On Blackberry Hill</span>
-    <span class="site-sub">Newport, OR &middot; Available via
-      <a href="https://www.meredithlodging.com/listings/1830" target="_blank" rel="noopener">Meredith</a>
-      &middot; <a href="https://www.airbnb.com/rooms/894278114876445404" target="_blank" rel="noopener">Airbnb</a>
-      &middot; <a href="https://www.vrbo.com/9829179ha" target="_blank" rel="noopener">Vrbo</a>
-    </span>
-    <button id="theme-toggle" class="theme-btn" onclick="toggleTheme()">&#9790; Dark</button>
+    <div class="site-header-text">
+      <span class="site-name">On Blackberry Hill</span>
+      <span class="site-location">Newport, OR &mdash; Vacation Rental</span>
+      <span class="site-tagline">Ocean View &middot; Game Room &middot; Dog Friendly</span>
+      <span class="site-sub">Rent via:
+        <a href="https://www.meredithlodging.com/listings/1830" target="_blank" rel="noopener">Meredith</a>,
+        <a href="https://www.airbnb.com/rooms/894278114876445404" target="_blank" rel="noopener">Airbnb</a>,
+        <a href="https://www.vrbo.com/9829179ha" target="_blank" rel="noopener">Vrbo</a>
+        {'<a id="theme-toggle" href="#" onclick="toggleTheme();return false;" style="color:var(--muted)"> (dark)</a>' if is_direct else ''}
+      </span>
+    </div>
+    {snap_rotator_html}
   </header>
   <div class="page-header">
-    <h2>Snapshot &mdash; {title_date} &mdash; {now_str} (cached until {cached_until_str})</h2>
+    <h2>Live View &ndash; <span class="date-long">{title_date}</span><span class="date-short">{title_date_short}</span></h2>
+    {'<div class="captured-at">Cached image (next refresh ' + cached_until_str + ')<span class="admin-note"> &middot; ' + src_note + '</span></div>' if is_cf else ''}
   </div>
   <div class="snapshot-wrap">
     <a href="/snapshot?info=0" target="_blank" title="Open raw image">
@@ -263,28 +299,52 @@ def snapshot():
   </div>
   {wx_html}
   <div class="actions">
-    <button class="btn" onclick="location.reload()">&#8635; New Snapshot</button>
-    <a class="btn" href="{tl_link}">Timelapses</a>
-    {'<a class="btn" href="/">Dashboard</a>' if is_direct else ''}
-    <a class="btn" href="data:image/jpeg;base64,{img_b64}" download="snapshot-{date_str}.jpg">&#8681; Download</a>
-    <span class="captured-at">Captured {now_str} &middot; {src_note}</span>
+    <a class="btn" href="{tl_link}">&#8592; Timelapses</a>
+    <button class="btn btn-admin" onclick="location.reload()">&#8635; New Snapshot</button>
+    {'<a class="btn btn-admin" href="/">Dashboard</a>' if is_direct else ''}
+    <a class="btn btn-admin" href="data:image/jpeg;base64,{img_b64}" download="snapshot-{date_str}.jpg">&#8681; Download</a>
   </div>
   <script>
+  var _dateShort = document.querySelector('.date-short');
+  var _dateLong  = document.querySelector('.date-long');
+  if (_dateShort && _dateLong) {{
+    if (window.innerWidth <= 600) {{ _dateLong.style.display='none'; }}
+    else {{ _dateShort.style.display='none'; }}
+  }}
   function toggleTheme() {{
     var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    var tog = document.getElementById('theme-toggle');
     if (isDark) {{
       document.documentElement.removeAttribute('data-theme');
       localStorage.setItem('tl_theme', 'light');
-      document.getElementById('theme-toggle').textContent = '\u263e Dark';
+      if (tog) tog.textContent = ' (dark)';
     }} else {{
       document.documentElement.setAttribute('data-theme', 'dark');
       localStorage.setItem('tl_theme', 'dark');
-      document.getElementById('theme-toggle').textContent = '\u2600 Light';
+      if (tog) tog.textContent = ' (light)';
     }}
   }}
   (function(){{
-    if (document.documentElement.getAttribute('data-theme') === 'dark')
-      document.getElementById('theme-toggle').textContent = '\u2600 Light';
+    var tog = document.getElementById('theme-toggle');
+    if (document.documentElement.getAttribute('data-theme') === 'dark' && tog)
+      tog.textContent = ' (light)';
+  }})();
+  (function() {{
+    function startRotator(imgId, photos, delayMs, intervalMs) {{
+      if (photos.length < 2) return;
+      var img = document.getElementById(imgId);
+      if (!img) return;
+      var idx = 0;
+      setTimeout(function() {{
+        setInterval(function() {{
+          idx = (idx + 1) % photos.length;
+          img.style.opacity = '0';
+          setTimeout(function() {{ img.src = photos[idx]; img.style.opacity = '1'; }}, 600);
+        }}, intervalMs);
+      }}, delayMs);
+    }}
+    startRotator('hero-rotator-img-a', {snap_photos_js_a}, 0,    6000);
+    startRotator('hero-rotator-img-b', {snap_photos_js_b}, 3000, 8000);
   }})();
   </script>
 </body>
@@ -305,6 +365,36 @@ WEATHER_CACHE_DIR = os.path.join(TIMELAPSE_DIR, 'weather')
 RATINGS_FILE      = os.path.join(TIMELAPSE_DIR, 'ratings.json')
 SNAPSHOT_DIR      = os.path.join(TIMELAPSE_DIR, 'snapshots')
 THUMB_WIDTH       = 240   # px — thumbnail width in the "All timelapses" list (height auto-computed 16:9)
+HERO_PHOTOS_DIR   = os.path.join(os.path.expanduser('~'), '.config', 'pumphouse', 'photos')
+HERO_BOOKING_URL  = 'https://www.meredithlodging.com/listings/1830'
+
+def _hero_rotator_parts():
+    """Return (hero_rotator_html, hero_photos_js_a, hero_photos_js_b) for the property photo rotator."""
+    import json as _j
+    _exts = {'.jpg', '.jpeg', '.png', '.webp'}
+    photos = []
+    if os.path.isdir(HERO_PHOTOS_DIR):
+        photos = sorted(
+            f'/hero-photos/{fn}'
+            for fn in os.listdir(HERO_PHOTOS_DIR)
+            if os.path.splitext(fn.lower())[1] in _exts
+        )
+    if not photos:
+        return '', '[]', '[]'
+    a, b = photos[0::2], photos[1::2]
+    html = (
+        f'<a id="hero-rotator-a" class="hero-rotator" href="{HERO_BOOKING_URL}"'
+        f' target="_blank" rel="noopener"><div class="hero-rotator-inner">'
+        f'<img id="hero-rotator-img-a" src="{a[0]}" alt="On Blackberry Hill">'
+        f'</div></a>'
+        + (
+        f'<a id="hero-rotator-b" class="hero-rotator hero-rotator-b" href="{HERO_BOOKING_URL}"'
+        f' target="_blank" rel="noopener"><div class="hero-rotator-inner">'
+        f'<img id="hero-rotator-img-b" src="{b[0]}" alt="On Blackberry Hill">'
+        f'</div></a>' if b else ''
+        )
+    )
+    return html, _j.dumps(a), _j.dumps(b)
 
 import threading as _threading
 _ratings_lock = _threading.Lock()
@@ -1213,6 +1303,21 @@ def timelapse_best_frame(date_str, filename):
     return send_file(path, mimetype='image/jpeg', max_age=3600)
 
 
+@timelapse_bp.route('/hero-photos/<filename>')
+def hero_photo(filename):
+    """Serve a property hero photo from outside the git repo."""
+    import re
+    if not re.fullmatch(r'[\w\-]+\.(jpg|jpeg|png|webp)', filename, re.IGNORECASE):
+        return Response('Invalid filename', status=400, mimetype='text/plain')
+    path = os.path.join(HERO_PHOTOS_DIR, filename)
+    if not os.path.exists(path):
+        return Response('Not found', status=404, mimetype='text/plain')
+    ext = os.path.splitext(filename.lower())[1]
+    mime = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+            'png': 'image/png', 'webp': 'image/webp'}.get(ext.lstrip('.'), 'image/jpeg')
+    return send_file(path, mimetype=mime, max_age=86400)
+
+
 @timelapse_bp.route('/timelapse/<date_or_file>')
 def timelapse_view(date_or_file):
     """
@@ -1248,9 +1353,11 @@ def timelapse_view(date_or_file):
     try:
         from datetime import date as _date
         d = _date.fromisoformat(date_str)
-        title_date = d.strftime('%A, %B %-d, %Y')
+        title_date       = d.strftime('%A, %B %-d, %Y')
+        title_date_short = d.strftime('%a, %B %-d')
     except Exception:
         title_date = date_str
+        title_date_short = date_str
 
     def _short_date(ds):
         try:
@@ -1330,7 +1437,7 @@ def timelapse_view(date_or_file):
     dash_btn     = '<a href="/" class="speed-btn dl-btn">Dashboard</a>' if is_direct else ''
     best_btn     = ('<button id="best-btn" class="speed-btn dl-btn">&#9733; Best Frames</button>'
                     if is_direct else '')
-    public_link  = (f'&middot; (<a href="https://onblackberryhill.com/timelapse/{date_str}">public site</a>)'
+    public_link  = (f' (<a href="https://onblackberryhill.com/timelapse/{date_str}">public</a>)'
                     if is_direct else '')
 
     video_html = (
@@ -1460,6 +1567,9 @@ def timelapse_view(date_or_file):
         for d in _grid_dates
     )
 
+    # Hero photo rotator — property photos shown in light mode
+    hero_rotator_html, hero_photos_js_a, hero_photos_js_b = _hero_rotator_parts()
+
     html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -1495,15 +1605,16 @@ def timelapse_view(date_or_file):
     .no-video {{ color: var(--muted); font-style:italic; }}
     .site-header {{ max-width:960px; padding:4px 0 10px; margin-bottom:4px;
                     border-bottom:1px solid var(--border-light); display:flex;
-                    flex-wrap:wrap; align-items:baseline; gap:0 10px; }}
+                    align-items:flex-start; gap:12px; }}
+    .site-header-text {{ display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; padding-top:2px; }}
     .site-name {{ font-size:1.2em; color: var(--text); font-weight:bold; }}
+    .site-tagline {{ font-size:0.8em; color: var(--muted); font-style:italic; }}
     .site-sub  {{ font-size:0.85em; color: var(--muted); }}
     .site-sub a {{ color: var(--accent); text-decoration:none; }}
     .site-sub a:hover {{ color: var(--hover-text); }}
-    .theme-btn {{ margin-left:auto; background: var(--bg3); color: var(--muted);
-                  border:1px solid var(--border); padding:3px 10px; border-radius:4px;
-                  font-family:monospace; font-size:0.8em; cursor:pointer; white-space:nowrap; }}
-    .theme-btn:hover {{ color: var(--text); }}
+    #theme-toggle {{ color: var(--muted); text-decoration:none; }}
+    #theme-toggle:hover {{ color: var(--accent); }}
+    .date-short {{ display:none; }}
     .nav {{ display:flex; justify-content:space-between; align-items:center;
             max-width:960px; margin:12px 0; }}
     .nav-center {{ flex:1; text-align:center; }}
@@ -1515,12 +1626,12 @@ def timelapse_view(date_or_file):
     .weather {{ max-width:960px; background: var(--bg2); border:1px solid var(--border-light);
                 border-radius:4px; padding:12px 16px; margin:12px 0;
                 display:flex; flex-direction:column; gap:8px; }}
-    .wx-desc  {{ font-size:1.05em; color: var(--wx-desc); font-weight:bold; }}
+    .wx-desc  {{ font-size:0.9em; color: var(--wx-desc); font-weight:bold; }}
     .wx-quip  {{ font-size:0.9em; color: var(--muted); font-weight:normal; font-style:italic; }}
     .wx-group {{ display:flex; flex-wrap:wrap; gap:12px; }}
-    .stat {{ display:flex; flex-direction:column; min-width:80px; }}
-    .lbl  {{ font-size:0.75em; color: var(--muted); text-transform:uppercase; }}
-    .val  {{ font-size:1.1em; color: var(--text); }}
+    .stat {{ display:flex; flex-direction:column; min-width:60px; }}
+    .lbl  {{ font-size:0.7em; color: var(--muted); text-transform:uppercase; }}
+    .val  {{ font-size:0.9em; color: var(--text); }}
     .ctrl-row   {{ max-width:960px; display:flex; flex-wrap:wrap;
                    align-items:center; gap:6px; margin:8px 0; }}
     .speed-btns {{ display:contents; }}
@@ -1579,8 +1690,8 @@ def timelapse_view(date_or_file):
       .ctrl-row   {{ flex-direction:column; align-items:flex-start; }}
       .speed-btns {{ display:flex; align-items:center; gap:6px; }}
       .ctrl-btns  {{ display:flex; gap:6px; }}
-      .theme-btn  {{ display:none; }}
-      .sunset-prefix {{ display:none; }}
+      .date-long  {{ display:none; }}
+      .date-short {{ display:inline; }}
     }}
     .best-frames {{ max-width:960px; margin:12px 0; }}
     .best-frames-header {{ display:flex; align-items:center; gap:10px; margin-bottom:8px; }}
@@ -1607,8 +1718,13 @@ def timelapse_view(date_or_file):
     }}
     /* ── Light mode: guest-facing layout ── */
     html:not([data-theme="dark"]) .site-name {{
-      font-size: 1.6em; font-weight: 700; letter-spacing: -0.02em;
+      font-size: 2em; font-weight: 700; letter-spacing: -0.02em; white-space: nowrap;
     }}
+    html:not([data-theme="dark"]) .site-tagline  {{ display:block; font-size:0.82em; letter-spacing:-0.01em; }}
+    html:not([data-theme="dark"]) .site-location {{ display:block; font-size:0.95em; color:var(--muted); }}
+    html:not([data-theme="dark"]) .site-sub {{ font-size:0.9em; }}
+    .site-tagline  {{ display:none; }}
+    .site-location {{ display:none; }}
     html:not([data-theme="dark"]) .nav-extras {{ display: flex; }}
     .nav-extras {{ display: none; justify-content: center; gap: 20px;
                    font-size: 0.85em; margin-top: 5px; }}
@@ -1637,23 +1753,52 @@ def timelapse_view(date_or_file):
     @media (max-width:600px) {{
       .snap-grid {{ grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 5px; }}
     }}
+    /* ── Hero photo rotator (light mode only) ── */
+    @keyframes kenburns-a {{
+      0%   {{ transform: scale(1.0)  translate(0%,    0%); }}
+      50%  {{ transform: scale(1.25) translate(-4%,  -3%); }}
+      100% {{ transform: scale(1.0)  translate(0%,    0%); }}
+    }}
+    .hero-rotator {{ display: none; flex-shrink: 0;
+                     border-radius: 8px; overflow: hidden; text-decoration: none;
+                     width: 200px; height: 200px; }}
+    html:not([data-theme="dark"]) .hero-rotator {{ display: block; }}
+    /* Ken Burns on the inner wrapper; opacity fade on the img — keep them on separate elements
+       so the CSS transition and animation don't fight each other */
+    .hero-rotator-inner {{ width: 100%; height: 100%; }}
+    #hero-rotator-a .hero-rotator-inner {{ animation: kenburns-a 14s ease-in-out infinite; }}
+    .hero-rotator img {{ width: 100%; height: 100%; object-fit: cover; display: block;
+                         transition: opacity 0.8s ease; }}
+    @media (max-width:600px) {{
+      .hero-rotator {{ width: 31vw; height: 31vw; }}
+      .hero-rotator-b {{ display: none !important; }}
+      html:not([data-theme="dark"]) .site-name     {{ font-size: 1.3em; }}
+      html:not([data-theme="dark"]) .site-location {{ font-size: 0.8em; }}
+      html:not([data-theme="dark"]) .site-tagline  {{ font-size: 0.72em; }}
+      html:not([data-theme="dark"]) .site-sub      {{ font-size: 0.78em; }}
+    }}
   </style>
 </head>
 <body>
   <header class="site-header">
-    <span class="site-name">On Blackberry Hill</span>
-    <span class="site-sub">Newport, OR &middot; Available via
-      <a href="https://www.meredithlodging.com/listings/1830" target="_blank" rel="noopener">Meredith</a>
-      &middot; <a href="https://www.airbnb.com/rooms/894278114876445404" target="_blank" rel="noopener">Airbnb</a>
-      &middot; <a href="https://www.vrbo.com/9829179ha" target="_blank" rel="noopener">Vrbo</a>
-      {public_link}
-    </span>
-    <button id="theme-toggle" class="theme-btn" onclick="toggleTheme()">&#9790; Dark</button>
+    <div class="site-header-text">
+      <span class="site-name">On Blackberry Hill</span>
+      <span class="site-location">Newport, OR &mdash; Vacation Rental</span>
+      <span class="site-tagline">Ocean View &middot; Game Room &middot; Dog Friendly</span>
+      <span class="site-sub">Rent via:
+        <a href="https://www.meredithlodging.com/listings/1830" target="_blank" rel="noopener">Meredith</a>,
+        <a href="https://www.airbnb.com/rooms/894278114876445404" target="_blank" rel="noopener">Airbnb</a>,
+        <a href="https://www.vrbo.com/9829179ha" target="_blank" rel="noopener">Vrbo</a>
+        {public_link}
+        {'<a id="theme-toggle" href="#" onclick="toggleTheme();return false;" style="color:var(--muted)"> (dark)</a>' if is_direct else ''}
+      </span>
+    </div>
+    {hero_rotator_html}
   </header>
   <div class="nav">
     {prev_btn}
     <div class="nav-center">
-      <h2><span class="sunset-prefix">Sunset &mdash; </span>{title_date}</h2>
+      <h2>Sunset &ndash; <span class="date-long">{title_date}</span><span class="date-short">{title_date_short}</span></h2>
       <div class="nav-extras">
         <a href="/snapshot">Live</a>
         {'<a href="/timelapse/' + dates[-1] + '">Latest</a>' if next_date else ''}
@@ -2189,19 +2334,38 @@ def timelapse_view(date_or_file):
     // Light/dark theme toggle — persisted in localStorage
     function toggleTheme() {{
       var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      var tog = document.getElementById('theme-toggle');
       if (isDark) {{
         document.documentElement.removeAttribute('data-theme');
         localStorage.setItem('tl_theme', 'light');
-        document.getElementById('theme-toggle').textContent = '\u263e Dark';
+        if (tog) tog.textContent = '(dark)';
       }} else {{
         document.documentElement.setAttribute('data-theme', 'dark');
         localStorage.setItem('tl_theme', 'dark');
-        document.getElementById('theme-toggle').textContent = '\u2600 Light';
+        if (tog) tog.textContent = '(light)';
       }}
     }}
     (function(){{
-      if (document.documentElement.getAttribute('data-theme') === 'dark')
-        document.getElementById('theme-toggle').textContent = '\u2600 Light';
+      var tog = document.getElementById('theme-toggle');
+      if (document.documentElement.getAttribute('data-theme') === 'dark' && tog)
+        tog.textContent = '(light)';
+    }})();
+    (function() {{
+      function startRotator(imgId, photos, delayMs, intervalMs) {{
+        if (photos.length < 2) return;
+        var img = document.getElementById(imgId);
+        if (!img) return;
+        var idx = 0;
+        setTimeout(function() {{
+          setInterval(function() {{
+            idx = (idx + 1) % photos.length;
+            img.style.opacity = '0';
+            setTimeout(function() {{ img.src = photos[idx]; img.style.opacity = '1'; }}, 600);
+          }}, intervalMs);
+        }}, delayMs);
+      }}
+      startRotator('hero-rotator-img-a', {hero_photos_js_a}, 0,    6000);
+      startRotator('hero-rotator-img-b', {hero_photos_js_b}, 3000, 8000);
     }})();
   </script>
 </body>
