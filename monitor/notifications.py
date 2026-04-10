@@ -416,40 +416,20 @@ class NotificationManager:
             if self.debug:
                 print(f"Warning: Could not save notification state: {e}")
 
-    def should_suppress_tank_full(self, current_gallons, reset_threshold_pct=0.90):
+    TANK_FULL_COOLDOWN_SECONDS = 4 * 3600  # suppress duplicate tank-full alerts within 4 hours
+
+    def should_suppress_tank_full(self, current_gallons=None):
         """
-        Check if tank_full alert should be suppressed.
-        Suppresses if we already alerted and tank hasn't dropped below threshold.
-
-        Args:
-            current_gallons: Current tank level in gallons
-            reset_threshold_pct: Tank must drop below this % of alerted level to reset (default 90%)
-
-        Returns:
-            True if alert should be suppressed, False if alert should be sent
+        Suppress tank_full alert if one was already sent within the last 4 hours.
+        Allows every fill cycle to generate an alert as long as 4 hours have passed.
         """
-        if self.tank_full_alerted_level is None:
-            return False  # Never alerted, don't suppress
-
-        if current_gallons is None:
-            return False  # No data, don't suppress
-
-        # Reset threshold: tank must drop below 90% of the level when we last alerted
-        reset_level = self.tank_full_alerted_level * reset_threshold_pct
-
-        if current_gallons < reset_level:
-            # Tank has dropped enough, reset and allow new alert
-            self.tank_full_alerted_level = None
-            self.tank_full_alerted_time = None
-            self._save_state()
+        if self.tank_full_alerted_time is None:
             return False
-
-        # Tank still high, suppress the alert
-        return True
+        return (time.time() - self.tank_full_alerted_time) < self.TANK_FULL_COOLDOWN_SECONDS
 
     def record_tank_full_alert(self, tank_gallons):
-        """Record that a tank_full alert was sent at this level"""
-        self.tank_full_alerted_level = tank_gallons
+        """Record that a tank_full alert was sent"""
+        self.tank_full_alerted_level = tank_gallons  # kept for state persistence compat
         self.tank_full_alerted_time = time.time()
         self._save_state()
 
