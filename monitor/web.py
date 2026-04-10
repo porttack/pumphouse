@@ -62,6 +62,9 @@ import matplotlib.dates as mdates
 
 app = Flask(__name__)
 
+import logging as _logging  # noqa: E402
+_logging.basicConfig(level=_logging.WARNING, format='%(name)s %(levelname)s %(message)s')
+
 from flask_compress import Compress  # noqa: E402
 Compress(app)
 
