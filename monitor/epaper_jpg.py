@@ -237,12 +237,14 @@ def render_epaper_jpg(
     tank_gallons: float | None = None
     tank_pct:     float | None = None
     live_reading_ts = None
+    float_state = None
     try:
         live = get_tank_data(TANK_URL, timeout=30)
         if live['status'] == 'success' and live['gallons'] is not None:
             tank_gallons    = live['gallons']
             tank_pct        = (tank_gallons / TANK_CAPACITY_GALLONS) * 100
             live_reading_ts = live.get('last_updated')
+        float_state = live.get('float_state')
     except Exception:
         pass
 
@@ -627,11 +629,24 @@ def render_epaper_jpg(
             cy = iy + icon_sz // 2
             draw_weather_icon_color(draw, code, cx, cy, icon_sz)
 
-    # "Override ON" label when tenant=no is explicit and supply override is active
+    # Status overlay: Override ON / float state / bypass (tenant=no view only)
     if tenant_override == 'no':
         try:
-            if get_all_relay_status().get('supply_override') == 'ON':
-                draw.text((graph_left + pad, py), 'Override ON', font=font_small, fill=WHITE)
+            _relay     = get_all_relay_status()
+            _supply_on = _relay.get('supply_override') == 'ON'
+            _bypass_on = _relay.get('bypass') == 'ON'
+            if _supply_on:
+                _status = 'Override ON'
+            elif float_state == 'CALLING':
+                _status = 'CALLING'
+            elif float_state == 'FULL':
+                _status = 'FULL'
+            else:
+                _status = None
+            if _bypass_on:
+                _status = (_status + '/BYPASS') if _status else '/BYPASS'
+            if _status:
+                draw.text((graph_left + pad, py), _status, font=font_small, fill=WHITE)
         except Exception:
             pass
 
