@@ -217,15 +217,15 @@ def snapshot():
     .site-name    {{ font-size:1.2em; color: var(--text); font-weight:bold; }}
     .site-tagline {{ display:none; font-size:0.82em; color: var(--muted); font-style:italic; letter-spacing:-0.01em; }}
     .site-location {{ display:none; font-size:0.95em; color: var(--muted); }}
-    .site-sub  {{ font-size:0.85em; color: var(--muted); }}
-    .site-sub a {{ color: var(--accent); text-decoration:none; }}
+    .site-sub  {{ font-size:0.95em; color: var(--muted); }}
+    .site-sub a {{ color: var(--accent); text-decoration:underline; font-weight:600; }}
     .site-sub a:hover {{ color: var(--hover-text); }}
-    #theme-toggle {{ color: var(--muted); text-decoration:none; }}
+    #theme-toggle {{ color: var(--muted); text-decoration:none; font-weight:normal; font-size:0.85em; }}
     #theme-toggle:hover {{ color: var(--accent); }}
     html:not([data-theme="dark"]) .site-name     {{ font-size:2em; font-weight:700; letter-spacing:-0.02em; white-space:nowrap; }}
     html:not([data-theme="dark"]) .site-tagline  {{ display:block; }}
     html:not([data-theme="dark"]) .site-location {{ display:block; }}
-    html:not([data-theme="dark"]) .site-sub      {{ font-size:0.9em; }}
+    html:not([data-theme="dark"]) .site-sub      {{ font-size:1.0em; }}
     .page-header {{ max-width:960px; margin:12px 0; }}
     .page-header h2 {{ font-size:1.1em; }}
     .captured-at {{ color: var(--muted); font-size:0.78em; margin-top:3px; }}
@@ -269,7 +269,7 @@ def snapshot():
       html:not([data-theme="dark"]) .site-name     {{ font-size:1.3em; }}
       html:not([data-theme="dark"]) .site-location {{ font-size:0.8em; }}
       html:not([data-theme="dark"]) .site-tagline  {{ font-size:0.72em; }}
-      html:not([data-theme="dark"]) .site-sub      {{ font-size:0.78em; }}
+      html:not([data-theme="dark"]) .site-sub      {{ font-size:0.88em; }}
     }}
   </style>
 </head>
@@ -1609,10 +1609,10 @@ def timelapse_view(date_or_file):
     .site-header-text {{ display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; padding-top:2px; }}
     .site-name {{ font-size:1.2em; color: var(--text); font-weight:bold; }}
     .site-tagline {{ font-size:0.8em; color: var(--muted); font-style:italic; }}
-    .site-sub  {{ font-size:0.85em; color: var(--muted); }}
-    .site-sub a {{ color: var(--accent); text-decoration:none; }}
+    .site-sub  {{ font-size:0.95em; color: var(--muted); }}
+    .site-sub a {{ color: var(--accent); text-decoration:underline; font-weight:600; }}
     .site-sub a:hover {{ color: var(--hover-text); }}
-    #theme-toggle {{ color: var(--muted); text-decoration:none; }}
+    #theme-toggle {{ color: var(--muted); text-decoration:none; font-weight:normal; font-size:0.85em; }}
     #theme-toggle:hover {{ color: var(--accent); }}
     .date-short {{ display:none; }}
     .nav {{ display:flex; justify-content:space-between; align-items:center;
@@ -1722,7 +1722,7 @@ def timelapse_view(date_or_file):
     }}
     html:not([data-theme="dark"]) .site-tagline  {{ display:block; font-size:0.82em; letter-spacing:-0.01em; }}
     html:not([data-theme="dark"]) .site-location {{ display:block; font-size:0.95em; color:var(--muted); }}
-    html:not([data-theme="dark"]) .site-sub {{ font-size:0.9em; }}
+    html:not([data-theme="dark"]) .site-sub {{ font-size:1.0em; }}
     .site-tagline  {{ display:none; }}
     .site-location {{ display:none; }}
     html:not([data-theme="dark"]) .nav-extras {{ display: flex; }}
@@ -1775,7 +1775,7 @@ def timelapse_view(date_or_file):
       html:not([data-theme="dark"]) .site-name     {{ font-size: 1.3em; }}
       html:not([data-theme="dark"]) .site-location {{ font-size: 0.8em; }}
       html:not([data-theme="dark"]) .site-tagline  {{ font-size: 0.72em; }}
-      html:not([data-theme="dark"]) .site-sub      {{ font-size: 0.78em; }}
+      html:not([data-theme="dark"]) .site-sub      {{ font-size: 0.88em; }}
     }}
   </style>
 </head>
