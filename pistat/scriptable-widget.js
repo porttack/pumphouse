@@ -31,6 +31,7 @@ let isError = false;
 
 try {
   let req = new Request(url);
+  req.timeoutInterval = 15;  // seconds — fail fast so catch can use cache
   image = await req.loadImage();
   
   // Save successful image to cache
