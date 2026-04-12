@@ -332,23 +332,6 @@ def _count_vehicles(jpeg_bytes: bytes) -> Optional[int]:
             return None
 
         h, w = img.shape[:2]
-
-        # Adapt confidence threshold to image brightness.
-        # Night/IR images (low brightness) produce noisy low-confidence detections;
-        # a higher threshold keeps them out.  Daytime images need a lower threshold
-        # to catch partially-obscured vehicles.
-        #   bright (≥130): day   → 0.30
-        #   dim   (60–130): dusk → 0.40
-        #   dark  (<60):    night→ 0.50
-        brightness = float(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).mean())
-        if brightness >= 130:
-            conf_threshold = 0.30
-        elif brightness >= 60:
-            conf_threshold = 0.40
-        else:
-            conf_threshold = 0.50
-        logger.info('Vehicle count: brightness=%.1f → conf_threshold=%.2f', brightness, conf_threshold)
-
         blob = cv2.dnn.blobFromImage(img, 1/255.0, (416, 416), swapRB=True, crop=False)
         net.setInput(blob)
 
@@ -362,7 +345,7 @@ def _count_vehicles(jpeg_bytes: bytes) -> Optional[int]:
                 scores = detection[5:]
                 class_id = int(scores.argmax())
                 confidence = float(scores[class_id])
-                if confidence >= conf_threshold and class_id in _VEHICLE_CLASSES:
+                if confidence >= 0.3 and class_id in _VEHICLE_CLASSES:
                     cx, cy, bw, bh = (detection[:4] * [w, h, w, h]).astype(int)
                     x = cx - bw // 2
                     y = cy - bh // 2
@@ -370,7 +353,7 @@ def _count_vehicles(jpeg_bytes: bytes) -> Optional[int]:
                     confidences.append(confidence)
                     class_ids.append(class_id)
 
-        indices = cv2.dnn.NMSBoxes(boxes, confidences, score_threshold=conf_threshold, nms_threshold=0.45)
+        indices = cv2.dnn.NMSBoxes(boxes, confidences, score_threshold=0.3, nms_threshold=0.45)
         count = len(indices) if len(indices) > 0 else 0
 
         logger.info('Vehicle count: %d after NMS (raw detections=%d)', count, len(boxes))
