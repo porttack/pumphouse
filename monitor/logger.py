@@ -94,7 +94,8 @@ def log_snapshot(filepath, duration, tank_gallons, tank_gallons_delta, tank_data
                 pressure_high_seconds, pressure_high_percent,
                 estimated_gallons, purge_count, relay_status, occupied='',
                 outdoor_temp=None, indoor_temp=None, outdoor_humidity=None,
-                baro_abs=None, wind_gust=None, tank_rolling_gph=None):
+                baro_abs=None, wind_gust=None, tank_rolling_gph=None,
+                vehicle_count=None):
     """Log a snapshot to snapshots.csv"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
 
@@ -127,4 +128,5 @@ def log_snapshot(filepath, duration, tank_gallons, tank_gallons_delta, tank_data
             f'{baro_abs:.3f}' if baro_abs is not None else '',
             f'{wind_gust:.1f}' if wind_gust is not None else '',
             f'{tank_rolling_gph:.1f}' if tank_rolling_gph is not None else '',
+            str(vehicle_count) if vehicle_count is not None else '',
         ])

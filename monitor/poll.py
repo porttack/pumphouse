@@ -1044,6 +1044,28 @@ class SimplifiedMonitor:
                         if self.debug:
                             print(f"Could not check occupancy: {e}")
 
+                    # Vehicle count: daytime only, fresh Ring cache only (no fetch)
+                    snapshot_vehicle_count = None
+                    try:
+                        from astral import LocationInfo as _LI
+                        from astral.sun import sun as _asun
+                        import pytz as _pytz
+                        _tz  = _pytz.timezone('America/Los_Angeles')
+                        _now = datetime.now(_tz)
+                        _loc = _LI('Newport, OR', 'Oregon', 'America/Los_Angeles', 44.6368, -124.0535)
+                        _st  = _asun(_loc.observer, date=_now.date(), tzinfo=_tz)
+                        if _st['sunrise'] <= _now <= _st['sunset']:
+                            from monitor.config import RING_CACHE_FILE, RING_CACHE_MINUTES
+                            from monitor.ring_camera import read_vehicle_count_from_exif
+                            if RING_CACHE_FILE.exists():
+                                _age = time.time() - RING_CACHE_FILE.stat().st_mtime
+                                if _age < RING_CACHE_MINUTES * 60:
+                                    snapshot_vehicle_count = read_vehicle_count_from_exif(
+                                        RING_CACHE_FILE.read_bytes()
+                                    )
+                    except Exception:
+                        pass
+
                     log_snapshot(
                         self.snapshots_file,
                         snapshot_data['duration'],
@@ -1065,6 +1087,7 @@ class SimplifiedMonitor:
                         self.state.baro_abs,
                         self.state.wind_gust,
                         tank_rolling_gph,
+                        snapshot_vehicle_count,
                     )
 
                     # Update last snapshot tank gallons for next delta calculation
