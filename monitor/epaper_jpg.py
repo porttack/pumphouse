@@ -647,6 +647,15 @@ def render_epaper_jpg(
                 _status = (_status + '/BYPASS') if _status else '/BYPASS'
             if _status:
                 draw.text((graph_left + pad, py), _status, font=font_small, fill=WHITE)
+                py += draw.textbbox((0, 0), _status, font=font_small)[3] + s(2)
+            try:
+                from monitor.ring_camera import get_vehicle_count
+                _vc = get_vehicle_count()
+                if _vc is not None:
+                    _vc_text = f'{_vc} vehicle{"s" if _vc != 1 else ""}'
+                    draw.text((graph_left + pad, py), _vc_text, font=font_small, fill=WHITE)
+            except Exception:
+                pass
         except Exception:
             pass
 
