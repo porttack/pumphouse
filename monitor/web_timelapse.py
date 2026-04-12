@@ -113,7 +113,7 @@ def snapshot():
     _exp_dt  = (_now_dt + _td(minutes=5)).replace(second=0, microsecond=0) + _td(minutes=1)
     cached_until_str = _exp_dt.strftime('%-I:%M %p')
     src_note  = 'from timelapse' if from_timelapse else 'live grab'
-    is_direct = 'onblackberryhill.com' not in request.host.lower()
+    is_direct = not bool(request.headers.get('CF-Ray'))
     is_cf     = bool(request.headers.get('CF-Ray'))
     img_b64   = _base64.b64encode(jpeg_bytes).decode()
 
@@ -978,7 +978,7 @@ def timelapse_best_frame_view(date_str, filename):
         return Response('Not found', status=404)
 
     img_b64   = _b64.b64encode(open(path, 'rb').read()).decode()
-    is_direct = 'onblackberryhill.com' not in request.host.lower()
+    is_direct = not bool(request.headers.get('CF-Ray'))
     dash_btn  = '<a class="btn" href="/">Dashboard</a>' if is_direct else ''
     set_key_btn = (
         f'<button id="set-key-btn" class="btn" onclick="setKeySnapshot()">Set key snapshot</button>'
@@ -1081,7 +1081,7 @@ def timelapse_frame_view(date_str):
         return Response(f'Invalid image data: {e}', status=400)
     img_b64 = _b64.b64encode(jpeg_bytes).decode()
 
-    is_direct = 'onblackberryhill.com' not in request.host.lower()
+    is_direct = not bool(request.headers.get('CF-Ray'))
     dash_btn = '<a class="btn" href="/">Dashboard</a>' if is_direct else ''
     set_key_btn = (
         '<button id="set-key-btn" class="btn" onclick="setKeySnapshot()">Set key snapshot</button>'

@@ -1584,7 +1584,7 @@ def water_status():
     Direct Pi access (no CF-Ray): tenant=no mode, dashboard link shown.
     """
     via_cloudflare = bool(request.headers.get('CF-Ray'))
-    dashboard_url = 'https://onblackberryhill2.tplinkdns.com:6443/?hours=120&totals=income'
+    dashboard_url = f'https://{request.host}/?hours=120&totals=income'
 
     # Support ?hours=N or ?days=N to control the graph timespan
     hours_arg = request.args.get('hours', type=int)
@@ -1696,7 +1696,7 @@ def water2_status():
     Cache-Control is no-store so relay state is always fresh.
     """
     via_cloudflare = bool(request.headers.get('CF-Ray'))
-    dashboard_url  = 'https://onblackberryhill2.tplinkdns.com:6443/?hours=120&totals=income'
+    dashboard_url  = f'https://{request.host}/?hours=120&totals=income'
 
     hours_arg = request.args.get('hours', type=int)
     days_arg  = request.args.get('days',  type=int)
