@@ -649,11 +649,14 @@ def render_epaper_jpg(
                 draw.text((graph_left + pad, py), _status, font=font_small, fill=WHITE)
                 py += draw.textbbox((0, 0), _status, font=font_small)[3] + s(2)
             try:
-                from monitor.ring_camera import get_vehicle_count
-                _vc = get_vehicle_count()
-                if _vc is not None:
-                    _vc_text = f'{_vc} vehicle{"s" if _vc != 1 else ""}'
-                    draw.text((graph_left + pad, py), _vc_text, font=font_small, fill=WHITE)
+                from monitor.ring_camera import get_snapshot, read_vehicle_count_from_exif
+                from monitor.config import RING_TOKEN_FILE, RING_CAMERA_NAME
+                _snap = get_snapshot(RING_TOKEN_FILE, RING_CAMERA_NAME)
+                if _snap:
+                    _vc = read_vehicle_count_from_exif(_snap)
+                    if _vc is not None:
+                        _vc_text = f'{_vc} vehicle{"s" if _vc != 1 else ""}'
+                        draw.text((graph_left + pad, py), _vc_text, font=font_small, fill=WHITE)
             except Exception:
                 pass
         except Exception:

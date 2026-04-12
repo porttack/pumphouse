@@ -383,6 +383,28 @@ def _add_exif_metadata(jpeg_bytes: bytes, vehicle_count: Optional[int]) -> bytes
         return jpeg_bytes
 
 
+def read_vehicle_count_from_exif(jpeg_bytes: bytes) -> Optional[int]:
+    """
+    Read the vehicle count embedded by _add_exif_metadata() from a JPEG's
+    EXIF UserComment tag.  Returns None if the tag is absent or unparseable.
+    """
+    try:
+        import io
+        from PIL import Image
+        img = Image.open(io.BytesIO(jpeg_bytes))
+        comment = img.getexif().get(0x9286)
+        if comment:
+            if isinstance(comment, bytes):
+                comment = comment.decode('utf-8', errors='ignore')
+            if comment.startswith('vehicles='):
+                val = comment.split('=', 1)[1]
+                if val.isdigit():
+                    return int(val)
+    except Exception:
+        pass
+    return None
+
+
 def get_cache_mtime() -> Optional[float]:
     """Return the mtime of the cache file, or None if it doesn't exist."""
     from monitor.config import RING_CACHE_FILE
