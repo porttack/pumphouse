@@ -645,9 +645,11 @@ def render_epaper_jpg(
                 _status = None
             if _bypass_on:
                 _status = (_status + '/BYPASS') if _status else '/BYPASS'
+            _NUM_WORDS = ['Zero','One','Two','Three','Four','Five',
+                          'Six','Seven','Eight','Nine','Ten']
             if _status:
-                draw.text((graph_left + pad, py), _status, font=font_small, fill=WHITE)
-                py += draw.textbbox((0, 0), _status, font=font_small)[3] + s(2)
+                draw.text((graph_left + pad, py), _status, font=font_tiny, fill=WHITE)
+                py += draw.textbbox((0, 0), _status, font=font_tiny)[3] + s(2)
             try:
                 from monitor.ring_camera import get_snapshot, read_vehicle_count_from_exif
                 from monitor.config import RING_TOKEN_FILE, RING_CAMERA_NAME
@@ -655,8 +657,9 @@ def render_epaper_jpg(
                 if _snap:
                     _vc = read_vehicle_count_from_exif(_snap)
                     if _vc is not None:
-                        _vc_text = f'{_vc} vehicle{"s" if _vc != 1 else ""}'
-                        draw.text((graph_left + pad, py), _vc_text, font=font_small, fill=WHITE)
+                        _vc_word = _NUM_WORDS[_vc] if 0 <= _vc < len(_NUM_WORDS) else str(_vc)
+                        _vc_text = f'{_vc_word} car{"s" if _vc != 1 else ""}'
+                        draw.text((graph_left + pad, py), _vc_text, font=font_tiny, fill=WHITE)
             except Exception:
                 pass
         except Exception:

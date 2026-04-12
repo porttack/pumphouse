@@ -232,7 +232,10 @@ def _stamp_timestamp(jpeg_bytes: bytes, vehicle_count: Optional[int] = None) -> 
     h, w  = img.shape[:2]
     time_str = datetime.now().strftime('%-I:%M %p')
     if vehicle_count is not None:
-        label = f'{time_str}  {vehicle_count} vehicle{"s" if vehicle_count != 1 else ""}'
+        _num_words = ['Zero','One','Two','Three','Four','Five',
+                      'Six','Seven','Eight','Nine','Ten']
+        _vc_word = _num_words[vehicle_count] if 0 <= vehicle_count < len(_num_words) else str(vehicle_count)
+        label = f'{time_str}  {_vc_word} car{"s" if vehicle_count != 1 else ""}'
     else:
         label = time_str
     font  = cv2.FONT_HERSHEY_SIMPLEX
