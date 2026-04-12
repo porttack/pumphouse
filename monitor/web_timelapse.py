@@ -1046,7 +1046,7 @@ def timelapse_set_snapshot_file(date_str):
     if not _re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_str):
         return Response(_json.dumps({'ok': False, 'error': 'Invalid date'}), status=400,
                         mimetype='application/json')
-    if 'onblackberryhill.com' in request.host.lower():
+    if request.headers.get('CF-Ray'):
         return Response(_json.dumps({'ok': False, 'error': 'Not available via CDN'}),
                         mimetype='application/json')
     try:
@@ -1147,7 +1147,7 @@ def timelapse_set_snapshot(date_str):
     if not _re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_str):
         return Response(_json.dumps({'ok': False, 'error': 'Invalid date'}),
                         status=400, mimetype='application/json')
-    if 'onblackberryhill.com' in request.host.lower():
+    if request.headers.get('CF-Ray'):
         return Response(_json.dumps({'ok': False, 'error': 'Not available via CDN'}),
                         mimetype='application/json')
     try:
@@ -1190,7 +1190,7 @@ def api_ratings_delete(date_str):
     import re
     if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_str):
         return Response('Invalid date', status=400)
-    if 'onblackberryhill.com' in request.host.lower():
+    if request.headers.get('CF-Ray'):
         return Response('Forbidden', status=403)
     with _ratings_lock:
         data = _read_ratings()
@@ -1425,7 +1425,7 @@ def timelapse_view(date_or_file):
           </div>
         </div>"""
 
-    is_direct    = 'onblackberryhill.com' not in request.host.lower()
+    is_direct    = not bool(request.headers.get('CF-Ray'))
     is_direct_js = 'true' if is_direct else 'false'
     # Zoom version: same base name with _zoom suffix
     _zoom_name = (mp4_name[:-4] + '_zoom.mp4') if mp4_name else None
