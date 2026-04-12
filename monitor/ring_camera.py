@@ -345,7 +345,7 @@ def _count_vehicles(jpeg_bytes: bytes) -> Optional[int]:
                 scores = detection[5:]
                 class_id = int(scores.argmax())
                 confidence = float(scores[class_id])
-                if confidence >= 0.3 and class_id in _VEHICLE_CLASSES:
+                if confidence >= 0.25 and class_id in _VEHICLE_CLASSES:
                     cx, cy, bw, bh = (detection[:4] * [w, h, w, h]).astype(int)
                     x = cx - bw // 2
                     y = cy - bh // 2
@@ -353,7 +353,7 @@ def _count_vehicles(jpeg_bytes: bytes) -> Optional[int]:
                     confidences.append(confidence)
                     class_ids.append(class_id)
 
-        indices = cv2.dnn.NMSBoxes(boxes, confidences, score_threshold=0.3, nms_threshold=0.45)
+        indices = cv2.dnn.NMSBoxes(boxes, confidences, score_threshold=0.25, nms_threshold=0.45)
         count = len(indices) if len(indices) > 0 else 0
 
         logger.info('Vehicle count: %d after NMS (raw detections=%d)', count, len(boxes))
