@@ -116,6 +116,9 @@ NOTIFY_HIGH_PRESSURE_ENABLED = False  # Enable immediate high pressure alerts
 NOTIFY_HIGH_PRESSURE_USE_EMAIL = True  # Send email alerts (default: False, use ntfy only)
 NOTIFY_PRESSURE_LOW_ENABLED = False  # Send alert when pressure goes LOW with duration info
 
+# Vehicle Detection (unoccupied property only)
+NOTIFY_VEHICLE_DETECTED = True   # Alert when vehicle count changes while property is unoccupied
+
 # Tank Data Outage Detection
 NOTIFY_TANK_OUTAGE_ENABLED = False  # Enable tank data outage detection and notification
 NOTIFY_TANK_OUTAGE_THRESHOLD_MINUTES = 60  # Minimum outage duration (in minutes) to trigger notification
@@ -131,7 +134,9 @@ MAX_PRESSURE_LOG_INTERVAL = 1800  # Log at least every 30 minutes when pressure 
 # Common types: TANK_LEVEL, PRESSURE_HIGH, PRESSURE_LOW, INIT, SHUTDOWN, FLOAT_CALLING, FLOAT_FULL
 DASHBOARD_HIDE_EVENT_TYPES = ['TANK_LEVEL', 'PRESSURE_LOW', 'PRESSURE_HIGH', 'SHUTDOWN', 'FULL_FLOW', 'NOTIFY_FULL_FLOW']  # Hide noisy tank level change events
 DASHBOARD_MAX_EVENTS = 200  # Maximum number of events to show in dashboard and emails (~3 days)
-DASHBOARD_SNAPSHOT_COUNT = 97  # Number of snapshots to show (97 = 24 hours at 15-min intervals)
+DASHBOARD_SNAPSHOT_COUNT    = 400  # Raw rows to read (~4 days); older ones aggregated for display
+DASHBOARD_SNAPSHOT_RAW      = 5    # Number of recent 15-min rows shown individually
+DASHBOARD_SNAPSHOT_AGG_HOURS = 2   # Bucket size (hours) for older rows; use even divisors of 24 (1,2,3,4,6,8,12)
 
 # Reservation/Rental Income Configuration
 MANAGEMENT_FEE_PERCENT = 36  # Percentage paid to management company (subtracted from displayed income)
@@ -157,6 +162,7 @@ SNAPSHOTS_FILE             = DATA_DIR / 'snapshots.csv'
 DAILY_CSV                  = DATA_DIR / 'daily.csv'
 RESERVATIONS_FILE          = DATA_DIR / 'reservations.csv'
 RESERVATIONS_SNAPSHOT_FILE = DATA_DIR / 'reservations_snapshot.csv'
+WORK_ORDERS_FILE           = DATA_DIR / 'work_orders.csv'
 
 # Default file paths (used by main.py CLI args and legacy callers)
 DEFAULT_LOG_FILE       = 'pressure_log.txt'

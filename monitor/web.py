@@ -15,7 +15,7 @@ from functools import wraps
 
 from monitor import __version__
 from monitor.config import (
-    EVENTS_FILE, RESERVATIONS_FILE, DEFAULT_SNAPSHOTS_FILE, DAILY_CSV,
+    EVENTS_FILE, RESERVATIONS_FILE, WORK_ORDERS_FILE, DEFAULT_SNAPSHOTS_FILE, DAILY_CSV,
     NOTIFY_BACKFLUSH_TIME_START, NOTIFY_BACKFLUSH_TIME_END,
     TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS,
     EPAPER_CONSERVE_WATER_THRESHOLD, EPAPER_OWNER_STAY_TYPES,
@@ -24,6 +24,7 @@ from monitor.config import (
     EPAPER_FORECAST_DAYS, EPAPER_MIN_GRAPH_RANGE_PCT, EPAPER_MAX_GRAPH_PCT,
     DASHBOARD_HIDE_EVENT_TYPES,
     DASHBOARD_MAX_EVENTS, DASHBOARD_DEFAULT_HOURS, DASHBOARD_SNAPSHOT_COUNT,
+    DASHBOARD_SNAPSHOT_RAW, DASHBOARD_SNAPSHOT_AGG_HOURS,
     SECRET_OVERRIDE_ON_TOKEN, SECRET_OVERRIDE_OFF_TOKEN,
     SECRET_BYPASS_ON_TOKEN, SECRET_BYPASS_OFF_TOKEN,
     SECRET_PURGE_TOKEN, MANAGEMENT_FEE_PERCENT,
@@ -180,12 +181,16 @@ def format_month_year_filter(date_str):
 
 @app.template_filter('human_time')
 def human_time_filter(timestamp_str):
-    """Convert timestamp to 3-letter day and HH:MM format (e.g., 'Mon 14:23')"""
+    """Convert timestamp to 3-letter day and HH:MM format (e.g., 'Mon 14:23').
+    Strips a leading '~' marker used to flag hourly-aggregate rows before parsing."""
     try:
-        if isinstance(timestamp_str, str):
-            dt = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S.%f')
-        elif isinstance(timestamp_str, datetime):
-            dt = timestamp_str
+        s = timestamp_str
+        if isinstance(s, str) and s.startswith('~'):
+            s = s[1:]
+        if isinstance(s, str):
+            dt = datetime.strptime(s, '%Y-%m-%d %H:%M:%S.%f')
+        elif isinstance(s, datetime):
+            dt = s
         else:
             return timestamp_str
         return dt.strftime('%a %-I:%M %p')
@@ -235,6 +240,164 @@ def read_csv_tail(filepath, max_rows=20):
     except Exception as e:
         return [], []
 
+def aggregate_snapshots(headers, rows, raw_count=5, bucket_hours=1):
+    """
+    Keep the most recent raw_count rows as individual 15-min snapshots, then
+    collapse older rows into even-aligned N-hour buckets (e.g. bucket_hours=2
+    gives 0-2, 2-4, 4-6 … boundaries, never crossing midnight).
+
+    Aggregated rows are marked with a leading '~' on the timestamp so the
+    template can style them differently.  Returned in chronological order
+    (oldest first) so the template's existing |reverse filter works unchanged.
+
+    Aggregation rules by column:
+      last        — use the final value in the bucket (state at end of period)
+      sum         — add up numeric values
+      sum_signed  — sum with sign prefix preserved (+/-)
+      any_yes     — "Yes" if any row in bucket was "Yes" (e.g. float_ever_calling)
+      all_yes     — "Yes" only if every row was "Yes" (e.g. float_always_full)
+      pct_dur     — recalculate pressure_high_percent from sums of seconds
+      avg1/avg0/avg3 — mean rounded to 1/0/3 decimal places
+      max1        — maximum, rounded to 1 decimal
+      last_nonblank — last non-empty value (ignores nighttime/stale blanks)
+    """
+    if not headers or not rows or len(rows) <= raw_count:
+        return rows
+
+    agg_rules = {
+        'timestamp':              'hour_start',
+        'duration_seconds':       'sum',
+        'tank_gallons':           'last',
+        'tank_gallons_delta':     'sum_signed',
+        'tank_data_age_seconds':  'last',
+        'float_state':            'last',
+        'float_ever_calling':     'any_yes',
+        'float_always_full':      'all_yes',
+        'pressure_high_seconds':  'sum',
+        'pressure_high_percent':  'pct_dur',
+        'estimated_gallons_pumped': 'sum_signed',
+        'purge_count':            'sum',
+        'relay_bypass':           'last',
+        'relay_supply_override':  'last',
+        'occupied':               'last',
+        'outdoor_temp_f':         'avg1',
+        'indoor_temp_f':          'avg1',
+        'outdoor_humidity':       'avg0',
+        'baro_abs_inhg':          'avg3',
+        'wind_gust_mph':          'max1',
+        'tank_rolling_gph':       'avg1',
+        'vehicle_count':          'last_nonblank',  # blank at night; use last daytime reading
+    }
+
+    raw_rows   = rows[-raw_count:]
+    older_rows = rows[:-raw_count]
+
+    def parse_ts(s):
+        for fmt in ('%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S'):
+            try:
+                return datetime.strptime(s, fmt)
+            except Exception:
+                pass
+        return None
+
+    def hour_key(row):
+        ts_idx = headers.index('timestamp') if 'timestamp' in headers else 0
+        dt = parse_ts(row[ts_idx] if ts_idx < len(row) else '')
+        if dt:
+            # Align to even bucket boundary (e.g. bucket_hours=2 → 0,2,4,...,22)
+            bucket_start = (dt.hour // bucket_hours) * bucket_hours
+            return f'{dt.strftime("%Y-%m-%d")} {bucket_start:02d}'
+        return row[0][:13]
+
+    # Group into ordered hourly buckets
+    from collections import OrderedDict
+    buckets = OrderedDict()
+    for row in older_rows:
+        buckets.setdefault(hour_key(row), []).append(row)
+
+    def safe_float(v):
+        if v is None or v == '':
+            return None
+        try:
+            return float(str(v).lstrip('+'))
+        except Exception:
+            return None
+
+    def agg_col(col_idx, col_name, group):
+        rule = agg_rules.get(col_name, 'last')
+        vals = [row[col_idx] if col_idx < len(row) else '' for row in group]
+
+        if rule == 'hour_start':
+            ts_idx = headers.index('timestamp') if 'timestamp' in headers else 0
+            dt = parse_ts(group[0][ts_idx] if ts_idx < len(group[0]) else '')
+            if dt:
+                bucket_start = (dt.hour // bucket_hours) * bucket_hours
+                return '~' + dt.strftime('%Y-%m-%d') + f' {bucket_start:02d}:00:00.000'
+            return '~' + vals[0]
+
+        if rule == 'last':
+            return vals[-1]
+
+        if rule == 'sum':
+            nums = [safe_float(v) for v in vals if safe_float(v) is not None]
+            if not nums:
+                return ''
+            total = sum(nums)
+            return str(int(total)) if total == int(total) else f'{total:.1f}'
+
+        if rule == 'sum_signed':
+            nums = [safe_float(v) for v in vals if safe_float(v) is not None]
+            if not nums:
+                return ''
+            total = sum(nums)
+            return ('+' if total >= 0 else '') + (str(int(total)) if total == int(total) else f'{total:.2f}')
+
+        if rule == 'any_yes':
+            return 'Yes' if any(v.strip() == 'Yes' for v in vals) else 'No'
+
+        if rule == 'all_yes':
+            nonempty = [v.strip() for v in vals if v.strip()]
+            return 'Yes' if nonempty and all(v == 'Yes' for v in nonempty) else 'No'
+
+        if rule == 'pct_dur':
+            try:
+                ph_idx  = headers.index('pressure_high_seconds')
+                dur_idx = headers.index('duration_seconds')
+                ph  = sum(safe_float(row[ph_idx])  or 0 for row in group if ph_idx  < len(row))
+                dur = sum(safe_float(row[dur_idx]) or 0 for row in group if dur_idx < len(row))
+                return f'{ph / dur * 100:.1f}' if dur else '0.0'
+            except Exception:
+                return ''
+
+        if rule == 'avg1':
+            nums = [safe_float(v) for v in vals if safe_float(v) is not None]
+            return f'{sum(nums)/len(nums):.1f}' if nums else ''
+
+        if rule == 'avg0':
+            nums = [safe_float(v) for v in vals if safe_float(v) is not None]
+            return str(int(round(sum(nums)/len(nums)))) if nums else ''
+
+        if rule == 'avg3':
+            nums = [safe_float(v) for v in vals if safe_float(v) is not None]
+            return f'{sum(nums)/len(nums):.3f}' if nums else ''
+
+        if rule == 'max1':
+            nums = [safe_float(v) for v in vals if safe_float(v) is not None]
+            return f'{max(nums):.1f}' if nums else ''
+
+        if rule == 'last_nonblank':
+            nonempty = [v for v in vals if v.strip()]
+            return nonempty[-1] if nonempty else ''
+
+        return vals[-1]  # fallback: last
+
+    def aggregate_group(group):
+        return [agg_col(i, h, group) for i, h in enumerate(headers)]
+
+    agg_rows = [aggregate_group(bucket) for bucket in buckets.values()]
+    return agg_rows + raw_rows
+
+
 def read_events_by_time(filepath, hours=72):
     """Read events from CSV file filtered by time window (hours)"""
     if not os.path.exists(filepath):
@@ -280,6 +443,58 @@ def read_events_by_time(filepath, hours=72):
 
     except Exception as e:
         return [], []
+
+def load_work_orders(filepath, months=3):
+    """Load work orders from CSV, returning (headers, rows) filtered to the past N months."""
+    if not os.path.exists(filepath):
+        return [], []
+    try:
+        cutoff = datetime.now() - timedelta(days=months * 31)
+        with open(filepath, 'r') as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+        if not rows:
+            return [], []
+
+        headers = list(rows[0].keys())
+
+        # Find a date column to filter on
+        date_col = None
+        for candidate in ['Date', 'Created', 'Created Date', 'Date Created', 'Submitted', 'date']:
+            if candidate in headers:
+                date_col = candidate
+                break
+
+        filtered = []
+        for row in rows:
+            if date_col:
+                try:
+                    # Try common date formats
+                    raw = row[date_col].strip()
+                    dt = None
+                    for fmt in ('%Y-%m-%d', '%m/%d/%Y', '%m-%d-%Y', '%Y-%m-%dT%H:%M:%S'):
+                        try:
+                            dt = datetime.strptime(raw[:len(fmt)], fmt)
+                            break
+                        except ValueError:
+                            continue
+                    if dt and dt < cutoff:
+                        continue
+                except Exception:
+                    pass
+            filtered.append([row.get(h, '') for h in headers])
+
+        # Strip internal scraper columns from display
+        display_headers = [h for h in headers if not h.startswith('_')]
+        display_col_indices = [i for i, h in enumerate(headers) if not h.startswith('_')]
+        display_rows = [[row[i] for i in display_col_indices] for row in filtered]
+
+        return display_headers, display_rows
+    except Exception as e:
+        print(f"Error loading work orders: {e}")
+        return [], []
+
 
 def get_hourly_gph(filepath=DEFAULT_SNAPSHOTS_FILE, blocks=6, block_hours=2):
     """Return list of {label, delta} for the last `blocks` complete 2-hour blocks.
@@ -1859,7 +2074,11 @@ def index():
         tank_age_minutes = int(age_seconds / 60)
 
     # Read CSV files
+    work_order_headers, work_order_rows = load_work_orders(WORK_ORDERS_FILE, months=3)
     snapshot_headers, snapshot_rows = read_csv_tail(DEFAULT_SNAPSHOTS_FILE, max_rows=DASHBOARD_SNAPSHOT_COUNT)
+    snapshot_rows = aggregate_snapshots(snapshot_headers, snapshot_rows,
+                                        raw_count=DASHBOARD_SNAPSHOT_RAW,
+                                        bucket_hours=DASHBOARD_SNAPSHOT_AGG_HOURS)
     daily_headers, daily_rows = read_csv_tail(str(DAILY_CSV), max_rows=62)
     pumpoff_headers, pumpoff_rows = read_csv_tail(str(DAILY_CSV.parent / 'pumpoff.csv'), max_rows=50)
     event_headers, event_rows = read_events_by_time(EVENTS_FILE, hours=hours)
@@ -2147,7 +2366,9 @@ def index():
                          purge_pending=get_purge_pending(),
                          calendar_months=build_calendar_months(all_reservations),
                          prior_calendar_months=_build_prior_calendar(all_reservations),
-                         past_reservation_list=_build_past_reservations(all_reservations, MANAGEMENT_FEE_PERCENT, guest_counts))
+                         past_reservation_list=_build_past_reservations(all_reservations, MANAGEMENT_FEE_PERCENT, guest_counts),
+                         work_order_headers=work_order_headers,
+                         work_order_rows=work_order_rows)
 
 @app.route('/sunset')
 def sunset():

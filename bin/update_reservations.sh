@@ -32,5 +32,13 @@ else
     exit 1
 fi
 
+# Step 3: Scrape work orders
+echo "[$TIMESTAMP] Downloading work orders from TrackHS..."
+if $VENV_PYTHON "$BIN_DIR/scrape_work_orders.py" --output "$DATA_DIR/work_orders.csv"; then
+    echo "[$TIMESTAMP] ✓ Downloaded work orders successfully"
+else
+    echo "[$TIMESTAMP] ✗ Failed to download work orders (non-fatal)"
+fi
+
 echo "[$TIMESTAMP] Reservation update complete"
 echo ""
