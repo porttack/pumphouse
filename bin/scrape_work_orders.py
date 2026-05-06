@@ -2,18 +2,18 @@
 """
 TrackHS Work Orders Scraper
 
-Logs into meredith.trackhs.com and scrapes work orders from the owner portal.
-Saves the data to work_orders.csv.
+Logs into meredith.trackhs.com and scrapes work orders from the owner portal
+for the past N months (default 3). Saves the data to work_orders.csv.
 
 Usage:
-    python scrape_work_orders.py [--debug] [--output FILENAME]
+    python scrape_work_orders.py [--debug] [--months N] [--output FILENAME]
 """
 
 import argparse
 import csv
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, date
 import sys
 from pathlib import Path
 
@@ -26,6 +26,11 @@ DATA_DIR = Path.home() / '.local' / 'share' / 'pumphouse'
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 SECRETS_PATH = Path.home() / ".config" / "pumphouse" / "secrets.conf"
+
+MONTH_NAMES = [
+    '', 'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+]
 
 
 def load_secrets():
@@ -81,17 +86,13 @@ def login(session, debug=False):
         if not form_action or form_action in ['/login', '/owner/login']:
             form_action = LOGIN_URL
         elif not form_action.startswith('http'):
-            if form_action.startswith('/'):
-                form_action = TRACKHS_BASE_URL + form_action
-            else:
-                form_action = LOGIN_URL.rstrip('/') + '/' + form_action
+            form_action = TRACKHS_BASE_URL + form_action if form_action.startswith('/') else LOGIN_URL.rstrip('/') + '/' + form_action
 
         payload = {}
         for hidden_input in login_form.find_all('input', type='hidden'):
             name = hidden_input.get('name')
-            value = hidden_input.get('value', '')
             if name:
-                payload[name] = value
+                payload[name] = hidden_input.get('value', '')
 
         username_field = (login_form.find('input', {'name': 'username'}) or
                           login_form.find('input', {'type': 'email'}) or
@@ -121,148 +122,155 @@ def login(session, debug=False):
         return False
 
 
-def scrape_work_orders(session, debug=False):
-    """
-    Fetch and parse work orders from the TrackHS owner portal.
-    Returns a list of dicts with work order data.
-    """
+def get_unit_id(session, debug=False):
+    """Discover the unit ID from the work orders page select element."""
     try:
-        if debug:
-            print(f"Fetching work orders page: {WORK_ORDERS_URL}")
-
         response = session.get(WORK_ORDERS_URL)
         response.raise_for_status()
-
-        if debug:
-            print(f"Work orders page status: {response.status_code}")
-            print(f"Final URL: {response.url}")
-
-        if 'Log in to get started' in response.text or 'Login - Owner Connect' in response.text:
-            print("ERROR: Redirected to login when accessing work orders (auth failed)")
-            return None
-
-        if debug:
-            # Save HTML for inspection
-            debug_file = DATA_DIR / 'work_orders_debug.html'
-            with open(debug_file, 'w') as f:
-                f.write(response.text)
-            print(f"Saved HTML to: {debug_file}")
-
         soup = BeautifulSoup(response.text, 'html.parser')
-
-        # Find the work orders table - try multiple strategies
-        work_orders = []
-
-        # Strategy 1: Look for a table with work order-like columns
-        tables = soup.find_all('table')
+        unit_select = soup.find('select', {'name': 'unit'})
+        if unit_select:
+            first_option = unit_select.find('option', value=True)
+            if first_option and first_option.get('value'):
+                unit_id = first_option['value']
+                if debug:
+                    print(f"Discovered unit ID: {unit_id} ({first_option.get_text(strip=True)})")
+                return unit_id
+    except Exception as e:
         if debug:
-            print(f"Found {len(tables)} table(s) on page")
+            print(f"Could not discover unit ID: {e}")
+    return None
 
-        best_table = None
-        best_headers = []
-        for table in tables:
-            headers = []
-            header_row = table.find('tr')
-            if header_row:
-                headers = [th.get_text(strip=True) for th in header_row.find_all(['th', 'td'])]
-            if debug:
-                print(f"  Table headers: {headers}")
-            # Prefer tables that look like work orders
-            if any(kw in ' '.join(headers).lower() for kw in ['date', 'status', 'description', 'work', 'order', 'request']):
-                best_table = table
-                best_headers = headers
-                break
 
-        if best_table is None and tables:
-            # Fall back to the largest table
-            best_table = max(tables, key=lambda t: len(t.find_all('tr')))
-            header_row = best_table.find('tr')
-            if header_row:
-                best_headers = [th.get_text(strip=True) for th in header_row.find_all(['th', 'td'])]
+def parse_work_orders_table(html, year, month, debug=False):
+    """Parse work orders from a monthly report HTML page."""
+    soup = BeautifulSoup(html, 'html.parser')
 
-        if best_table:
-            rows = best_table.find_all('tr')
-            if debug:
-                print(f"Parsing table with {len(rows)} rows, headers: {best_headers}")
-
-            for row in rows[1:]:  # Skip header row
-                cells = [td.get_text(strip=True) for td in row.find_all(['td', 'th'])]
-                if not cells or all(c == '' for c in cells):
-                    continue
-
-                # Map cells to headers, padding if needed
-                entry = {}
-                for i, header in enumerate(best_headers):
-                    entry[header] = cells[i] if i < len(cells) else ''
-
-                # Also store raw cells under generic keys if no headers
-                if not best_headers:
-                    for i, cell in enumerate(cells):
-                        entry[f'col_{i}'] = cell
-
-                # Try to find a date field for filtering
-                entry['_scraped_at'] = datetime.now().isoformat(timespec='seconds')
-                work_orders.append(entry)
-
+    for table in soup.find_all('table'):
+        # Headers may be <th> directly inside <thead> (no wrapping <tr>)
+        thead = table.find('thead')
+        if thead:
+            headers = [th.get_text(strip=True) for th in thead.find_all('th')]
         else:
-            # Strategy 2: Look for work order cards/list items (non-table layout)
-            if debug:
-                print("No table found, looking for list/card layout...")
+            first_row = table.find('tr')
+            headers = [th.get_text(strip=True) for th in first_row.find_all(['th', 'td'])] if first_row else []
 
-            # Common TrackHS patterns for work order listings
-            items = (soup.find_all(class_=lambda c: c and any(
-                kw in c.lower() for kw in ['work-order', 'workorder', 'maintenance', 'ticket', 'request']
-            )) or soup.find_all('li', class_=True))
+        if not any(h in headers for h in ['WO #', 'Status', 'Summary']):
+            continue
 
-            for item in items:
-                text = item.get_text(separator='|', strip=True)
-                if text:
-                    work_orders.append({'Description': text, '_scraped_at': datetime.now().isoformat(timespec='seconds')})
+        tbody = table.find('tbody')
+        data_rows = tbody.find_all('tr') if tbody else table.find_all('tr')[1:]
+
+        # Each work order spans: a header row (WO # non-empty), one or more
+        # detail rows (WO # empty, contains description + amount), and a Sub-Total row.
+        # Merge them into one row per work order.
+        wo_idx = headers.index('WO #') if 'WO #' in headers else 0
+        summary_idx = headers.index('Summary') if 'Summary' in headers else -1
+        total_idx = headers.index('Total') if 'Total' in headers else -1
+
+        rows = []
+        current = None
+        for tr in data_rows:
+            cells = [td.get_text(strip=True) for td in tr.find_all('td')]
+            if not cells or all(c == '' for c in cells):
+                continue
+
+            first = cells[0] if cells else ''
+
+            # Sub-total row — flush current and skip
+            if first.lower().startswith('sub-total') or first.lower().startswith('total charges'):
+                if current:
+                    rows.append(current)
+                    current = None
+                continue
+
+            entry = dict(zip(headers, cells))
+
+            if entry.get('WO #'):
+                # New work order header row
+                if current:
+                    rows.append(current)
+                entry['Month'] = f"{MONTH_NAMES[month]} {year}"
+                current = entry
+            else:
+                # Detail row — append description and fill in amount
+                if current is None:
+                    continue
+                detail_summary = cells[summary_idx] if summary_idx >= 0 and summary_idx < len(cells) else ''
+                detail_total = cells[total_idx] if total_idx >= 0 and total_idx < len(cells) else ''
+                if detail_summary and summary_idx >= 0:
+                    existing = current.get('Summary', '')
+                    current['Summary'] = f"{existing} — {detail_summary}" if existing else detail_summary
+                if detail_total and total_idx >= 0 and not current.get('Total'):
+                    current['Total'] = detail_total
+
+        if current:
+            rows.append(current)
 
         if debug:
-            print(f"Found {len(work_orders)} work order(s)")
-            if work_orders:
-                print(f"Sample: {work_orders[0]}")
-
-        return work_orders
-
-    except requests.RequestException as e:
-        print(f"ERROR fetching work orders: {e}")
-        return None
-
-
-def save_work_orders(work_orders, output_file, debug=False):
-    if not work_orders:
-        print("No work orders to save")
-        # Write empty file with minimal header so dashboard doesn't break
-        with open(output_file, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(['Date', 'Description', 'Status', 'Priority', 'Unit', '_scraped_at'])
-        return True
-
-    # Collect all fieldnames across all rows
-    fieldnames = []
-    seen = set()
-    for wo in work_orders:
-        for key in wo:
-            if key not in seen:
-                fieldnames.append(key)
-                seen.add(key)
-
-    with open(output_file, 'w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
-        writer.writeheader()
-        writer.writerows(work_orders)
+            print(f"  {year}-{month:02d}: found {len(rows)} work order(s)")
+        return headers, rows
 
     if debug:
-        print(f"✓ Saved {len(work_orders)} work orders to {output_file}")
+        print(f"  {year}-{month:02d}: no matching table found")
+    return [], []
 
-    return True
+
+def scrape_work_orders(session, months=3, debug=False):
+    """Scrape work orders for the past N months. Returns (fieldnames, all_rows)."""
+    unit_id = get_unit_id(session, debug=debug)
+    if not unit_id:
+        print("ERROR: Could not determine unit ID")
+        return None, None
+
+    today = date.today()
+    all_rows = []
+    all_headers = []
+
+    for i in range(months):
+        # Walk backwards: current month, then prior months
+        month = today.month - i
+        year = today.year
+        while month <= 0:
+            month += 12
+            year -= 1
+
+        params = {'unit': unit_id, 'year': str(year), 'period': str(month)}
+        if debug:
+            print(f"Fetching {MONTH_NAMES[month]} {year}...")
+
+        try:
+            response = session.get(WORK_ORDERS_URL, params=params)
+            response.raise_for_status()
+        except requests.RequestException as e:
+            print(f"ERROR fetching {year}-{month:02d}: {e}")
+            continue
+
+        headers, rows = parse_work_orders_table(response.text, year, month, debug=debug)
+        if headers and not all_headers:
+            all_headers = headers + ['Month']
+        all_rows.extend(rows)
+
+    return all_headers, all_rows
+
+
+def save_work_orders(headers, rows, output_file, debug=False):
+    if not headers:
+        headers = ['WO #', 'Status', 'Vendor', 'Name', 'Date', 'Summary', 'Total', 'Month']
+
+    with open(output_file, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=headers, extrasaction='ignore')
+        writer.writeheader()
+        writer.writerows(rows)
+
+    if debug:
+        print(f"✓ Saved {len(rows)} work orders to {output_file}")
 
 
 def main():
     parser = argparse.ArgumentParser(description='Download TrackHS work orders')
     parser.add_argument('--debug', action='store_true', help='Enable debug output')
+    parser.add_argument('--months', type=int, default=3, help='Number of months to fetch (default: 3)')
     parser.add_argument('--output', default=str(DATA_DIR / 'work_orders.csv'), help='Output CSV filename')
     args = parser.parse_args()
 
@@ -277,15 +285,15 @@ def main():
         return 1
     print("✓ Login successful")
 
-    print("\n[2/3] Fetching work orders...")
-    work_orders = scrape_work_orders(session, debug=args.debug)
-    if work_orders is None:
+    print(f"\n[2/3] Fetching work orders for past {args.months} months...")
+    headers, rows = scrape_work_orders(session, months=args.months, debug=args.debug)
+    if headers is None:
         print("✗ Failed to fetch work orders")
         return 1
-    print(f"✓ Found {len(work_orders)} work orders")
+    print(f"✓ Found {len(rows)} work order(s) across {args.months} months")
 
     print("\n[3/3] Saving work orders...")
-    save_work_orders(work_orders, args.output, debug=args.debug)
+    save_work_orders(headers, rows, args.output, debug=args.debug)
     print(f"✓ Saved to: {args.output}")
 
     return 0

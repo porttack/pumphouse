@@ -459,27 +459,14 @@ def load_work_orders(filepath, months=3):
 
         headers = list(rows[0].keys())
 
-        # Find a date column to filter on
-        date_col = None
-        for candidate in ['Date', 'Created', 'Created Date', 'Date Created', 'Submitted', 'date']:
-            if candidate in headers:
-                date_col = candidate
-                break
-
         filtered = []
         for row in rows:
-            if date_col:
+            # Filter using Month column (format: "April 2026") if present
+            month_val = row.get('Month', '')
+            if month_val:
                 try:
-                    # Try common date formats
-                    raw = row[date_col].strip()
-                    dt = None
-                    for fmt in ('%Y-%m-%d', '%m/%d/%Y', '%m-%d-%Y', '%Y-%m-%dT%H:%M:%S'):
-                        try:
-                            dt = datetime.strptime(raw[:len(fmt)], fmt)
-                            break
-                        except ValueError:
-                            continue
-                    if dt and dt < cutoff:
+                    dt = datetime.strptime(month_val, '%B %Y')
+                    if dt < cutoff:
                         continue
                 except Exception:
                     pass
