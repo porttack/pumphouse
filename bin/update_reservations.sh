@@ -36,6 +36,14 @@ fi
 echo "[$TIMESTAMP] Downloading work orders from TrackHS..."
 if $VENV_PYTHON "$BIN_DIR/scrape_work_orders.py" --output "$DATA_DIR/work_orders.csv"; then
     echo "[$TIMESTAMP] ✓ Downloaded work orders successfully"
+
+    # Step 4: Check for new work orders and notify
+    echo "[$TIMESTAMP] Checking for new work orders..."
+    if $VENV_PYTHON "$BIN_DIR/check_new_work_orders.py"; then
+        echo "[$TIMESTAMP] ✓ Checked for new work orders"
+    else
+        echo "[$TIMESTAMP] ✗ Failed to check new work orders (non-fatal)"
+    fi
 else
     echo "[$TIMESTAMP] ✗ Failed to download work orders (non-fatal)"
 fi
