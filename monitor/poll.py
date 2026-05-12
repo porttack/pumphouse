@@ -28,6 +28,7 @@ from monitor.config import (
     ENABLE_AMBIENT_WEATHER, AMBIENT_WEATHER_POLL_INTERVAL,
     AMBIENT_WEATHER_API_KEY, AMBIENT_WEATHER_APPLICATION_KEY, AMBIENT_WEATHER_MAC_ADDRESS,
     PURGE_PENDING_FILE,
+    NOTIFY_VEHICLE_DETECTED,
 )
 from monitor.gpio_helpers import (
     read_pressure, read_float_sensor,
@@ -196,6 +197,9 @@ class SimplifiedMonitor:
         self.tank_fetch_failures = 0
         self.max_tank_failures = MAX_TANK_FETCH_FAILURES
         self.tank_outage_start = None  # Track when tank data became unavailable
+
+        # Vehicle count tracking (for change detection when unoccupied)
+        self.last_vehicle_count = None
 
         # Weather tracking
         self.last_weather_check = 0
@@ -1075,6 +1079,42 @@ class SimplifiedMonitor:
                             maybe_save_reference(_ring_jpeg)
                         except Exception:
                             pass
+
+                    # Vehicle arrival/departure detection (unoccupied only)
+                    if (NOTIFY_VEHICLE_DETECTED and
+                            occupied_status == 'NO' and
+                            snapshot_vehicle_count is not None and
+                            self.last_vehicle_count is not None and
+                            snapshot_vehicle_count != self.last_vehicle_count):
+                        delta = snapshot_vehicle_count - self.last_vehicle_count
+                        if delta > 0:
+                            self.log_state_event('VEHICLE_DETECTED',
+                                f'Vehicle count {self.last_vehicle_count}→{snapshot_vehicle_count} at unoccupied property')
+                            if self.notification_manager.can_notify('vehicle_detected'):
+                                send_notification(
+                                    title=f'🚗 Vehicle arrived ({self.last_vehicle_count}→{snapshot_vehicle_count})',
+                                    message=f'Vehicle count increased to {snapshot_vehicle_count} while property is unoccupied.',
+                                    priority='high',
+                                    tags=['car'],
+                                    click_url=DASHBOARD_URL,
+                                    attach_url=f'{DASHBOARD_URL}api/ring.jpg',
+                                    debug=self.debug
+                                )
+                        else:
+                            self.log_state_event('VEHICLE_DEPARTED',
+                                f'Vehicle count {self.last_vehicle_count}→{snapshot_vehicle_count} at unoccupied property')
+                            if self.notification_manager.can_notify('vehicle_departed'):
+                                send_notification(
+                                    title=f'🚗 Vehicle left ({self.last_vehicle_count}→{snapshot_vehicle_count})',
+                                    message=f'Vehicle count decreased to {snapshot_vehicle_count} while property is unoccupied.',
+                                    priority='default',
+                                    tags=['car'],
+                                    click_url=DASHBOARD_URL,
+                                    attach_url=f'{DASHBOARD_URL}api/ring.jpg',
+                                    debug=self.debug
+                                )
+                    if snapshot_vehicle_count is not None:
+                        self.last_vehicle_count = snapshot_vehicle_count
 
                     log_snapshot(
                         self.snapshots_file,
