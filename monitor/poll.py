@@ -27,7 +27,7 @@ from monitor.config import (
     MAX_TANK_FETCH_FAILURES,
     ENABLE_AMBIENT_WEATHER, AMBIENT_WEATHER_POLL_INTERVAL,
     AMBIENT_WEATHER_API_KEY, AMBIENT_WEATHER_APPLICATION_KEY, AMBIENT_WEATHER_MAC_ADDRESS,
-    PURGE_PENDING_FILE
+    PURGE_PENDING_FILE,
 )
 from monitor.gpio_helpers import (
     read_pressure, read_float_sensor,
@@ -1044,8 +1044,9 @@ class SimplifiedMonitor:
                         if self.debug:
                             print(f"Could not check occupancy: {e}")
 
-                    # Vehicle count: daytime only, fresh Ring cache only (no fetch)
+                    # Vehicle count: daytime only; fetch a fresh Ring snapshot (uses cache if still fresh)
                     snapshot_vehicle_count = None
+                    _ring_jpeg = None
                     try:
                         from astral import LocationInfo as _LI
                         from astral.sun import sun as _asun
@@ -1055,14 +1056,11 @@ class SimplifiedMonitor:
                         _loc = _LI('Newport, OR', 'Oregon', 'America/Los_Angeles', 44.6368, -124.0535)
                         _st  = _asun(_loc.observer, date=_now.date(), tzinfo=_tz)
                         if _st['sunrise'] <= _now <= _st['sunset']:
-                            from monitor.config import RING_CACHE_FILE, RING_CACHE_MINUTES
-                            from monitor.ring_camera import read_vehicle_count_from_exif
-                            if RING_CACHE_FILE.exists():
-                                _age = time.time() - RING_CACHE_FILE.stat().st_mtime
-                                if _age < RING_CACHE_MINUTES * 60:
-                                    snapshot_vehicle_count = read_vehicle_count_from_exif(
-                                        RING_CACHE_FILE.read_bytes()
-                                    )
+                            from monitor.config import RING_TOKEN_FILE, RING_CAMERA_NAME
+                            from monitor.ring_camera import get_snapshot, read_vehicle_count_from_exif
+                            _ring_jpeg = get_snapshot(RING_TOKEN_FILE, RING_CAMERA_NAME)
+                            if _ring_jpeg:
+                                snapshot_vehicle_count = read_vehicle_count_from_exif(_ring_jpeg)
                     except Exception:
                         pass
 
