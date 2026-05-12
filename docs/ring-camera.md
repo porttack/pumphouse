@@ -51,6 +51,76 @@ The token file contains sensitive OAuth credentials — it is not committed to g
 
 Ring uploads snapshots periodically from the camera. Without an active live-view session, snapshots are typically 1–5 minutes old. The 10-minute server-side cache adds up to 10 additional minutes of lag.
 
+---
+
+## Vehicle counting
+
+Each snapshot is run through a vehicle detector at fetch time. The count is overlaid on the image and embedded in the JPEG EXIF (`UserComment` tag) so downstream consumers (epaper display, alert logic) can read it without re-running inference.
+
+### Algorithm
+
+Two detectors run in combination; their results are summed:
+
+1. **YOLOv8n** (`models/yolov8n.onnx`) — primary detector. Counts objects in COCO classes 2, 3, 5, 7 (car, motorcycle, bus, truck) with confidence ≥ 0.15, then applies NMS at 0.60 IoU. Falls back to YOLOv4-tiny (OpenCV DNN) if the ONNX model is absent.
+2. **Background subtraction** — secondary detector for vehicles that YOLO misses because they are partially occluded. Compares a configurable zone (`_BG_ZONE`, default right 45% × middle 45% of frame) against the nearest-hour reference image. Returns +1 if ≥ 8% of zone pixels differ by more than 35 intensity units.
+
+The final count is `YOLO count + background count`.
+
+### File storage
+
+| Path | Description |
+|---|---|
+| `~/.config/pumphouse/ring_snapshot_cache.jpg` | Latest snapshot (JPEG with timestamp/count overlay and EXIF count). Refreshed every `RING_CACHE_MINUTES` (10 min). Shared by all processes via a lock file. |
+| `~/.config/pumphouse/ring_snapshot_cache.lock` | Advisory lock preventing concurrent Ring API calls across gunicorn workers and the monitor daemon. |
+| `~/.config/pumphouse/vehicle_count.json` | Last-known count with Unix timestamp. Read by the e-paper display without re-running inference. TTL: 2 hours (stale after that, skipped 00–08). |
+| `~/.config/pumphouse/ring_reference/` | Per-hour empty-driveway reference images used by the background subtraction detector (see below). |
+| `~/.config/pumphouse/ring_reference/HH.jpg` | One JPEG per hour slot (00–23), e.g. `08.jpg` is the reference for 8 AM. Updated continuously; the nearest available slot is used when an exact match doesn't exist. |
+
+### Building the reference library
+
+The background subtraction detector is only effective once reference images exist for each daylight hour. References are saved automatically by the monitor when:
+
+- The property is **unoccupied** (per reservation data)
+- YOLO detects **0 vehicles**
+- It is currently **daytime** (between sunrise and sunset)
+
+To build baseline images faster — especially during a known-empty period — run the dedicated script in the background:
+
+```bash
+nohup /home/pi/src/pumphouse/venv/bin/python3 \
+    /home/pi/src/pumphouse/bin/build_ring_baseline.py \
+    >> /tmp/ring_baseline.log 2>&1 &
+```
+
+The script fetches a fresh snapshot every `RING_CACHE_MINUTES` (10 min), validates with YOLO, and saves a reference if the driveway is empty. Logs show per-fetch results and which hour slots still need coverage:
+
+```
+17:40:00 INFO Hour 17 — reference saved  (0 vehicles)
+17:40:00 INFO Coverage: 2/16 daylight slots  covered=[12, 17]  missing=[5, 6, 7, ...]
+```
+
+References are continuously refreshed as the script runs, so lighting conditions stay accurate across seasons.
+
+### Alerts
+
+When the property is unoccupied and the vehicle count changes:
+
+- **Arrival (any count increase)** — high-priority push notification with a link to the Ring snapshot.
+- **Arrival from zero (0 → N)** — email with the Ring snapshot image embedded inline.
+- **Departure** — default-priority push notification.
+
+All alerts are rate-limited by `MIN_NOTIFICATION_INTERVAL` (shared with other alert types).
+
+### Tuning constants (ring_camera.py)
+
+| Constant | Default | Effect |
+|---|---|---|
+| `_BG_ZONE` | `(0.55, 0.15, 1.0, 0.60)` | Fraction of frame used for background subtraction `(x1, y1, x2, y2)` |
+| `_BG_DIFF_THRESHOLD` | `35` | Per-pixel intensity difference to count as "changed" (0–255) |
+| `_BG_COVERAGE_FRAC` | `0.08` | Fraction of zone pixels that must differ to declare a vehicle present |
+| `_CONF` (YOLO) | `0.15` | Minimum class confidence to count a detection |
+| `_NMS` (YOLO) | `0.60` | IoU threshold for non-max suppression |
+
 ## Troubleshooting
 
 | Symptom | Fix |
