@@ -1100,6 +1100,15 @@ class SimplifiedMonitor:
                                     attach_url=f'{DASHBOARD_URL}api/ring.jpg',
                                     debug=self.debug
                                 )
+                                if self.last_vehicle_count == 0:
+                                    send_email_notification(
+                                        subject=f'🚗 Vehicle arrived at unoccupied property',
+                                        message=f'Vehicle count increased from 0 to {snapshot_vehicle_count}.',
+                                        priority='high',
+                                        dashboard_url=DASHBOARD_URL,
+                                        debug=self.debug,
+                                        include_ring_snapshot=True,
+                                    )
                         else:
                             self.log_state_event('VEHICLE_DEPARTED',
                                 f'Vehicle count {self.last_vehicle_count}→{snapshot_vehicle_count} at unoccupied property')
