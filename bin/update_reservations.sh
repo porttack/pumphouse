@@ -48,5 +48,13 @@ else
     echo "[$TIMESTAMP] ✗ Failed to download work orders (non-fatal)"
 fi
 
+# Step 5: Scrape owner statements
+echo "[$TIMESTAMP] Downloading owner statements from TrackHS..."
+if $VENV_PYTHON "$BIN_DIR/scrape_statements.py" --output "$DATA_DIR/statements.csv"; then
+    echo "[$TIMESTAMP] ✓ Downloaded statements successfully"
+else
+    echo "[$TIMESTAMP] ✗ Failed to download statements (non-fatal)"
+fi
+
 echo "[$TIMESTAMP] Reservation update complete"
 echo ""
