@@ -56,6 +56,7 @@ FIELDNAMES = [
     'gallons_net_change',
     'tank_rolling_gph_avg',     # avg fill rate during calling windows
     'pressure_high_pct_overall',
+    'filter_health_ratio',      # avg(gph/pct_high) for bypass-off, unoccupied, non-checkout windows (5–50% band)
     'high_events_pump_gph',
     'low_events_pump_gph',
     'bypass_hours',
@@ -99,7 +100,7 @@ def avg(vals):
     return round(sum(v) / len(v), 1) if v else None
 
 
-def summarize_day(date, rows, checkout_net_income=0.0):
+def summarize_day(date, rows, checkout_net_income=0.0, is_checkout=False):
     """Return a dict of daily stats for one calendar day's worth of rows."""
     n = len(rows)
     if n == 0:
@@ -123,6 +124,36 @@ def summarize_day(date, rows, checkout_net_income=0.0):
     if current_run:
         runs.append(current_run)
     high_rows = [r for run in runs for r in run]
+
+    # Filter health ratio: avg(gph / pct_high) for bypass-off, unoccupied,
+    # non-checkout windows in the 5–50% pressure band (gph >= 0).
+    # Null on checkout days (housekeeping uses water) or insufficient data.
+    # On days with bypass activity, only use windows before the first bypass-ON
+    # to avoid post-bypass recovery inflating the metric.
+    if is_checkout:
+        filter_health_ratio = None
+    else:
+        from datetime import datetime as _dt
+        bypass_times = [
+            _dt.fromisoformat(r['timestamp'])
+            for r in rows
+            if r.get('relay_bypass', '').upper() == 'ON'
+        ]
+        first_bypass = min(bypass_times) if bypass_times else None
+
+        fh_rows = [
+            r for r in non_bypass
+            if r.get('occupied', '').upper() == 'NO'
+            and 5.0 < flt(r, 'pressure_high_percent') <= 50.0
+            and flt(r, 'tank_rolling_gph') >= 0.0
+            and (first_bypass is None or _dt.fromisoformat(r['timestamp']) < first_bypass)
+        ]
+        if len(fh_rows) >= 4:
+            ratios = [flt(r, 'tank_rolling_gph') / flt(r, 'pressure_high_percent')
+                      for r in fh_rows]
+            filter_health_ratio = round(sum(ratios) / len(ratios), 3)
+        else:
+            filter_health_ratio = None
 
     def _stats(row_list):
         dur  = sum(flt(r, 'duration_seconds') for r in row_list)
@@ -216,6 +247,7 @@ def summarize_day(date, rows, checkout_net_income=0.0):
         'backflush_gallons':         backflush_gallons,
         'checkout_net_income':       round(checkout_net_income, 2) if checkout_net_income else None,
         'net_income_cumulative':     None,  # filled in by main() after running total is known
+        'filter_health_ratio':       filter_health_ratio,
         'pressure_high_pct_overall': round(nb_high / nb_dur * 100, 1) if nb_dur else None,
         'pressure_high_minutes':     round(nb_high / 60, 0),
         'high_events':               len(runs),
@@ -240,6 +272,22 @@ def summarize_day(date, rows, checkout_net_income=0.0):
         'baro_avg':                  avg(baro),
         'wind_gust_max':             round(max(gusts), 1) if gusts else None,
     }
+
+
+def load_checkout_dates():
+    """Return a set of all checkout date strings (all reservation types)."""
+    dates = set()
+    if not RESERVATIONS_FILE.exists():
+        return dates
+    try:
+        with open(RESERVATIONS_FILE, newline='') as f:
+            for row in csv.DictReader(f):
+                checkout = (row.get('Checkout') or '').strip()[:10]
+                if checkout:
+                    dates.add(checkout)
+    except Exception:
+        pass
+    return dates
 
 
 def load_reservations_by_checkout():
@@ -294,14 +342,31 @@ def main():
     parser = argparse.ArgumentParser(description='Build daily.csv from snapshots')
     parser.add_argument('--rebuild', action='store_true',
                         help='Wipe daily.csv and regenerate from scratch')
+    parser.add_argument('--include-today', action='store_true',
+                        help='Also compute a row for today using data so far (overwrites any existing today row)')
     args = parser.parse_args()
 
     if args.rebuild and DAILY_CSV.exists():
         DAILY_CSV.unlink()
         print('Removed existing daily.csv — rebuilding from scratch.')
 
+    today = __import__('datetime').date.today().isoformat()
+
     existing_dates = load_existing_dates()
+
+    # When including today, strip any existing today row so it gets recomputed.
+    if args.include_today and today in existing_dates and DAILY_CSV.exists():
+        kept = []
+        with open(DAILY_CSV, newline='') as f:
+            kept = [r for r in csv.DictReader(f) if r['date'] != today]
+        with open(DAILY_CSV, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+            writer.writeheader()
+            writer.writerows(kept)
+        existing_dates.discard(today)
+
     reservations   = load_reservations_by_checkout()
+    checkout_dates = load_checkout_dates()
 
     # Seed monthly running income from the last existing row only if it shares
     # the same month as the first new date we are about to write.
@@ -314,10 +379,11 @@ def main():
         d = row['timestamp'][:10]
         by_day[d].append(row)
 
-    today = __import__('datetime').date.today().isoformat()
-
-    # Only process days not already in daily.csv; never write today (incomplete)
-    new_dates = sorted(d for d in by_day if d not in existing_dates and d < today)
+    # Only process days not already in daily.csv; skip today unless --include-today
+    new_dates = sorted(
+        d for d in by_day
+        if d not in existing_dates and (d <= today if args.include_today else d < today)
+    )
 
     if not new_dates:
         print('daily.csv is already up to date.')
@@ -348,7 +414,8 @@ def main():
                 current_month = month
             income = reservations.get(date, 0.0)
             running_income += income
-            summary = summarize_day(date, by_day[date], checkout_net_income=income)
+            summary = summarize_day(date, by_day[date], checkout_net_income=income,
+                                    is_checkout=date in checkout_dates)
             if summary:
                 summary['net_income_cumulative'] = round(running_income, 2)
                 writer.writerow(summary)
