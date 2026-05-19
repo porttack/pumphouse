@@ -24,13 +24,21 @@ _VEHICLE_COUNT_CACHE = Path.home() / '.config' / 'pumphouse' / 'vehicle_count.js
 _VEHICLE_COUNT_TTL   = 2 * 3600  # seconds
 
 # Directory for ML model files (lazy-downloaded on first vehicle-count call)
-_MODELS_DIR = Path(__file__).parent.parent / 'models'
-_YOLO_CFG    = _MODELS_DIR / 'yolov4-tiny.cfg'
+_MODELS_DIR   = Path(__file__).parent.parent / 'models'
+_YOLO_CFG     = _MODELS_DIR / 'yolov4-tiny.cfg'
 _YOLO_WEIGHTS = _MODELS_DIR / 'yolov4-tiny.weights'
-_COCO_NAMES  = _MODELS_DIR / 'coco.names'
+_COCO_NAMES   = _MODELS_DIR / 'coco.names'
+_YOLOV8_ONNX  = _MODELS_DIR / 'yolov8n.onnx'
 
 # COCO class indices that count as "vehicles"
 _VEHICLE_CLASSES = {2, 3, 5, 7}  # car, motorcycle, bus, truck
+
+# Background subtraction: reference images stored per hour-of-day
+# Collected automatically when property is unoccupied and YOLO sees 0 vehicles.
+_RING_REF_DIR      = Path.home() / '.config' / 'pumphouse' / 'ring_reference'
+_BG_ZONE           = (0.55, 0.15, 1.0, 0.60)  # (x1, y1, x2, y2) as fractions of image
+_BG_DIFF_THRESHOLD = 35    # per-pixel abs diff (0-255) to count as "changed"
+_BG_COVERAGE_FRAC  = 0.08  # fraction of zone pixels that must differ to count as a vehicle
 
 _MODEL_URLS = {
     _YOLO_CFG:     'https://raw.githubusercontent.com/AlexeyAB/darknet/master/cfg/yolov4-tiny.cfg',
@@ -311,8 +319,10 @@ def _ensure_models() -> bool:
 
 def _count_vehicles(jpeg_bytes: bytes) -> Optional[int]:
     """
-    Count vehicles (cars, trucks, buses, motorcycles) in a JPEG using YOLOv4-tiny.
-    Returns None if the model is unavailable or inference fails.
+    Count vehicles (cars, trucks, buses, motorcycles) in a JPEG.
+    Uses YOLOv8n (onnxruntime) when available, falls back to YOLOv4-tiny (cv2.dnn).
+    Supplements YOLO with background subtraction for occluded zones.
+    Returns None if no model is available or inference fails.
     """
     try:
         import cv2
@@ -320,49 +330,189 @@ def _count_vehicles(jpeg_bytes: bytes) -> Optional[int]:
     except ImportError:
         return None
 
-    if not _ensure_models():
+    data = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+    img  = cv2.imdecode(data, cv2.IMREAD_COLOR)
+    if img is None:
+        logger.warning('Vehicle count: failed to decode JPEG')
         return None
 
+    if _YOLOV8_ONNX.exists():
+        yolo_count = _count_vehicles_yolov8(img)
+        if yolo_count is None:
+            logger.warning('YOLOv8n inference failed; falling back to YOLOv4-tiny')
+            yolo_count = _count_vehicles_yolov4(img)
+    else:
+        yolo_count = _count_vehicles_yolov4(img)
+
+    if yolo_count is None:
+        return None
+
+    bg_count = _count_vehicles_background(img)
+    total = yolo_count + bg_count
+    if bg_count:
+        logger.info('Vehicle count: YOLO=%d + background zone=%d = %d', yolo_count, bg_count, total)
+    return total
+
+
+def maybe_save_reference(jpeg_bytes: bytes) -> bool:
+    """
+    Save jpeg_bytes as the reference "empty driveway" image for the current hour.
+    Call only when occupied=NO and YOLO detected 0 vehicles (guards against
+    accidentally capturing a maintenance visit visible to YOLO).
+    Stores one image per hour slot (00–23), continuously refreshed.
+    Returns True if saved successfully.
+    """
     try:
+        import cv2
+        import numpy as np
+        _RING_REF_DIR.mkdir(parents=True, exist_ok=True)
+        hour = datetime.now().hour
+        ref_path = _RING_REF_DIR / f'{hour:02d}.jpg'
+        ref_path.write_bytes(jpeg_bytes)
+        logger.info('Saved empty-driveway reference for hour %02d (%d bytes)', hour, len(jpeg_bytes))
+        return True
+    except Exception as e:
+        logger.warning('Failed to save reference image (%s: %s)', type(e).__name__, e)
+        return False
+
+
+def _find_nearest_reference(hour: int) -> Optional[Path]:
+    """Return the reference image whose hour-slot is closest to the given hour."""
+    if not _RING_REF_DIR.exists():
+        return None
+    refs = [p for p in _RING_REF_DIR.glob('??.jpg') if p.stem.isdigit()]
+    if not refs:
+        return None
+    return min(refs, key=lambda p: min(abs(int(p.stem) - hour), 24 - abs(int(p.stem) - hour)))
+
+
+def _count_vehicles_background(img) -> int:
+    """
+    Compare the background zone of img against the nearest-hour reference image.
+    Returns 1 if a significant change is detected (vehicle present), 0 otherwise.
+    Returns 0 if no reference images exist yet.
+    """
+    try:
+        import cv2
+        import numpy as np
+
+        ref_path = _find_nearest_reference(datetime.now().hour)
+        if ref_path is None:
+            return 0
+
+        ref_data = np.frombuffer(ref_path.read_bytes(), dtype=np.uint8)
+        ref_img  = cv2.imdecode(ref_data, cv2.IMREAD_COLOR)
+        if ref_img is None:
+            return 0
+
+        h, w = img.shape[:2]
+        if ref_img.shape[:2] != (h, w):
+            ref_img = cv2.resize(ref_img, (w, h))
+
+        x1, y1, x2, y2 = (int(w * _BG_ZONE[0]), int(h * _BG_ZONE[1]),
+                           int(w * _BG_ZONE[2]), int(h * _BG_ZONE[3]))
+
+        zone     = cv2.cvtColor(img[y1:y2, x1:x2],     cv2.COLOR_BGR2GRAY).astype(np.float32)
+        ref_zone = cv2.cvtColor(ref_img[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY).astype(np.float32)
+
+        diff     = np.abs(zone - ref_zone)
+        coverage = float(np.mean(diff > _BG_DIFF_THRESHOLD))
+        mean_diff = float(np.mean(diff))
+
+        logger.info('Background zone vs %s: mean_diff=%.1f coverage=%.3f threshold=%.3f',
+                    ref_path.name, mean_diff, coverage, _BG_COVERAGE_FRAC)
+
+        return 1 if coverage >= _BG_COVERAGE_FRAC else 0
+    except Exception as e:
+        logger.warning('Background subtraction error (%s: %s)', type(e).__name__, e)
+        return 0
+
+
+def _count_vehicles_yolov8(img) -> Optional[int]:
+    """YOLOv8n inference via onnxruntime. Input: decoded BGR numpy image."""
+    _CONF = 0.15
+    _NMS  = 0.60
+    try:
+        import onnxruntime as ort
+        import numpy as np
+        import cv2
+
+        sess = ort.InferenceSession(str(_YOLOV8_ONNX),
+                                    providers=['CPUExecutionProvider'])
+
+        # Preprocess: resize to 640×640, RGB, float32, NCHW
+        h0, w0 = img.shape[:2]
+        inp = cv2.resize(img, (640, 640))
+        inp = cv2.cvtColor(inp, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+        inp = inp.transpose(2, 0, 1)[np.newaxis]  # NCHW
+
+        outputs = sess.run(None, {sess.get_inputs()[0].name: inp})
+        # YOLOv8 output: [1, 84, 8400]  (4 box + 80 class scores, no objectness)
+        preds = outputs[0][0].T  # → [8400, 84]
+
+        boxes, confidences = [], []
+        for row in preds:
+            class_scores = row[4:]
+            class_id = int(class_scores.argmax())
+            conf = float(class_scores[class_id])
+            if conf >= _CONF and class_id in _VEHICLE_CLASSES:
+                cx, cy, bw, bh = row[:4]
+                # Coordinates are relative to 640×640 input; scale back to original
+                x = int((cx - bw / 2) * w0 / 640)
+                y = int((cy - bh / 2) * h0 / 640)
+                w = int(bw * w0 / 640)
+                h = int(bh * h0 / 640)
+                boxes.append([x, y, w, h])
+                confidences.append(conf)
+
+        indices = cv2.dnn.NMSBoxes(boxes, confidences,
+                                   score_threshold=_CONF, nms_threshold=_NMS)
+        count = len(indices) if len(indices) > 0 else 0
+        logger.info('Vehicle count (YOLOv8n): %d after NMS (raw=%d)', count, len(boxes))
+        return count
+    except Exception as e:
+        logger.error('YOLOv8n vehicle count error (%s: %s)', type(e).__name__, e)
+        return None
+
+
+def _count_vehicles_yolov4(img) -> Optional[int]:
+    """YOLOv4-tiny inference via cv2.dnn. Input: decoded BGR numpy image. Fallback only."""
+    _CONF = 0.15
+    _NMS  = 0.60
+    try:
+        import cv2
+        import numpy as np
+
+        if not _ensure_models():
+            return None
+
         net = cv2.dnn.readNetFromDarknet(str(_YOLO_CFG), str(_YOLO_WEIGHTS))
         net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
         net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
 
-        data = np.frombuffer(jpeg_bytes, dtype=np.uint8)
-        img  = cv2.imdecode(data, cv2.IMREAD_COLOR)
-        if img is None:
-            logger.warning('Vehicle count: failed to decode JPEG')
-            return None
-
         h, w = img.shape[:2]
-        blob = cv2.dnn.blobFromImage(img, 1/255.0, (416, 416), swapRB=True, crop=False)
+        blob = cv2.dnn.blobFromImage(img, 1/255.0, (608, 608), swapRB=True, crop=False)
         net.setInput(blob)
+        outputs = net.forward(net.getUnconnectedOutLayersNames())
 
-        out_layers = net.getUnconnectedOutLayersNames()
-        outputs = net.forward(out_layers)
-
-        # Collect boxes + scores, then apply NMS to eliminate duplicate detections
-        boxes, confidences, class_ids = [], [], []
+        boxes, confidences = [], []
         for output in outputs:
-            for detection in output:
-                scores = detection[5:]
+            for det in output:
+                scores = det[5:]
                 class_id = int(scores.argmax())
-                confidence = float(scores[class_id])
-                if confidence >= 0.25 and class_id in _VEHICLE_CLASSES:
-                    cx, cy, bw, bh = (detection[:4] * [w, h, w, h]).astype(int)
-                    x = cx - bw // 2
-                    y = cy - bh // 2
-                    boxes.append([x, y, bw, bh])
-                    confidences.append(confidence)
-                    class_ids.append(class_id)
+                conf = float(scores[class_id])
+                if conf >= _CONF and class_id in _VEHICLE_CLASSES:
+                    cx, cy, bw, bh = (det[:4] * [w, h, w, h]).astype(int)
+                    boxes.append([cx - bw // 2, cy - bh // 2, bw, bh])
+                    confidences.append(conf)
 
-        indices = cv2.dnn.NMSBoxes(boxes, confidences, score_threshold=0.25, nms_threshold=0.45)
+        indices = cv2.dnn.NMSBoxes(boxes, confidences,
+                                   score_threshold=_CONF, nms_threshold=_NMS)
         count = len(indices) if len(indices) > 0 else 0
-
-        logger.info('Vehicle count: %d after NMS (raw detections=%d)', count, len(boxes))
+        logger.info('Vehicle count (YOLOv4-tiny): %d after NMS (raw=%d)', count, len(boxes))
         return count
     except Exception as e:
-        logger.error('Vehicle count error (%s: %s)', type(e).__name__, e)
+        logger.error('YOLOv4-tiny vehicle count error (%s: %s)', type(e).__name__, e)
         return None
 
 
