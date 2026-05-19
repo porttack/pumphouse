@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dosatron Detector</title>
+  <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+      background: #1a1a1a; color: #e0e0e0; padding: 20px; line-height: 1.6;
+    }
+    a { color: #4CAF50; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .container { max-width: 1000px; margin: 0 auto; }
+    h1 { color: #4CAF50; margin-bottom: 4px; font-size: 24px; }
+    .subtitle { color: #888; font-size: 13px; margin-bottom: 20px; }
+    .section {
+      background: #2a2a2a; border: 1px solid #444;
+      padding: 16px 20px; margin-bottom: 18px; border-radius: 4px;
+    }
+    .section h2 {
+      color: #4CAF50; font-size: 15px;
+      border-bottom: 1px solid #444; padding-bottom: 6px; margin-bottom: 14px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    /* status bar */
+    .status-bar { display: flex; gap: 20px; flex-wrap: wrap; align-items: center; }
+    .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+    .dot-green { background: #4CAF50; box-shadow: 0 0 6px #4CAF50; }
+    .dot-red   { background: #f44336; }
+    .stat-chip {
+      background: #1a1a1a; border: 1px solid #555; border-radius: 3px;
+      padding: 4px 10px; font-size: 13px; color: #ccc;
+    }
+    .stat-chip span { color: #fff; font-weight: bold; }
+    /* threshold */
+    .threshold-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .threshold-row label { color: #aaa; font-size: 13px; }
+    input[type=range] { width: 200px; accent-color: #4CAF50; }
+    #thresholdDisplay { min-width: 48px; text-align: right; color: #fff; font-weight: bold; }
+    .btn {
+      background: #2e7d32; color: #fff; border: none;
+      padding: 6px 14px; border-radius: 3px; cursor: pointer;
+      font-family: inherit; font-size: 13px;
+    }
+    .btn:hover { background: #388e3c; }
+    .btn-sm { padding: 3px 10px; font-size: 12px; }
+    .saved-msg { color: #4CAF50; font-size: 12px; display: none; }
+    /* cycle cards */
+    .cycle-list { display: flex; flex-direction: column; gap: 14px; }
+    .cycle-card {
+      background: #1a1a1a; border: 1px solid #444; border-radius: 4px; padding: 12px 14px;
+    }
+    .cycle-card.match     { border-left: 3px solid #4CAF50; }
+    .cycle-card.mismatch  { border-left: 3px solid #f44336; }
+    .cycle-card.unlabeled { border-left: 3px solid #555; }
+    .cycle-header { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+    .cycle-ts { color: #ccc; font-size: 14px; }
+    .cycle-meta { color: #888; font-size: 12px; }
+    .cycle-meta span { color: #aaa; }
+    audio {
+      width: 100%; height: 32px; margin: 6px 0 10px;
+      filter: invert(0.85) hue-rotate(90deg);
+    }
+    .no-audio { color: #666; font-size: 12px; font-style: italic; margin: 6px 0 10px; }
+    .count-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+    .count-box {
+      background: #2a2a2a; border: 1px solid #555; border-radius: 3px;
+      padding: 6px 14px; font-size: 13px; color: #ccc; min-width: 120px;
+    }
+    .count-box .label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+    .count-box .value { font-size: 22px; font-weight: bold; color: #fff; margin-top: 2px; }
+    .count-box .value.match-yes { color: #4CAF50; }
+    .count-box .value.match-no  { color: #f44336; }
+    .manual-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .manual-row input[type=number] {
+      background: #333; border: 1px solid #666; color: #fff;
+      padding: 4px 8px; border-radius: 3px; font-family: inherit; font-size: 14px; width: 70px;
+    }
+    .manual-row input[type=number]:focus { outline: 1px solid #4CAF50; border-color: #4CAF50; }
+    .match-tag {
+      font-size: 11px; padding: 2px 8px; border-radius: 10px;
+      text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .tag-match    { background: #1b5e20; color: #81c784; }
+    .tag-mismatch { background: #4a1919; color: #ef9a9a; }
+    .tag-pending  { background: #333; color: #888; }
+    /* calibration section (individual clips) */
+    .det-list { display: flex; flex-direction: column; gap: 10px; }
+    .det-card {
+      background: #1a1a1a; border: 1px solid #333; border-radius: 3px; padding: 10px 12px;
+    }
+    .det-card.labeled-click  { border-left: 3px solid #4CAF50; }
+    .det-card.labeled-noise  { border-left: 3px solid #f44336; }
+    .det-card.unlabeled      { border-left: 3px solid #444; }
+    .det-meta { color: #888; font-size: 12px; }
+    .det-meta span { color: #aaa; }
+    .label-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+    .btn-click  { background: #1b5e20; border: 1px solid #4CAF50; color: #4CAF50; }
+    .btn-click:hover  { background: #2e7d32; color: #fff; }
+    .btn-click.active { background: #4CAF50; color: #000; }
+    .btn-noise  { background: #4a1919; border: 1px solid #f44336; color: #f44336; }
+    .btn-noise:hover  { background: #7f1919; color: #fff; }
+    .btn-noise.active { background: #f44336; color: #fff; }
+    .btn-unlabel { background: #333; border: 1px solid #666; color: #aaa; }
+    .btn-unlabel:hover { background: #444; }
+    .no-clip { color: #666; font-size: 12px; font-style: italic; }
+    /* collapsible */
+    .collapsible-toggle {
+      background: none; border: 1px solid #555; color: #888;
+      padding: 3px 10px; border-radius: 3px; cursor: pointer; font-size: 12px;
+      font-family: inherit;
+    }
+    .collapsible-toggle:hover { color: #ccc; border-color: #888; }
+    .collapsible-body { display: none; margin-top: 12px; }
+    .collapsible-body.open { display: block; }
+    .empty-state { color: #666; text-align: center; padding: 24px; font-size: 14px; }
+    #refreshStatus { color: #888; font-size: 12px; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Dosatron Detector</h1>
+  <div class="subtitle">
+    <a href="/">← dashboard</a> &nbsp;|&nbsp;
+    <span id="refreshStatus">loading…</span>
+  </div>
+
+  <!-- Live listen -->
+  <div class="section" style="border-color:#2e5e2e;">
+    <h2 style="color:#4CAF50;">Live Listen</h2>
+    <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+      <button id="liveBtn" class="btn" style="min-width:130px;" onclick="toggleLive()">▶ Start Listening</button>
+      <div id="liveStatus" style="color:#888; font-size:13px;">Click to stream live mic audio.</div>
+      <div id="liveRms" style="display:none; align-items:center; gap:8px;">
+        <span style="color:#888; font-size:12px;">level</span>
+        <canvas id="liveBar" width="200" height="14" style="border-radius:3px;background:#111;"></canvas>
+      </div>
+    </div>
+    <audio id="liveAudio" style="width:100%;margin-top:10px;display:none;"
+           controls preload="none"></audio>
+  </div>
+
+  <!-- Status -->
+  <div class="section">
+    <h2>Status</h2>
+    <div class="status-bar">
+      <div>
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">checking…</span>
+      </div>
+      <div class="stat-chip">Click threshold: <span id="statThreshold">—</span></div>
+      <div class="stat-chip" id="statAvgInterval" style="display:none">Avg cycle: <span id="avgInterval">—</span> min</div>
+    </div>
+    <div id="nextCycleRow" style="display:none;margin-top:10px;font-size:13px;color:#888;">
+      <span id="nextCycleLabel">Next cycle</span>:
+      <span id="nextCycleHigh" style="color:#81c784;font-weight:bold;"></span>
+      <span id="nextCycleSep" style="display:none"> → </span>
+      <span id="nextCycleLow"  style="color:#aaa;"></span>
+    </div>
+  </div>
+
+  <!-- Threshold controls -->
+  <div class="section">
+    <h2>Detection Settings</h2>
+    <div class="threshold-row" style="margin-bottom:10px;">
+      <label for="thresholdSlider">Click threshold (peak amp 0–32767):</label>
+      <input type="range" id="thresholdSlider" min="100" max="10000" step="50" value="2000">
+      <span id="thresholdDisplay">2000</span>
+      <button class="btn" onclick="saveThreshold()">Apply</button>
+      <span class="saved-msg" id="thresholdSaved">✓ saved</span>
+    </div>
+    <div class="threshold-row">
+      <label for="flowSlider">Flow ratio threshold (quiet≈12, flow≈39):</label>
+      <input type="range" id="flowSlider" min="5" max="60" step="0.5" value="22">
+      <span id="flowDisplay">22</span>
+      <button class="btn" onclick="saveFlowThreshold()">Apply</button>
+      <span class="saved-msg" id="flowSaved">✓ saved</span>
+    </div>
+    <div style="margin-top:8px; font-size:12px; color:#666;">
+      Click threshold: set ~3–5× ambient peak (was ~100–700 at calibration).<br>
+      Flow ratio: FFT energy(100–400 Hz) / energy(1–4 kHz). Quiet bypass ≈ 12, water flowing ≈ 39. Default 22 sits between them.
+    </div>
+  </div>
+
+  <!-- Pressure cycle recordings -->
+  <div class="section">
+    <h2>
+      Pressure Cycles — last 24 h
+      <button class="btn btn-sm" onclick="loadAll()">↻ refresh</button>
+    </h2>
+    <p style="color:#888; font-size:12px; margin-bottom:12px;">
+      Each row is one full pressure-HIGH → pressure-LOW + 30 s recording.
+      Listen, count how many click-clack pairs you hear. Each pair = 0.14 gal (2 sounds per firing → 0.07 gal/sound).
+      Computer counts each individual sound; enter what your ear counts to calibrate.
+    </p>
+    <div id="cycleList" class="cycle-list">
+      <div class="empty-state">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Individual click calibration (collapsible) -->
+  <div class="section">
+    <h2>
+      Click Calibration — last 24 h
+      <button class="collapsible-toggle" onclick="toggleCalib(this)">show ▾</button>
+    </h2>
+    <div id="calibBody" class="collapsible-body">
+      <p style="color:#888; font-size:12px; margin-bottom:12px;">
+        Individual 6-second clips for threshold tuning. Label each as Real Click or Not a Click.
+      </p>
+      <div id="detectionList" class="det-list">
+        <div class="empty-state">Click "show" to load</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bypass flow cycles -->
+  <div class="section">
+    <h2>
+      Bypass Flow Cycles — last 24 h
+      <button class="btn btn-sm" onclick="loadFlow()">↻ refresh</button>
+    </h2>
+    <p style="color:#888; font-size:12px; margin-bottom:12px;">
+      When bypass is ON, water flows through the bypass line instead of the Dosatron.
+      The listener detects sustained elevated noise (rushing water) and records the flow period.
+      Listen and confirm whether you hear real water flow, to help tune the <em>Flow threshold</em> above.
+    </p>
+    <div id="flowList" class="cycle-list">
+      <div class="empty-state">No bypass flow cycles recorded yet.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const fmt = iso => {
+  const d = new Date(iso);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const yesterday = new Date(now); yesterday.setDate(now.getDate()-1);
+  const prevDay = d.toDateString() === yesterday.toDateString();
+  const t = d.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+  if (sameDay)   return 'Today ' + t;
+  if (prevDay)   return 'Yesterday ' + t;
+  return d.toLocaleDateString([], {weekday:'short'}) + ' ' + t;
+};
+const fmtDur = s => s >= 60 ? `${(s/60).toFixed(1)} min` : `${Math.round(s)} s`;
+
+async function loadAll() {
+  document.getElementById('refreshStatus').textContent = 'refreshing…';
+  try {
+    const [statusRes, cyclesRes, predRes] = await Promise.all([
+      fetch('/api/dosatron/status'),
+      fetch('/api/dosatron/cycles?hours=24'),
+      fetch('/api/dosatron/prediction'),
+    ]);
+    const status    = await statusRes.json();
+    const cycleData = await cyclesRes.json();
+    const pred      = await predRes.json();
+
+    // status bar
+    const dot = document.getElementById('statusDot');
+    dot.className = 'status-dot ' + (status.running ? 'dot-green' : 'dot-red');
+    document.getElementById('statusText').textContent =
+      status.running ? 'Listener running' : 'Listener NOT running';
+    document.getElementById('statThreshold').textContent = status.threshold;
+
+    // sync sliders
+    document.getElementById('thresholdSlider').value = status.threshold;
+    document.getElementById('thresholdDisplay').textContent = status.threshold;
+    if (status.flow_ratio_threshold) {
+      document.getElementById('flowSlider').value = status.flow_ratio_threshold;
+      document.getElementById('flowDisplay').textContent = status.flow_ratio_threshold;
+    }
+
+    // avg interval + next cycle timing
+    if (pred.avg_interval_min) {
+      document.getElementById('statAvgInterval').style.display = '';
+      document.getElementById('avgInterval').textContent = pred.avg_interval_min.toFixed(1);
+    }
+    const nr = document.getElementById('nextCycleRow');
+    if (pred.next_high) {
+      nr.style.display = '';
+      const label = pred.mode === 'bypass' ? 'Next bypass flow' : 'Next pressure cycle';
+      document.getElementById('nextCycleLabel').textContent = label;
+      document.getElementById('nextCycleHigh').textContent = '~' + pred.next_high;
+      if (pred.next_low) {
+        document.getElementById('nextCycleSep').style.display = '';
+        document.getElementById('nextCycleLow').textContent = '~' + pred.next_low;
+      } else {
+        document.getElementById('nextCycleSep').style.display = 'none';
+        document.getElementById('nextCycleLow').textContent = '';
+      }
+    } else if (pred.mode === 'bypass' && pred.based_on_n === 0) {
+      nr.style.display = '';
+      document.getElementById('nextCycleLabel').textContent = 'Next bypass flow';
+      document.getElementById('nextCycleHigh').textContent = '— waiting for 2nd event';
+      document.getElementById('nextCycleSep').style.display = 'none';
+    } else {
+      nr.style.display = 'none';
+    }
+
+    renderCycles(cycleData.cycles || []);
+    document.getElementById('refreshStatus').textContent =
+      'updated ' + new Date().toLocaleTimeString();
+  } catch(e) {
+    document.getElementById('refreshStatus').textContent = 'error: ' + e.message;
+  }
+}
+
+function renderCycles(cycles) {
+  const el = document.getElementById('cycleList');
+  if (!cycles.length) {
+    el.innerHTML = '<div class="empty-state">No pressure cycles recorded in the last 24 hours.</div>';
+    return;
+  }
+  el.innerHTML = cycles.map(c => cycleCard(c)).join('');
+}
+
+async function loadFlow() {
+  try {
+    const res = await fetch('/api/dosatron/flow_cycles?hours=24');
+    const data = await res.json();
+    const el = document.getElementById('flowList');
+    const cycles = data.flow_cycles || [];
+    if (!cycles.length) {
+      el.innerHTML = '<div class="empty-state">No bypass flow cycles in the last 24 hours.</div>';
+      return;
+    }
+    el.innerHTML = cycles.map(c => flowCard(c)).join('');
+  } catch(e) {
+    document.getElementById('flowList').innerHTML =
+      '<div class="empty-state">Error: ' + e.message + '</div>';
+  }
+}
+
+function flowCard(c) {
+  const dur = c.duration_s ? fmtDur(c.duration_s) : '?';
+  const verified = c.verified;
+  const cardClass = verified === true ? 'match' : verified === false ? 'mismatch' : 'unlabeled';
+  const fn = c.audio_file || '';
+  const audioHtml = fn
+    ? `<audio controls preload="metadata">
+         <source src="/api/dosatron/flow_cycles/${encodeURIComponent(fn)}" type="audio/wav">
+       </audio>`
+    : '<div class="no-audio">no audio file</div>';
+  const verTag = verified === true
+    ? '<span class="match-tag tag-match">✓ real flow</span>'
+    : verified === false
+    ? '<span class="match-tag tag-mismatch">✗ false positive</span>'
+    : '<span class="match-tag tag-pending">unlabeled</span>';
+  return `
+  <div class="cycle-card ${cardClass}">
+    <div class="cycle-header">
+      <span class="cycle-ts">${fmt(c.start_ts)} → ${c.end_ts ? fmt(c.end_ts) : '…'}</span>
+      <span class="cycle-meta">duration <span>${dur}</span>${c.truncated ? ' <span style="color:#f44336;font-size:11px">[truncated]</span>' : ''}</span>
+    </div>
+    ${audioHtml}
+    <div class="label-row">
+      ${fn ? `
+      <button class="btn btn-sm btn-click ${verified===true?'active':''}" onclick="verifyFlow('${fn}',true)">✓ Real flow</button>
+      <button class="btn btn-sm btn-noise ${verified===false?'active':''}" onclick="verifyFlow('${fn}',false)">✗ False positive</button>
+      <button class="btn btn-sm btn-unlabel" onclick="verifyFlow('${fn}',null)">clear</button>
+      ` : ''}
+      ${verTag}
+    </div>
+  </div>`;
+}
+
+async function verifyFlow(fn, verified) {
+  await fetch(`/api/dosatron/flow_cycles/${encodeURIComponent(fn)}/verify`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({verified}),
+  });
+  loadFlow();
+}
+
+const GPK = 0.14; // gallons per click-clack cycle
+
+function cycleCard(c) {
+  const mc = c.manual_count;          // computer click count
+  const ac = c.click_count;           // computer click count
+  const ag = c.gallons.toFixed(2);    // computer gallons (ac * 0.14)
+  const hasManual = mc !== null && mc !== undefined;
+  const match = hasManual && mc === ac;
+  const mismatch = hasManual && mc !== ac;
+  const cardClass = match ? 'match' : mismatch ? 'mismatch' : 'unlabeled';
+  const matchTag = match
+    ? '<span class="match-tag tag-match">✓ match</span>'
+    : mismatch
+    ? `<span class="match-tag tag-mismatch">✗ off by ${Math.abs(mc-ac)}</span>`
+    : '<span class="match-tag tag-pending">unlabeled</span>';
+
+  const dur = c.high_duration_s ? fmtDur(c.high_duration_s) : (c.duration_s ? fmtDur(c.duration_s - 30) : '?');
+  const dutyStr = c.duty_pct != null ? ` · ${c.duty_pct}% duty` : '';
+  const truncBadge = c.truncated ? ' <span style="color:#f44336;font-size:11px">[truncated at 60 min]</span>' : '';
+  const audioHtml = c.audio_file
+    ? `<audio controls preload="metadata">
+         <source src="/api/dosatron/cycles/${encodeURIComponent(c.audio_file)}" type="audio/wav">
+       </audio>`
+    : '<div class="no-audio">no audio file</div>';
+
+  const fn = c.audio_file || '';
+  const autoMatchClass = hasManual ? (match ? 'match-yes' : 'match-no') : '';
+  const myGal = hasManual ? (mc * GPK).toFixed(2) : '—';
+
+  return `
+  <div class="cycle-card ${cardClass}" id="cycle-${fn}">
+    <div class="cycle-header">
+      <span class="cycle-ts">${fmt(c.high_ts)} → ${c.low_ts ? fmt(c.low_ts) : '…'}</span>
+      <span class="cycle-meta">HIGH <span>${dur}</span>${dutyStr}${truncBadge}</span>
+    </div>
+    ${audioHtml}
+    <div class="count-row">
+      <div class="count-box">
+        <div class="label">Computer</div>
+        <div class="value ${autoMatchClass}">${ac} clicks</div>
+        <div style="color:#888;font-size:12px;margin-top:2px;">${ag} gal</div>
+      </div>
+      <div class="count-box">
+        <div class="label">I hear</div>
+        <div class="value">${hasManual ? mc + ' clicks' : '—'}</div>
+        <div style="color:#888;font-size:12px;margin-top:2px;">${myGal}${hasManual ? ' gal' : ''}</div>
+      </div>
+      <div>${matchTag}</div>
+    </div>
+    ${fn ? `
+    <div class="manual-row">
+      <span style="color:#888;font-size:13px;">My click-clack count:</span>
+      <input type="number" min="0" max="999" step="1"
+             id="mc-${fn}" value="${hasManual ? mc : ''}"
+             placeholder="0" onkeydown="if(event.key==='Enter')saveManual('${fn}')">
+      <button class="btn btn-sm" onclick="saveManual('${fn}')">Save</button>
+      <button class="btn btn-sm btn-unlabel" onclick="clearManual('${fn}')">Clear</button>
+      <span id="mc-saved-${fn}" style="color:#4CAF50;font-size:12px;display:none">✓</span>
+    </div>` : ''}
+  </div>`;
+}
+
+async function saveManual(fn) {
+  const input = document.getElementById('mc-' + fn);
+  const val = input.value.trim();
+  const count = val === '' ? null : parseInt(val);
+  try {
+    const res = await fetch(`/api/dosatron/cycles/${encodeURIComponent(fn)}/manual_count`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({count}),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const s = document.getElementById('mc-saved-' + fn);
+    s.style.display = 'inline';
+    setTimeout(() => { s.style.display = 'none'; }, 1500);
+    await loadAll();
+  } catch(e) { alert('Save failed: ' + e.message); }
+}
+
+async function clearManual(fn) {
+  await saveManualRaw(fn, null);
+}
+async function saveManualRaw(fn, count) {
+  await fetch(`/api/dosatron/cycles/${encodeURIComponent(fn)}/manual_count`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({count}),
+  });
+  await loadAll();
+}
+
+// ── calibration section ────────────────────────────────────────────────────
+let calibLoaded = false;
+function toggleCalib(btn) {
+  const body = document.getElementById('calibBody');
+  body.classList.toggle('open');
+  btn.textContent = body.classList.contains('open') ? 'hide ▴' : 'show ▾';
+  if (body.classList.contains('open') && !calibLoaded) {
+    loadCalib();
+    calibLoaded = true;
+  }
+}
+
+async function loadCalib() {
+  try {
+    const res = await fetch('/api/dosatron/detections?hours=24');
+    const data = await res.json();
+    renderDetections(data.detections || []);
+  } catch(e) {
+    document.getElementById('detectionList').innerHTML =
+      '<div class="empty-state">Error: ' + e.message + '</div>';
+  }
+}
+
+function renderDetections(detections) {
+  const el = document.getElementById('detectionList');
+  if (!detections.length) {
+    el.innerHTML = '<div class="empty-state">No individual detections in last 24 h.</div>';
+    return;
+  }
+  el.innerHTML = detections.map(d => detCard(d)).join('');
+}
+
+function detCard(d) {
+  const lc = d.label === 'click' ? 'labeled-click' : d.label === 'noise' ? 'labeled-noise' : 'unlabeled';
+  const ca = d.label === 'click' ? 'active' : '';
+  const na = d.label === 'noise' ? 'active' : '';
+  const fn = d.clip || '';
+  const audio = fn
+    ? `<audio controls preload="none" style="margin:4px 0 6px"><source src="/api/dosatron/clips/${encodeURIComponent(fn)}" type="audio/wav"></audio>`
+    : '<span class="no-clip">no clip</span>';
+  return `
+  <div class="det-card ${lc}">
+    <div class="det-meta">${fmt(d.ts)} &nbsp; peak=<span>${d.peak}</span> rms=<span>${d.rms}</span></div>
+    ${audio}
+    <div class="label-row">
+      ${fn ? `
+      <button class="btn btn-sm btn-click ${ca}" onclick="setLabel('${fn}','click')">✓ Real Click</button>
+      <button class="btn btn-sm btn-noise ${na}" onclick="setLabel('${fn}','noise')">✗ Not a Click</button>
+      <button class="btn btn-sm btn-unlabel" onclick="setLabel('${fn}',null)">clear</button>
+      ` : '<span class="no-clip">cannot label — no clip</span>'}
+    </div>
+  </div>`;
+}
+
+async function setLabel(fn, label) {
+  await fetch(`/api/dosatron/label/${encodeURIComponent(fn)}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({label}),
+  });
+  loadCalib();
+}
+
+// ── thresholds ─────────────────────────────────────────────────────────────
+const slider = document.getElementById('thresholdSlider');
+slider.addEventListener('input', () => { document.getElementById('thresholdDisplay').textContent = slider.value; });
+
+const flowSlider = document.getElementById('flowSlider');
+flowSlider.addEventListener('input', () => { document.getElementById('flowDisplay').textContent = flowSlider.value; });
+
+async function saveThreshold() {
+  try {
+    const res = await fetch('/api/dosatron/config', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({threshold: parseInt(slider.value)}),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const msg = document.getElementById('thresholdSaved');
+    msg.style.display = 'inline';
+    setTimeout(() => { msg.style.display = 'none'; }, 3000);
+  } catch(e) { alert('Save failed: ' + e.message); }
+}
+
+async function saveFlowThreshold() {
+  try {
+    const res = await fetch('/api/dosatron/config', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({flow_ratio_threshold: parseFloat(flowSlider.value)}),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const msg = document.getElementById('flowSaved');
+    msg.style.display = 'inline';
+    setTimeout(() => { msg.style.display = 'none'; }, 3000);
+  } catch(e) { alert('Save failed: ' + e.message); }
+}
+
+// ── live listen ────────────────────────────────────────────────────────────
+let _liveActive = false;
+let _liveCtx = null;
+let _liveSource = null;
+
+function toggleLive() {
+  _liveActive ? stopLive() : startLive();
+}
+
+function startLive() {
+  const audio = document.getElementById('liveAudio');
+  const btn   = document.getElementById('liveBtn');
+  const stat  = document.getElementById('liveStatus');
+
+  // Cache-bust so each connect starts a fresh ffmpeg process
+  audio.src = '/api/dosatron/live?' + Date.now();
+  audio.style.display = 'block';
+  audio.play().catch(() => {});
+
+  btn.textContent = '■ Stop';
+  btn.style.background = '#7f1919';
+  stat.textContent = 'Streaming… (may take a few seconds to start)';
+  _liveActive = true;
+
+  audio.onplaying = () => { stat.textContent = 'Live — listening now'; };
+  audio.onerror   = () => { stat.textContent = 'Stream error — is the listener running?'; stopLive(); };
+  audio.onended   = () => stopLive();
+
+  // Web Audio API level meter
+  try {
+    _liveCtx = new (window.AudioContext || window.webkitAudioContext)();
+    _liveSource = _liveCtx.createMediaElementSource(audio);
+    const analyser = _liveCtx.createAnalyser();
+    analyser.fftSize = 256;
+    _liveSource.connect(analyser);
+    analyser.connect(_liveCtx.destination);
+    document.getElementById('liveRms').style.display = 'flex';
+    const canvas = document.getElementById('liveBar');
+    const ctx2d  = canvas.getContext('2d');
+    const data   = new Uint8Array(analyser.frequencyBinCount);
+    function drawBar() {
+      if (!_liveActive) return;
+      requestAnimationFrame(drawBar);
+      analyser.getByteFrequencyData(data);
+      const avg = data.reduce((a, b) => a + b, 0) / data.length;
+      const w = Math.round((avg / 255) * canvas.width);
+      ctx2d.clearRect(0, 0, canvas.width, canvas.height);
+      const grad = ctx2d.createLinearGradient(0, 0, canvas.width, 0);
+      grad.addColorStop(0, '#4CAF50');
+      grad.addColorStop(0.6, '#ff9800');
+      grad.addColorStop(1, '#f44336');
+      ctx2d.fillStyle = grad;
+      ctx2d.fillRect(0, 0, w, canvas.height);
+    }
+    drawBar();
+  } catch(e) { /* no Web Audio API support, skip meter */ }
+}
+
+function stopLive() {
+  const audio = document.getElementById('liveAudio');
+  audio.pause();
+  audio.src = '';
+  audio.style.display = 'none';
+  document.getElementById('liveBtn').textContent = '▶ Start Listening';
+  document.getElementById('liveBtn').style.background = '';
+  document.getElementById('liveStatus').textContent = 'Click to stream live mic audio.';
+  document.getElementById('liveRms').style.display = 'none';
+  if (_liveCtx) { _liveCtx.close().catch(() => {}); _liveCtx = null; }
+  _liveActive = false;
+}
+
+loadAll();
+loadFlow();
+setInterval(loadAll, 60000);
+setInterval(loadFlow, 60000);
+</script>
+</body>
+</html>

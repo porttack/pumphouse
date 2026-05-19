@@ -2,6 +2,80 @@
 
 All notable changes to the pressure monitoring system.
 
+## [2.30.0] - 2026-05-19
+
+### Added — Daily Summary: Filter Health Ratio
+
+- **`filter_health_ratio`** new column in `daily.csv` (`build_daily.py`): average of `gph / pressure_high_percent` across bypass-off, unoccupied, non-checkout windows in the 5–50% pressure band; proxy for filter cleanliness — as the filter clogs, GPH falls while pump duty rises, so the ratio drops
+- Null on checkout days (housekeeping water use is unpredictable) and on days with fewer than 4 qualifying windows
+- On days with any bypass activity, only windows before the first bypass-ON event are included to avoid post-bypass recovery inflating the metric
+- **`log_daily_gph.py`** added to version control (script was present in repo root and called by cron, but had never been tracked)
+
+## [2.29.0] - 2026-05-19
+
+### Added — Vehicle Detection: YOLOv8n and Background Subtraction
+
+- **YOLOv8n (ONNX) model** (`ring_camera.py`): uses `yolov8n.onnx` via `onnxruntime` when available; falls back to YOLOv4-tiny (`cv2.dnn`); YOLOv8n is smaller and more accurate for the fixed-angle driveway use case
+- **Background subtraction** (`ring_camera.py`): supplements YOLO with per-pixel diff against reference images collected automatically when the property is unoccupied and YOLO sees 0 vehicles; reference images stored per hour-of-day in `~/.config/pumphouse/ring_reference/`; configurable zone `_BG_ZONE` (default: right half of frame); if ≥ 8% of zone pixels differ from reference by > 35 units, a vehicle is inferred even if YOLO misses it (handles partially occluded or parked-overnight cases)
+
+## [2.28.0] - 2026-05-19
+
+### Added — Timelapse: Automatic Sunset Scoring and Expanded Snap Grid
+
+- **`scripts/score_sunset.py`**: hybrid color + CLIP algorithm scores each day's sunset timelapse for visual quality; run automatically after assembly via a background thread in `sunset_timelapse.py`; `--no-clip` flag keeps auto-scoring fast (~30 s, low memory); scores written to `clip_scores.json` in the timelapse directory
+- **Auto-scoring after assembly** (`sunset_timelapse.py`): `_start_auto_score()` runs `score_sunset.py --no-clip --write` in a daemon thread; CLIP-based scoring can be run manually for higher accuracy
+- **Snap grid expanded 24 → 36 dates** (`web_timelapse.py`): light-mode photo grid now shows up to 36 most recent sunset snapshots
+- **Scores and weather in grid tooltips**: each thumbnail title shows date, NWS weather description, and sunset quality score
+- **`data-score` / `data-rating` attributes** on grid anchors, enabling client-side sort/filter
+
+## [2.27.0] - 2026-05-19
+
+### Added — Reservations: Owner Statement Scraping and Dashboard Display
+
+- **`bin/scrape_statements.py`**: logs into `meredith.trackhs.com` and downloads monthly owner statement summaries from the `/owner/statements/view-data/` JSON endpoint; saves to `~/.local/share/pumphouse/statements.csv` (annual statements excluded)
+- **`bin/update_reservations.sh`**: added step 5 to run statement scraper after reservations and work orders; non-fatal on failure
+- **Statement rows in income history**: prior-months calendar and reservation list now inject a statement summary row after each month showing Meredith portal figures (revenue, management fee, other charges, balance) for cross-check against computed net income
+- **`config.py`**: added `STATEMENTS_FILE` path constant
+
+## [2.26.0] - 2026-05-19
+
+### Added — Dosatron: Poll Integration, Status Dashboard, and Audio Service
+
+#### Poll and Logger Integration
+- **`monitor/poll.py`**: writes `pressure_signal.json` on each PRESSURE_HIGH/LOW transition so the audio listener starts/stops cycle recordings in sync with pressure; writes `prediction.json` after each LOW with predicted next HIGH time based on a rolling average of recent cycle intervals; dosatron click count and gallon estimate included in PRESSURE_LOW event logging
+- **`monitor/logger.py`**: added `dosatron_gallons` column to `snapshots.csv`
+- **`monitor/config.py`**: added `BYPASS_FLOW_WATCH_FILE` for bypass-flow alert toggle; unhid `PRESSURE_LOW` from dashboard event log (had been hidden alongside PRESSURE_HIGH)
+
+#### Status Dashboard
+- **Last cycle panel** (`monitor/templates/status.html`): replaces pressure-HIGH percentage bars with a compact table showing last cycle start time, duration, duty %, and Dosatron gallons for the most recent complete pressure cycle
+- **Predicted next HIGH**: shown inline below the cycle panel via `/api/dosatron/prediction` (polled on page load)
+- **Bypass-flow watch toggle** (`/watch/bypass_flow`): flag-file based on/off for bypass-flow-cycle ntfy alerts; same pattern as pressure-LOW watch
+
+#### Audio Service
+- **`pumphouse-audio` systemd service** (`terraform/services/pumphouse-audio.service`): runs `python -m monitor.dosatron`; auto-restarts on failure; starts after `pumphouse-monitor`
+- **`bin/install-services.sh`**: detects USB mic card name, writes `dosatron_in` dsnoop stanza to `~/.asoundrc` if absent, runs a 1-second test recording; copies and registers `pumphouse-audio.service`
+- **`docs/audio.md`** (new): covers hardware, ALSA dsnoop setup, service management, calibration, data files, and troubleshooting
+- **`docs/installation.md`**: updated to include `pumphouse-audio` in all service commands
+
+## [2.25.0] - 2026-05-19
+
+### Added — Dosatron Click Detector: USB Mic Listener and Web Dashboard
+
+#### Audio Listener (`monitor/dosatron.py`)
+- **USB microphone listener**: detects Dosatron fertilizer injector firings by amplitude threshold on a USB microphone; each click + clack ≈ 0.14 gal; calibrated at 0.07 gal/click (GALLONS_PER_CLICK)
+- **Pressure-cycle WAV recording**: full audio from PRESSURE_HIGH to PRESSURE_LOW + 30 s post-roll saved as `cycles/*.wav` (14-day retention); driven by `pressure_signal.json` written by poll.py
+- **Bypass flow detection (FFT)**: detects water flowing through the bypass line using spectral ratio score = energy(100–400 Hz) / energy(1000–4000 Hz); quiet ambient ≈ 12, water flowing ≈ 39, default threshold 22; records `flow_cycles/*.wav`; requires 5 s above threshold to start, 10 s below to stop, minimum 15 s duration
+- **Live audio streaming** (`/api/dosatron/live`): MP3 stream via `arecord` → `ffmpeg` pipeline; `dsnoop` ALSA virtual device allows the background listener and live-stream requests to share the microphone simultaneously
+- **Click pre/post-roll clips**: 1 s pre-roll + 5 s post-roll WAV clips saved to `clips/` on each detection (7-day retention); clip filename backfilled into `detections.jsonl` after post-roll completes
+- **Config hot-reload**: threshold settings re-read from `config.json` every 30 s — no restart needed after UI changes
+
+#### Dosatron Web Dashboard (`/dosatron`)
+- **Listener status and cycle list**: shows whether the audio listener is running, lists recent pressure cycles with duration, duty %, click count, estimated gallons, and audio playback
+- **Individual detections view** (calibration): lists all recent detections with peak/RMS readings and audio clips; click/noise labeling for threshold tuning
+- **Bypass flow view**: lists flow cycles detected during bypass mode with duration and audio playback; verify/reject labels for ground-truth collection
+- **Prediction panel**: last LOW, predicted next HIGH, average cycle interval
+- **Live audio widget**: one-click streaming via the `/api/dosatron/live` endpoint
+
 ## [2.24.0] - 2026-04-07
 
 ### Added — Public Timelapse Website, iOS Video Fix, Pump-Off Outage Tracking

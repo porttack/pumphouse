@@ -21,15 +21,16 @@ Remote monitoring and control system for a well-water pump house serving an Airb
 - **Guest water guidance**: An e-paper display at the property shows guests current water availability and when to delay laundry or other high-use activities — reducing the risk of running low during a stay.
 - **Marketing**: Daily sunset timelapses are published at [onblackberryhill.com](https://onblackberryhill.com/timelapse) to showcase the property. The public site uses a warm light-mode design with a photo grid of recent sunsets; a dark developer mode with full controls is one toggle away.
 
-## How: Three Daemons
+## How: Four Daemons
 
 | Service | Source | Role |
 |---------|--------|------|
 | `pumphouse-monitor` | `monitor/` | Core monitoring loop: pressure, float, tank level, relay control, CSV logging, notifications |
 | `pumphouse-web` | `monitor/web.py` | Flask/gunicorn HTTPS server: dashboard, API endpoints, timelapse viewer, Cloudflare tunnel target |
 | `pumphouse-timelapse` | `sunset_timelapse.py` | Captures RTSP frames around sunset, assembles MP4, serves preview during capture |
+| `pumphouse-audio` | `monitor/dosatron.py` | USB mic listener: Dosatron click detection, bypass flow detection (FFT), cycle WAV recording |
 
-All three run as systemd services. See [docs/installation.md](docs/installation.md) for setup.
+All four run as systemd services. See [docs/installation.md](docs/installation.md) for setup.
 
 ## Inputs & Sensors
 
@@ -78,6 +79,8 @@ pumphouse/
 │   ├── poll.py                  # Main monitoring loop (pressure, float, tank, relay, snapshots)
 │   ├── web.py                   # Flask web server & all API routes (dashboard, /api/*, timelapse)
 │   ├── web_timelapse.py         # Timelapse viewer routes and MP4/JPG serving
+│   ├── dosatron.py              # Dosatron click detector + bypass flow listener (pumphouse-audio)
+│   ├── web_dosatron.py          # Dosatron Flask blueprint (/dosatron page + /api/dosatron/*)
 │   ├── state.py                 # SystemState dataclass — shared live sensor state
 │   ├── stats.py                 # Snapshot-based statistics (GPH, pressure %, averages)
 │   ├── logger.py                # CSV event & snapshot logging
@@ -97,7 +100,10 @@ pumphouse/
 │   ├── epaper_jpg.py            # E-paper BMP/JPG image generation for display & widget
 │   ├── restart_tracker.py       # Crash loop detection (restart_tracker.json)
 │   ├── check.py                 # Status checker & diagnostic test runner (--test-email, etc.)
-│   └── templates/status.html   # Web dashboard Jinja2 template
+│   ├── ring_camera.py           # Ring doorbell snapshot + YOLOv8n/YOLOv4 vehicle counting
+│   └── templates/
+│       ├── status.html          # Web dashboard Jinja2 template
+│       └── dosatron.html        # Dosatron dashboard Jinja2 template
 ├── pistat/                      # E-paper display daemon (runs on separate Pi)
 │   ├── epaper_daemon.py
 │   ├── IPHONE_WIDGET.md         # iPhone Scriptable widget setup
@@ -119,7 +125,8 @@ pumphouse/
 │   ├── services/                # systemd service unit files
 │   │   ├── pumphouse-monitor.service
 │   │   ├── pumphouse-web.service
-│   │   └── pumphouse-timelapse.service
+│   │   ├── pumphouse-timelapse.service
+│   │   └── pumphouse-audio.service
 │   └── cron/                    # Crontab reference and install docs
 │       ├── crontab.example      # All scheduled jobs with correct paths
 │       └── README.md
@@ -131,14 +138,18 @@ pumphouse/
 │   ├── scrape_ecobee.py         # Web scraping fallback
 │   └── scrape_ecobee_selenium.py # Selenium-based scraping
 ├── bin/                         # Scripts: setup/admin (run once) + cron-called scripts
-│   ├── install-services.sh      # Copies & enables all systemd services
+│   ├── install-services.sh      # Copies & enables all systemd services; writes ~/.asoundrc
 │   ├── generate_cert.sh         # Self-signed SSL certificate generator
 │   ├── deploy-pumphouse-certs.sh # Copies Let's Encrypt certs, restarts web service
 │   ├── setup_reservation_cron.sh # Installs reservation-scraper cron entries
-│   ├── update_reservations.sh   # Cron wrapper: scrape + check + notify
+│   ├── update_reservations.sh   # Cron wrapper: scrape reservations + work orders + statements
 │   ├── scrape_reservations.py   # TrackHS reservation downloader
+│   ├── scrape_statements.py     # TrackHS owner statement downloader (monthly summaries)
 │   └── check_new_reservations.py # New/changed/canceled booking detector
+├── scripts/                     # One-off and maintenance scripts
+│   └── score_sunset.py          # Hybrid color + CLIP sunset quality scorer
 ├── docs/                        # All documentation
+│   ├── audio.md                 # USB mic listener: ALSA setup, service, calibration
 │   ├── conversations/           # Development session notes
 │   └── lessons/                 # Educational content
 ├── sunset_timelapse.py          # Timelapse capture daemon (pumphouse-timelapse)
@@ -161,6 +172,16 @@ pumphouse/
     events.csv                # All state-change events
     reservations.csv          # Current TrackHS reservations
     reservations_snapshot.csv # Previous snapshot for change detection
+    statements.csv            # Monthly owner statement summaries from TrackHS
+    dosatron/
+        detections.jsonl      # One record per Dosatron click detection
+        cycles.jsonl          # One record per pressure cycle recording
+        flow_cycles.jsonl     # One record per bypass flow detection
+        config.json           # Listener threshold settings (editable from web UI)
+        listener.pid          # PID of the running pumphouse-audio listener
+        clips/                # Short WAV clips around each click (7-day retention)
+        cycles/               # Full pressure-cycle WAV recordings (14-day retention)
+        flow_cycles/          # Bypass flow WAV recordings (14-day retention)
 
 ~/timelapses/                 # Timelapse archive (written by pumphouse-timelapse)
     YYYY-MM-DD_HHMM.mp4       # Daily MP4s (sunset time in filename)
@@ -178,6 +199,7 @@ pumphouse/
     pumphouse-monitor.service
     pumphouse-web.service
     pumphouse-timelapse.service
+    pumphouse-audio.service
     cloudflared.service       # Cloudflare Tunnel (installed by cloudflared)
 
 # Data files in the repo directory (excluded from git):
@@ -208,6 +230,7 @@ cert.pem / key.pem            # TLS certificate files
 | [docs/reservations.md](docs/reservations.md) | TrackHS scraper, cron setup, new/changed/canceled notification events |
 | [docs/ecobee.md](docs/ecobee.md) | Ecobee thermostat integration, web scraping, current capabilities |
 | [docs/gph-tracking.md](docs/gph-tracking.md) | Well GPH tracking, calculation method, caching, historical logging |
+| [docs/audio.md](docs/audio.md) | USB mic listener: ALSA dsnoop setup, pumphouse-audio service, Dosatron + bypass flow calibration |
 | [docs/system-health.md](docs/system-health.md) | System health monitor, throttling bitmask, journal persistence |
 | [docs/todo.md](docs/todo.md) | Pending tasks, security items, ideas, completed history |
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
