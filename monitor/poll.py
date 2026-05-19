@@ -2,6 +2,8 @@
 Simplified event-based polling loop
 """
 import csv
+import json
+import os
 import threading
 import time
 from collections import deque
@@ -37,6 +39,70 @@ from monitor.gpio_helpers import (
 from monitor.tank import get_tank_data
 from monitor.ambient_weather import get_weather_data
 from monitor.logger import log_event, log_snapshot
+try:
+    from monitor.dosatron import count_clicks as _count_dosatron_clicks, GALLONS_PER_CLICK as _DOSATRON_GPK
+    _DOSATRON_SIGNAL_FILE = os.path.join(
+        os.path.expanduser("~/.local/share/pumphouse/dosatron"), "pressure_signal.json"
+    )
+    _DOSATRON_PREDICTION_FILE = os.path.join(
+        os.path.expanduser("~/.local/share/pumphouse/dosatron"), "prediction.json"
+    )
+except Exception:
+    def _count_dosatron_clicks(start, end):  # type: ignore[misc]
+        return 0
+    _DOSATRON_GPK = 0.14
+    _DOSATRON_SIGNAL_FILE = None
+    _DOSATRON_PREDICTION_FILE = None
+
+
+def _write_pressure_signal(state: str, ts: float) -> None:
+    """Write pressure state to dosatron signal file so the listener can start/stop cycle recording."""
+    if not _DOSATRON_SIGNAL_FILE:
+        return
+    try:
+        tmp = _DOSATRON_SIGNAL_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"state": state, "ts": ts}, f)
+        os.replace(tmp, _DOSATRON_SIGNAL_FILE)
+    except Exception:
+        pass
+
+
+def _write_pressure_prediction(events_file: str, low_ts: float, n: int = 20) -> None:
+    """Calculate predicted next PRESSURE_HIGH from historical events, write prediction.json."""
+    if not _DOSATRON_PREDICTION_FILE:
+        return
+    try:
+        high_times = []
+        with open(events_file, newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row.get("event_type") == "PRESSURE_HIGH":
+                    try:
+                        high_times.append(datetime.fromisoformat(row["timestamp"]))
+                    except (ValueError, KeyError):
+                        pass
+        recent = high_times[-min(n + 1, len(high_times)):]
+        if len(recent) < 3:
+            return
+        intervals = [(recent[i + 1] - recent[i]).total_seconds()
+                     for i in range(len(recent) - 1)]
+        avg_s = sum(intervals) / len(intervals)
+        last_high = recent[-1]
+        predicted = last_high + timedelta(seconds=avg_s)
+        record = {
+            "last_high_ts":           last_high.isoformat(),
+            "last_low_ts":            datetime.fromtimestamp(low_ts).isoformat(),
+            "predicted_next_high_ts": predicted.isoformat(),
+            "avg_interval_minutes":   round(avg_s / 60, 1),
+            "based_on_n":             len(intervals),
+        }
+        tmp = _DOSATRON_PREDICTION_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(record, f)
+        os.replace(tmp, _DOSATRON_PREDICTION_FILE)
+    except Exception:
+        pass
 from monitor.state import SystemState
 from monitor.notifications import NotificationManager
 from monitor.ntfy import send_notification
@@ -200,6 +266,10 @@ class SimplifiedMonitor:
 
         # Vehicle count tracking (for change detection when unoccupied)
         self.last_vehicle_count = None
+
+        # Dosatron: deferred PRESSURE_LOW notification (sent 30 s after LOW so
+        # the cycle recording captures any last clicks)
+        self.pending_pressure_low_notif: dict | None = None
 
         # Weather tracking
         self.last_weather_check = 0
@@ -509,6 +579,7 @@ class SimplifiedMonitor:
             time.time(),
             self.snapshot_interval
         )
+        self.snapshot_start_time = time.time()
 
         # Initialize daily status email timing
         if ENABLE_DAILY_STATUS_EMAIL:
@@ -555,6 +626,7 @@ class SimplifiedMonitor:
                     if current_pressure:  # Went HIGH
                         self.pressure_high_start = current_time
                         self.log_state_event('PRESSURE_HIGH')
+                        _write_pressure_signal("HIGH", current_time)
                         if self.debug:
                             print(f"{datetime.now().strftime('%H:%M:%S')} - Pressure HIGH")
 
@@ -649,36 +721,30 @@ class SimplifiedMonitor:
                                     include_status=True
                                 )
                     else:  # Went LOW
+                        _write_pressure_signal("LOW", current_time)
                         if self.pressure_high_start:
                             duration = current_time - self.pressure_high_start
                             estimated = estimate_gallons(duration)
+                            dosatron_clicks = _count_dosatron_clicks(self.pressure_high_start, current_time)
+                            _dosatron_gal = round(dosatron_clicks * _DOSATRON_GPK, 2)
                             self.log_pressure_event('PRESSURE_LOW', estimated,
-                                                    f'Duration: {duration:.1f}s')
+                                                    f'Duration: {duration:.1f}s, Dosatron: {_dosatron_gal:.2f} gal ({dosatron_clicks} clicks)')
+                            _write_pressure_prediction(self.events_file, current_time)
                             if self.debug:
                                 print(f"{datetime.now().strftime('%H:%M:%S')} - Pressure LOW "
-                                     f"(was HIGH for {duration:.1f}s, ~{estimated:.1f} gal)")
+                                     f"(was HIGH for {duration:.1f}s, ~{estimated:.1f} gal, "
+                                     f"{_dosatron_gal:.2f} Dosatron gal ({dosatron_clicks} clicks)")
 
-                            # Send pressure LOW alert with duration info
+                            # Defer PRESSURE_LOW notification 30 s so the dosatron cycle
+                            # recording captures any trailing clicks before we report the count.
                             if (NOTIFY_PRESSURE_LOW_ENABLED or PRESSURE_LOW_WATCH_FILE.exists()) and self.notification_manager.can_notify('pressure_low'):
-                                current_gal = self.state.tank_gallons if self.state.tank_gallons else 0
-                                duration_minutes = duration / 60
-
-                                # Format duration nicely
-                                if duration_minutes >= 1:
-                                    duration_str = f"{duration_minutes:.1f} minutes"
-                                else:
-                                    duration_str = f"{duration:.0f} seconds"
-
-                                # Send ntfy notification
-                                send_notification(
-                                    title=f"{current_gal:.0f} gal - Pressure LOW",
-                                    message=f"Water usage ended. Pressure was HIGH for {duration_str} (~{estimated:.1f} gal)",
-                                    priority='default',
-                                    tags=['droplet'],
-                                    click_url=DASHBOARD_URL,
-                                    attach_url=f"{DASHBOARD_URL}api/epaper.jpg?tenant=no",
-                                    debug=self.debug
-                                )
+                                self.pending_pressure_low_notif = {
+                                    "send_at":    current_time + 30,
+                                    "high_start": self.pressure_high_start,
+                                    "duration":   duration,
+                                    "estimated":  estimated,
+                                    "tank_gal":   self.state.tank_gallons or 0,
+                                }
 
                             # Trigger purge if enabled AND enough time has passed
                             if self.enable_purge and self.relay_control_enabled and estimated > 0:
@@ -699,7 +765,27 @@ class SimplifiedMonitor:
                         self.last_pressure_high_end_time = current_time
 
                     self.last_pressure_state = current_pressure
-                
+
+                # DEFERRED PRESSURE_LOW NOTIFICATION (waits 30 s for cycle recording to finish)
+                if self.pending_pressure_low_notif and current_time >= self.pending_pressure_low_notif["send_at"]:
+                    p = self.pending_pressure_low_notif
+                    self.pending_pressure_low_notif = None
+                    final_clicks = _count_dosatron_clicks(p["high_start"], current_time)
+                    duration = p["duration"]
+                    duration_str = (f"{duration / 60:.1f} minutes" if duration >= 60
+                                    else f"{duration:.0f} seconds")
+                    final_dosatron_gal = round(final_clicks * _DOSATRON_GPK, 2)
+                    send_notification(
+                        title=f"{p['tank_gal']:.0f} gal - Pressure LOW",
+                        message=(f"Water usage ended. HIGH for {duration_str} "
+                                 f"(~{p['estimated']:.1f} gal, {final_dosatron_gal:.2f} Dosatron gal)"),
+                        priority='default',
+                        tags=['droplet'],
+                        click_url=DASHBOARD_URL,
+                        attach_url=f"{DASHBOARD_URL}api/epaper.jpg?tenant=no",
+                        debug=self.debug,
+                    )
+
                 # TANK POLLING
                 if current_time - self.last_tank_check >= self.tank_interval:
                     prev_gallons = self.state.tank_gallons
@@ -1125,6 +1211,9 @@ class SimplifiedMonitor:
                     if snapshot_vehicle_count is not None:
                         self.last_vehicle_count = snapshot_vehicle_count
 
+                    snapshot_dosatron_gal = _count_dosatron_clicks(
+                        self.snapshot_start_time, current_time
+                    )
                     log_snapshot(
                         self.snapshots_file,
                         snapshot_data['duration'],
@@ -1147,6 +1236,7 @@ class SimplifiedMonitor:
                         self.state.wind_gust,
                         tank_rolling_gph,
                         snapshot_vehicle_count,
+                        dosatron_gallons=round(snapshot_dosatron_gal * _DOSATRON_GPK, 2),
                     )
 
                     # Update last snapshot tank gallons for next delta calculation
@@ -1172,6 +1262,7 @@ class SimplifiedMonitor:
                         current_time,
                         self.snapshot_interval
                     )
+                    self.snapshot_start_time = current_time
 
                 # DAILY STATUS EMAIL
                 if ENABLE_DAILY_STATUS_EMAIL and self.next_daily_status_time and current_time >= self.next_daily_status_time:
@@ -1303,10 +1394,10 @@ class SimplifiedMonitor:
                 time.sleep(self.poll_interval)
         
         except Exception as e:
-            if self.debug:
-                print(f"\nError: {e}")
-                import traceback
-                traceback.print_exc()
+            import traceback
+            tb = traceback.format_exc()
+            print(f"\nFATAL ERROR in poll loop: {e}\n{tb}", flush=True)
+            self.log_state_event('CRASH', f"{type(e).__name__}: {e} | {tb.splitlines()[-2].strip()}")
             self.shutdown()
             raise
         

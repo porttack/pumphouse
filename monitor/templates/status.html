@@ -393,34 +393,32 @@
                     {% if relay_status.bypass == 'ON' %}
                     <div class="relay-warning">⚠ BYPASS ON</div>
                     {% endif %}
-                </div>
-                {% if stats and stats.pressure_high_pct_24hr is not none %}
-                <div class="status-item">
-                    <div class="status-label">Pressure HIGH</div>
-                    <table style="border-collapse:collapse; margin-top:6px; font-size:13px; width:100%; table-layout:fixed;">
-                        <tr style="color:#888;">
-                            <td style="padding:2px 0; text-align:center;">2h</td>
-                            <td style="padding:2px 0; text-align:center;">12h</td>
-                            <td style="padding:2px 0; text-align:center;">24h</td>
+                    {% if last_pressure_cycle %}
+                    <table style="border-collapse:collapse; margin-top:8px; font-size:12px; width:100%;">
+                        <tr>
+                            <td style="color:#888; padding:2px 0;">Last</td>
+                            <td style="color:#ccc; text-align:right; padding:2px 0;">{{ last_pressure_cycle.start_str }}</td>
                         </tr>
-                        <tr style="font-weight:bold; color:#e0e0e0; font-size:15px;">
-                            <td style="padding:2px 0; text-align:center;">{{ "%.1f"|format(stats.pressure_high_pct_2hr) if stats.pressure_high_pct_2hr is not none else "—" }}%</td>
-                            <td style="padding:2px 0; text-align:center;">{{ "%.1f"|format(stats.pressure_high_pct_12hr) if stats.pressure_high_pct_12hr is not none else "—" }}%</td>
-                            <td style="padding:2px 0; text-align:center;">{{ "%.1f"|format(stats.pressure_high_pct_24hr) }}%</td>
+                        <tr>
+                            <td style="color:#888; padding:2px 0;">Duration</td>
+                            <td style="color:#ccc; text-align:right; padding:2px 0;">{{ last_pressure_cycle.duration_str }}</td>
                         </tr>
+                        {% if last_pressure_cycle.pct is not none %}
+                        <tr>
+                            <td style="color:#888; padding:2px 0;">Duty</td>
+                            <td style="color:#ccc; text-align:right; padding:2px 0;">{{ "%.0f"|format(last_pressure_cycle.pct) }}%</td>
+                        </tr>
+                        {% endif %}
+                        {% if last_pressure_cycle.dosatron_gal is not none %}
+                        <tr>
+                            <td style="color:#888; padding:2px 0;">Dosatron</td>
+                            <td style="color:#ccc; text-align:right; padding:2px 0;">{{ "%.2f"|format(last_pressure_cycle.dosatron_gal) }} gal</td>
+                        </tr>
+                        {% endif %}
                     </table>
-                    {% if stats.last_pressure_high %}
-                    <div style="color:#888; font-size:12px; margin-top:5px; text-align:center;">Last: {{ stats.last_pressure_high }}</div>
                     {% endif %}
+                    <div id="dosatron-next-high" style="color:#81c784; font-size:12px; margin-top:6px;"></div>
                 </div>
-                {% endif %}
-                {% if next_pump_cycle %}
-                {% set mins_away = ((next_pump_cycle - now).total_seconds() / 60) | int %}
-                <div class="status-item">
-                    <div class="status-label">Next Pump Cycle</div>
-                    <div class="status-value">{{ next_pump_cycle.strftime('%-I:%M %p') }} <span style="color:#888;font-size:0.85em">(in {{ mins_away }} min)</span></div>
-                </div>
-                {% endif %}
                 {% if next_backflush %}
                 {% set bf_days = ((next_backflush - now).total_seconds() / 86400) %}
                 <div class="status-item">
@@ -628,6 +626,12 @@
                 <a href="/watch/pressure_low?enable=0&back=/?owner" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #f44336; background: #f44336; color: #fff;">● Pressure LOW alerts: ON</a>
                 {% else %}
                 <a href="/watch/pressure_low?enable=1&back=/?owner" class="time-btn" style="font-size: 12px; padding: 4px 10px;">○ Pressure LOW alerts: OFF</a>
+                {% endif %}
+                <span style="color: #555; font-size: 12px;">|</span>
+                {% if bypass_flow_watch %}
+                <a href="/watch/bypass_flow?enable=0&back=/?owner" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #f44336; background: #f44336; color: #fff;">● Bypass Flow alerts: ON</a>
+                {% else %}
+                <a href="/watch/bypass_flow?enable=1&back=/?owner" class="time-btn" style="font-size: 12px; padding: 4px 10px;">○ Bypass Flow alerts: OFF</a>
                 {% endif %}
                 <span style="color: #555; font-size: 12px;">|</span>
                 {% if relay_status.supply_override == 'ON' %}
@@ -1101,7 +1105,7 @@
             <div class="cal-grid">
                 {% for month in prior_calendar_months %}
                 <div class="cal-month">
-                    <div class="cal-month-name">{{ month.name }}{% if month.income %} <span style="color:#888; font-weight:normal;">{{ month.income }}</span>{% endif %}</div>
+                    <div class="cal-month-name">{{ month.name }}{% if month.income %} <span style="color:#888; font-weight:normal;">{{ month.income }}</span>{% endif %}{% if month.stmt_paid %} <span style="color:#5a7a50; font-weight:normal; font-size:0.85em;" title="Meredith paid to owner">→ {{ month.stmt_paid }}</span>{% endif %}</div>
                     <table>
                         <thead>
                             <tr>
@@ -1150,6 +1154,23 @@
                             </td>
                         </tr>
                         {% endif %}
+                        {% if res.get('_type') == 'statement' %}
+                        {% set delta = res['delta'] %}
+                        <tr style="color:#6a8060; font-size:0.82em; border-top:1px dashed #2a3a2a;">
+                            <td colspan="4" style="padding-top:4px; color:#5a7a50; font-style:italic;">
+                                Meredith statement &nbsp;·&nbsp; gross ${{ "%.0f"|format(res['stmt_revenue']) }}
+                            </td>
+                            <td colspan="2" style="padding-top:4px; color:#4a6a40; font-size:0.92em;">
+                                mgmt ${{ "%.0f"|format(res['stmt_mgmt_fee']) }}{% if res['stmt_other'] > 1 %} &nbsp;·&nbsp; other ${{ "%.0f"|format(res['stmt_other']) }}{% endif %}
+                            </td>
+                            <td></td>
+                            <td style="text-align:right; color:#5a7a50;">our net<br>${{ "%.0f"|format(res['computed_net']) }}</td>
+                            <td style="text-align:right; font-weight:bold; color:{% if delta >= -50 and delta <= 50 %}#6a8060{% elif delta > 50 %}#80b870{% else %}#c07070{% endif %};">
+                                paid ${{ "%.0f"|format(res['stmt_paid']) }}
+                                {% if delta > 1 %}<br><span style="font-size:0.85em; color:#80b870;">+${{ "%.0f"|format(delta) }}</span>{% elif delta < -1 %}<br><span style="font-size:0.85em; color:#c07070;">−${{ "%.0f"|format(delta|abs) }}</span>{% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
                         <tr style="color:#555e72;">
                             <td>{{ format_date_short(res['Check-In']) }}</td>
                             <td>{{ format_date_short(res['Checkout']) }}</td>
@@ -1161,6 +1182,7 @@
                             <td style="text-align:right;">${{ "%.0f"|format(res.get('net_income', 0)) }}</td>
                             <td style="text-align:right; font-weight:bold;">${{ "%.0f"|format(res.get('monthly_total', 0)) }}</td>
                         </tr>
+                        {% endif %}
                         {% endfor %}
                     </tbody>
                 </table>
@@ -1224,6 +1246,20 @@
                 ringLink.href   = 'https://ring.com';
                 ringLink.target = '_blank';
             }
+
+            // --- Dosatron next-HIGH prediction in pressure tile ---
+            (function loadDosatronPrediction() {
+                fetch('/api/dosatron/prediction').then(function(r) {
+                    return r.ok ? r.json() : null;
+                }).then(function(d) {
+                    if (!d) return;
+                    var nh = document.getElementById('dosatron-next-high');
+                    if (nh && d.next_high) {
+                        var prefix = d.mode === 'bypass' ? 'Next flow ~' : 'Next ~';
+                        nh.textContent = prefix + d.next_high;
+                    }
+                }).catch(function(){});
+            })();
 
             // --- Auto-refresh every 60 minutes ---
             setTimeout(function() { location.reload(); }, 60 * 60 * 1000);

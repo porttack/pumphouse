@@ -28,7 +28,7 @@ SNAPSHOT_COLUMNS = [
     'relay_bypass', 'relay_supply_override', 'occupied',
     'outdoor_temp_f', 'indoor_temp_f', 'outdoor_humidity',
     'baro_abs_inhg', 'wind_gust_mph',
-    'tank_rolling_gph',
+    'tank_rolling_gph', 'vehicle_count', 'dosatron_gallons',
 ]
 
 
@@ -95,7 +95,7 @@ def log_snapshot(filepath, duration, tank_gallons, tank_gallons_delta, tank_data
                 estimated_gallons, purge_count, relay_status, occupied='',
                 outdoor_temp=None, indoor_temp=None, outdoor_humidity=None,
                 baro_abs=None, wind_gust=None, tank_rolling_gph=None,
-                vehicle_count=None):
+                vehicle_count=None, dosatron_gallons=None):
     """Log a snapshot to snapshots.csv"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
 
@@ -129,4 +129,5 @@ def log_snapshot(filepath, duration, tank_gallons, tank_gallons_delta, tank_data
             f'{wind_gust:.1f}' if wind_gust is not None else '',
             f'{tank_rolling_gph:.1f}' if tank_rolling_gph is not None else '',
             str(vehicle_count) if vehicle_count is not None else '',
+            str(dosatron_gallons) if dosatron_gallons is not None else '',
         ])

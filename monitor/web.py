@@ -15,7 +15,7 @@ from functools import wraps
 
 from monitor import __version__
 from monitor.config import (
-    EVENTS_FILE, RESERVATIONS_FILE, WORK_ORDERS_FILE, DEFAULT_SNAPSHOTS_FILE, DAILY_CSV,
+    EVENTS_FILE, RESERVATIONS_FILE, WORK_ORDERS_FILE, STATEMENTS_FILE, DEFAULT_SNAPSHOTS_FILE, DAILY_CSV,
     NOTIFY_BACKFLUSH_TIME_START, NOTIFY_BACKFLUSH_TIME_END,
     TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS,
     EPAPER_CONSERVE_WATER_THRESHOLD, EPAPER_OWNER_STAY_TYPES,
@@ -33,6 +33,7 @@ from monitor.config import (
     RING_TOKEN_FILE, RING_CAMERA_NAME,
     DASHBOARD_URL,
     PRESSURE_LOW_WATCH_FILE,
+    BYPASS_FLOW_WATCH_FILE,
     OVERRIDE_MANUAL_OFF_FILE,
     BYPASS_TIMER_FILE, PURGE_PENDING_FILE,
     BYPASS_CYCLE_FILE,
@@ -71,7 +72,9 @@ Compress(app)
 
 from monitor.web_timelapse import timelapse_bp  # noqa: E402
 from monitor.weather_api import current_weather_desc, get_wind_forecast  # noqa: E402
+from monitor.web_dosatron import dosatron_bp  # noqa: E402
 app.register_blueprint(timelapse_bp)
+app.register_blueprint(dosatron_bp)
 
 # Configuration
 USERNAME = os.environ.get('PUMPHOUSE_USER', 'admin')
@@ -483,6 +486,37 @@ def load_work_orders(filepath, months=3):
         return [], []
 
 
+def load_statements(filepath):
+    """Load statements.csv and return a dict keyed by 'YYYY-MM' for quick lookup.
+
+    Each value is a dict with keys: revenue, charges, paid, balance (all floats).
+    Returns {} if the file doesn't exist or can't be parsed.
+    """
+    if not os.path.exists(filepath):
+        return {}
+    try:
+        result = {}
+        with open(filepath, newline='') as f:
+            for row in csv.DictReader(f):
+                try:
+                    yr = int(row['year'])
+                    mo = int(row['period'])
+                    key = f'{yr:04d}-{mo:02d}'
+                    result[key] = {
+                        'revenue':  float(row.get('revenue', 0) or 0),
+                        'charges':  float(row.get('charges', 0) or 0),
+                        'paid':     float(row.get('paid', 0) or 0),
+                        'balance':  float(row.get('balance', 0) or 0),
+                        'end_date': row.get('end_date', ''),
+                    }
+                except (ValueError, KeyError):
+                    continue
+        return result
+    except Exception as e:
+        print(f"Error loading statements: {e}")
+        return {}
+
+
 def get_hourly_gph(filepath=DEFAULT_SNAPSHOTS_FILE, blocks=6, block_hours=2):
     """Return list of {label, delta} for the last `blocks` complete 2-hour blocks.
 
@@ -644,7 +678,7 @@ def get_snapshots_stats(filepath=DEFAULT_SNAPSHOTS_FILE):
     except Exception as e:
         return None
 
-def _build_prior_calendar(all_reservations, num_months=6):
+def _build_prior_calendar(all_reservations, num_months=6, statements_by_month=None):
     """Return calendar months for the prior 6 complete months, oldest first."""
     from datetime import date as _date
     today = _date.today()
@@ -661,11 +695,16 @@ def _build_prior_calendar(all_reservations, num_months=6):
         start_year=yr,
         start_month=mo,
         show_past_detail=True,
+        statements_by_month=statements_by_month,
     )
 
 
-def _build_past_reservations(all_reservations, management_fee_pct, guest_counts):
-    """Return reservation rows (with gross/net/monthly_total) for checkouts in the prior 6 months."""
+def _build_past_reservations(all_reservations, management_fee_pct, guest_counts, statements_by_month=None):
+    """Return reservation rows (with gross/net/monthly_total) for checkouts in the prior 6 months.
+
+    If statements_by_month is provided, a special '_type':'statement' summary row is appended
+    after each month's reservations showing the Meredith portal statement figures.
+    """
     from datetime import date as _date
     from monitor.occupancy import parse_date
     today = _date.today()
@@ -713,10 +752,74 @@ def _build_past_reservations(all_reservations, management_fee_pct, guest_counts)
         running_total += res.get('net_income', 0)
         res['monthly_total'] = running_total
 
-    return rows
+    if not statements_by_month:
+        return rows
+
+    # Inject a statement summary row after the last reservation for each month.
+    # Collect months that appear in rows (in order), then insert statement sentinel after each.
+    result = []
+    current_month = None
+    pending_month = None
+    pending_net = 0.0
+
+    def _append_statement(month_key, computed_net):
+        stmt = statements_by_month.get(month_key)
+        if stmt:
+            mgmt_fee = stmt['revenue'] * management_fee_pct / 100
+            other    = abs(stmt['charges']) - mgmt_fee
+            result.append({
+                '_type':       'statement',
+                'Checkout':    f'{month_key}-28',
+                'stmt_revenue': stmt['revenue'],
+                'stmt_charges': stmt['charges'],
+                'stmt_mgmt_fee': mgmt_fee,
+                'stmt_other':    other,
+                'stmt_paid':    stmt['paid'],
+                'stmt_balance': stmt['balance'],
+                'computed_net': computed_net,
+                'delta':        stmt['paid'] - computed_net,
+            })
+
+    for res in rows:
+        checkout_date = parse_date(res.get('Checkout'))
+        month_key = checkout_date.strftime('%Y-%m') if checkout_date else None
+        if month_key != current_month:
+            if current_month and pending_month:
+                _append_statement(pending_month, pending_net)
+            current_month = month_key
+            pending_month = month_key
+            pending_net = 0.0
+        pending_net += res.get('net_income', 0)
+        result.append(res)
+
+    if pending_month:
+        _append_statement(pending_month, pending_net)
+
+    # Also inject statement rows for months that had NO reservations in the window
+    months_with_reservations = {r['Checkout'][:7] for r in result if r.get('_type') != 'statement'}
+    for key in sorted(statements_by_month):
+        if key >= f'{yr:04d}-{mo:02d}' and key < today.replace(day=1).strftime('%Y-%m') and key not in months_with_reservations:
+            stmt = statements_by_month[key]
+            mgmt_fee = stmt['revenue'] * management_fee_pct / 100
+            other    = abs(stmt['charges']) - mgmt_fee
+            result.append({
+                '_type':        'statement',
+                'Checkout':     f'{key}-28',
+                'stmt_revenue': stmt['revenue'],
+                'stmt_charges': stmt['charges'],
+                'stmt_mgmt_fee': mgmt_fee,
+                'stmt_other':    other,
+                'stmt_paid':    stmt['paid'],
+                'stmt_balance': stmt['balance'],
+                'computed_net': 0.0,
+                'delta':        stmt['paid'],
+            })
+
+    result.sort(key=lambda x: parse_date(x.get('Checkout')) or datetime.min)
+    return result
 
 
-def build_calendar_months(all_reservations, num_months=19, start_year=None, start_month=None, show_past_detail=False):
+def build_calendar_months(all_reservations, num_months=19, start_year=None, start_month=None, show_past_detail=False, statements_by_month=None):
     """Build calendar data for the availability calendar.
 
     start_year/start_month: override the starting month (default: current month).
@@ -829,10 +932,12 @@ def build_calendar_months(all_reservations, num_months=19, start_year=None, star
             week_rows.append(row)
         mk = first.strftime('%Y-%m')
         income = monthly_income.get(mk)
+        stmt = (statements_by_month or {}).get(mk)
         months.append({
-            'name': first.strftime('%b %Y'),
-            'weeks': week_rows,
-            'income': f'${income:,.0f}' if income else None,
+            'name':      first.strftime('%b %Y'),
+            'weeks':     week_rows,
+            'income':    f'${income:,.0f}' if income else None,
+            'stmt_paid': f'${stmt["paid"]:,.0f}' if stmt else None,
         })
         is_current_month = False
         mo += 1
@@ -2061,6 +2166,7 @@ def index():
         tank_age_minutes = int(age_seconds / 60)
 
     # Read CSV files
+    statements_by_month = load_statements(STATEMENTS_FILE)
     work_order_headers, work_order_rows = load_work_orders(WORK_ORDERS_FILE, months=3)
     snapshot_headers, snapshot_rows = read_csv_tail(DEFAULT_SNAPSHOTS_FILE, max_rows=DASHBOARD_SNAPSHOT_COUNT)
     snapshot_rows = aggregate_snapshots(snapshot_headers, snapshot_rows,
@@ -2094,27 +2200,66 @@ def index():
     # Hourly tank fill rate for sparkline
     hourly_gph = get_hourly_gph()
 
-    # Predict next pump cycle from recent PRESSURE_HIGH events
-    next_pump_cycle = None
+    # Last completed pressure cycle stats (start time, duration, duty %, dosatron gal)
+    last_pressure_cycle = None
     try:
-        _high_times = []
+        _ev_highs = []
+        _ev_lows  = []
         with open(EVENTS_FILE) as _f:
             for _row in csv.DictReader(_f):
-                if _row.get('event_type') == 'PRESSURE_HIGH':
+                _et = _row.get('event_type', '')
+                try:
+                    _ts = datetime.fromisoformat(_row['timestamp'])
+                except Exception:
+                    continue
+                if _et == 'PRESSURE_HIGH':
+                    _ev_highs.append(_ts)
+                elif _et == 'PRESSURE_LOW':
+                    _ev_lows.append({'ts': _ts, 'notes': _row.get('notes', '')})
+
+        if _ev_highs and _ev_lows:
+            _last_low = _ev_lows[-1]
+            # HIGH immediately before this LOW
+            _highs_before = [h for h in _ev_highs if h < _last_low['ts']]
+            if _highs_before:
+                _cycle_high_ts  = _highs_before[-1]
+                _duration_s     = (_last_low['ts'] - _cycle_high_ts).total_seconds()
+
+                # Duration string  (Xm Ys  or  Xs)
+                _dm, _ds = divmod(int(_duration_s), 60)
+                _dur_str = f"{_dm}m {_ds}s" if _dm else f"{_ds}s"
+
+                # Duty cycle %: HIGH_duration / (this_HIGH_start - prev_HIGH_start)
+                _pct = None
+                _highs_before_cycle = [h for h in _ev_highs if h < _cycle_high_ts]
+                if _highs_before_cycle:
+                    _cycle_period = (_cycle_high_ts - _highs_before_cycle[-1]).total_seconds()
+                    if _cycle_period > 0:
+                        _pct = _duration_s / _cycle_period * 100
+
+                # Dosatron gallons from notes.
+                # New format: "Dosatron: 1.96 gal (14 clicks)"  → parse float gallons
+                # Old format: "Dosatron: 14 gal"                → was raw count, convert
+                _dosatron_gal = None
+                _notes = _last_low['notes']
+                if 'Dosatron:' in _notes:
                     try:
-                        _high_times.append(datetime.fromisoformat(_row['timestamp']))
+                        _raw = _notes.split('Dosatron:')[1].split('gal')[0].strip()
+                        _val = float(_raw)
+                        # Old records had integer click count, not gallons.
+                        # Detect by checking for "(N clicks)" in notes.
+                        if '(' not in _notes.split('Dosatron:')[1]:
+                            _val = round(_val * 0.14, 2)  # convert old count→gallons
+                        _dosatron_gal = _val
                     except Exception:
                         pass
-        if len(_high_times) >= 4:
-            _intervals = [(_high_times[i+1] - _high_times[i]).total_seconds()
-                          for i in range(len(_high_times) - 1)]
-            _median = sorted(_intervals)[len(_intervals) // 2]
-            _typical = [iv for iv in _intervals if abs(iv - _median) < 120]
-            if _typical:
-                _avg_interval = sum(_typical) / len(_typical)
-                _predicted = _high_times[-1] + timedelta(seconds=_avg_interval)
-                if _predicted > datetime.now():
-                    next_pump_cycle = _predicted
+
+                last_pressure_cycle = {
+                    'start_str':    _cycle_high_ts.strftime('%-I:%M %p'),
+                    'duration_str': _dur_str,
+                    'pct':          _pct,
+                    'dosatron_gal': _dosatron_gal,
+                }
     except Exception:
         pass
 
@@ -2322,7 +2467,7 @@ def index():
                          ecobee_temp=ecobee_temp,
                          gph_metrics=gph_metrics,
                          hourly_gph=hourly_gph,
-                         next_pump_cycle=next_pump_cycle,
+                         last_pressure_cycle=last_pressure_cycle,
                          next_backflush=next_backflush,
                          time_to_full=time_to_full,
                          gallons_at_checkin=gallons_at_checkin,
@@ -2334,6 +2479,7 @@ def index():
                          FLOAT_STATE_CALLING=FLOAT_STATE_CALLING,
                          snapshot_url=DASHBOARD_URL.rstrip('/') + '/snapshot' if DASHBOARD_URL else None,
                          pressure_low_watch=PRESSURE_LOW_WATCH_FILE.exists(),
+                         bypass_flow_watch=BYPASS_FLOW_WATCH_FILE.exists(),
                          owner_mode=owner_mode,
                          show_ring=show_ring,
                          token_override_on=SECRET_OVERRIDE_ON_TOKEN,
@@ -2352,8 +2498,8 @@ def index():
                          token_purge_cancel_next=SECRET_PURGE_CANCEL_NEXT_TOKEN,
                          purge_pending=get_purge_pending(),
                          calendar_months=build_calendar_months(all_reservations),
-                         prior_calendar_months=_build_prior_calendar(all_reservations),
-                         past_reservation_list=_build_past_reservations(all_reservations, MANAGEMENT_FEE_PERCENT, guest_counts),
+                         prior_calendar_months=_build_prior_calendar(all_reservations, statements_by_month=statements_by_month),
+                         past_reservation_list=_build_past_reservations(all_reservations, MANAGEMENT_FEE_PERCENT, guest_counts, statements_by_month),
                          work_order_headers=work_order_headers,
                          work_order_rows=work_order_rows)
 
@@ -2471,6 +2617,30 @@ def watch_pressure_low():
     </body>
     </html>
     """
+
+@app.route('/watch/bypass_flow')
+def watch_bypass_flow():
+    """Toggle bypass-flow-cycle ntfy alerts on or off."""
+    enable = request.args.get('enable', '1')
+    back   = request.args.get('back', '/?owner')
+    if enable == '1':
+        BYPASS_FLOW_WATCH_FILE.parent.mkdir(parents=True, exist_ok=True)
+        BYPASS_FLOW_WATCH_FILE.touch()
+        action = "Bypass Flow alerts: ON"
+    else:
+        BYPASS_FLOW_WATCH_FILE.unlink(missing_ok=True)
+        action = "Bypass Flow alerts: OFF"
+    return f"""
+    <!DOCTYPE html><html><head><title>Watch</title>
+    <meta http-equiv="refresh" content="2;url={back}" />
+    <style>body{{font-family:monospace;background:#1a1a1a;color:#4CAF50;
+                 display:flex;align-items:center;justify-content:center;
+                 height:100vh;margin:0;}}
+           .message{{text-align:center;padding:40px;background:#2a2a2a;
+                     border:2px solid #4CAF50;border-radius:8px;}}</style>
+    </head><body><div class="message"><h1>✓ {action}</h1>
+    <p>Redirecting to dashboard...</p></div></body></html>"""
+
 
 @app.route('/control/<token>')
 def control(token):

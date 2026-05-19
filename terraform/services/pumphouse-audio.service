@@ -1,0 +1,22 @@
+[Unit]
+Description=Pumphouse Audio Listener (Dosatron + Bypass Flow Detection)
+After=network.target pumphouse-monitor.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/src/pumphouse
+Environment="PATH=/home/pi/src/pumphouse/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/pi/src/pumphouse/venv/bin/python -m monitor.dosatron
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pumphouse-audio
+
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

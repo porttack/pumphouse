@@ -132,7 +132,7 @@ MAX_PRESSURE_LOG_INTERVAL = 1800  # Log at least every 30 minutes when pressure 
 # Web Dashboard Configuration
 # List of event types to EXCLUDE from the Recent Events table on the web dashboard
 # Common types: TANK_LEVEL, PRESSURE_HIGH, PRESSURE_LOW, INIT, SHUTDOWN, FLOAT_CALLING, FLOAT_FULL
-DASHBOARD_HIDE_EVENT_TYPES = ['TANK_LEVEL', 'PRESSURE_LOW', 'PRESSURE_HIGH', 'SHUTDOWN', 'FULL_FLOW', 'NOTIFY_FULL_FLOW']  # Hide noisy tank level change events
+DASHBOARD_HIDE_EVENT_TYPES = ['TANK_LEVEL', 'PRESSURE_HIGH', 'SHUTDOWN', 'FULL_FLOW', 'NOTIFY_FULL_FLOW']  # Hide noisy tank level change events
 DASHBOARD_MAX_EVENTS = 200  # Maximum number of events to show in dashboard and emails (~3 days)
 DASHBOARD_SNAPSHOT_COUNT    = 400  # Raw rows to read (~4 days); older ones aggregated for display
 DASHBOARD_SNAPSHOT_RAW      = 5    # Number of recent 15-min rows shown individually
@@ -163,6 +163,7 @@ DAILY_CSV                  = DATA_DIR / 'daily.csv'
 RESERVATIONS_FILE          = DATA_DIR / 'reservations.csv'
 RESERVATIONS_SNAPSHOT_FILE = DATA_DIR / 'reservations_snapshot.csv'
 WORK_ORDERS_FILE           = DATA_DIR / 'work_orders.csv'
+STATEMENTS_FILE            = DATA_DIR / 'statements.csv'
 
 # Default file paths (used by main.py CLI args and legacy callers)
 DEFAULT_LOG_FILE       = 'pressure_log.txt'
@@ -174,7 +175,10 @@ CONFIG_FILE = Path.home() / '.config' / 'pumphouse' / 'monitor.conf'
 
 # Temporary watch flag: when this file exists, pressure-LOW ntfy alerts are enabled
 # regardless of NOTIFY_PRESSURE_LOW_ENABLED. Toggle via the dashboard.
-PRESSURE_LOW_WATCH_FILE = Path.home() / '.config' / 'pumphouse' / 'watch_pressure_low'
+PRESSURE_LOW_WATCH_FILE  = Path.home() / '.config' / 'pumphouse' / 'watch_pressure_low'
+
+# Same pattern for bypass-mode flow-cycle completion alerts.
+BYPASS_FLOW_WATCH_FILE   = Path.home() / '.config' / 'pumphouse' / 'watch_bypass_flow'
 
 # Manual override-off flag: when this file exists, the auto-on logic will NOT
 # re-enable override automatically. Set when user manually turns override OFF via

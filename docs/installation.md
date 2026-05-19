@@ -28,21 +28,25 @@ pip install -r requirements.txt
 ```bash
 # Install and enable all services (one-time)
 ./install-services.sh
-sudo systemctl enable --now pumphouse-monitor pumphouse-web pumphouse-timelapse
+sudo systemctl enable --now pumphouse-monitor pumphouse-web pumphouse-timelapse pumphouse-audio
 
 # Check status
 sudo systemctl status pumphouse-monitor
 sudo systemctl status pumphouse-web
 sudo systemctl status pumphouse-timelapse
+sudo systemctl status pumphouse-audio
 
 # View live logs
 sudo journalctl -u pumphouse-monitor -f
 sudo journalctl -u pumphouse-web -f
 sudo journalctl -u pumphouse-timelapse -f
+sudo journalctl -u pumphouse-audio -f
 
 # Restart after code changes
-sudo systemctl restart pumphouse-monitor pumphouse-web pumphouse-timelapse
+sudo systemctl restart pumphouse-monitor pumphouse-web pumphouse-timelapse pumphouse-audio
 ```
+
+**Note:** `pumphouse-audio` requires `~/.asoundrc` to define the `dosatron_in` ALSA dsnoop device before it will start. See [docs/audio.md](audio.md) for setup.
 
 **After making code changes:**
 1. No reinstall needed — services run from the project directory.
