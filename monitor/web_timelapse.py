@@ -1545,9 +1545,18 @@ def timelapse_view(date_or_file):
         for d in reversed(dates)
     )
 
-    # Light-mode photo grid — 24 most recent dates that have a snapshot on disk
+    # Light-mode photo grid — up to 36 most recent dates that have a snapshot on disk
     _grid_dates = [d for d in reversed(dates)
-                   if os.path.exists(os.path.join(SNAPSHOT_DIR, f'{d}.jpg'))][:24]
+                   if os.path.exists(os.path.join(SNAPSHOT_DIR, f'{d}.jpg'))][:36]
+
+    # Load scores once for the whole grid
+    _grid_scores = {}
+    try:
+        import json as _json
+        _grid_scores = _json.loads(open(os.path.join(TIMELAPSE_DIR, 'clip_scores.json')).read())
+    except Exception:
+        pass
+
     def _snap_stars(d):
         r = all_ratings.get(d, {})
         count = r.get('count', 0)
@@ -1558,8 +1567,30 @@ def timelapse_view(date_or_file):
                 f'{"&#9733;" * n_lit}'
                 f'<span class="snap-stars-count">({count})</span>'
                 f'</span>')
+    def _snap_title(d):
+        date_label = _date.fromisoformat(d).strftime('%a, %B %-d')
+        parts = [date_label]
+        try:
+            import json as _json
+            wx = _json.loads(open(os.path.join(WEATHER_CACHE_DIR, f'{d}.json')).read())
+            desc = wx.get('weather_desc')
+            if desc:
+                parts.append(desc)
+        except Exception:
+            pass
+        if d in _grid_scores:
+            parts.append(f"Score: {_grid_scores[d]['score']}")
+        return '\n'.join(parts)
+
+    def _snap_data(d):
+        score = _grid_scores.get(d, {}).get('score', 0)
+        r = all_ratings.get(d, {})
+        count = r.get('count', 0)
+        rating = round(r['sum'] / count, 2) if count else 0
+        return f'data-date="{d}" data-score="{score}" data-rating="{rating}"'
+
     snap_grid_items = ''.join(
-        f'<a href="/timelapse/{d}" title="{_date.fromisoformat(d).strftime("%b %-d, %Y")}">'
+        f'<a href="/timelapse/{d}" title="{_snap_title(d)}" {_snap_data(d)}>'
         f'<img src="/timelapse/{d}/snapshot" loading="lazy" alt="Sunset {d}"'
         f' onerror="this.parentElement.style.display=\'none\'">'
         f'{_snap_stars(d)}'
@@ -1738,7 +1769,12 @@ def timelapse_view(date_or_file):
     /* ── Snap grid (light mode only) ── */
     .snap-grid-section {{ display: none; max-width: 960px; margin: 20px 0; }}
     .snap-grid-label   {{ font-size: 0.75em; color: var(--muted); text-transform: uppercase;
-                          letter-spacing: 0.07em; margin: 0 0 10px; font-weight: 600; }}
+                          letter-spacing: 0.07em; margin: 0; font-weight: 600; }}
+    .snap-grid-header  {{ display: flex; align-items: center; gap: 10px; margin: 0 0 10px; flex-wrap: wrap; }}
+    .snap-sort-btn     {{ font-size: 0.72em; padding: 3px 9px; border-radius: 12px; border: 1px solid var(--muted);
+                          background: transparent; color: var(--muted); cursor: pointer; letter-spacing: 0.04em;
+                          text-transform: uppercase; transition: background 0.15s, color 0.15s; }}
+    .snap-sort-btn.active {{ background: var(--muted); color: #fff; }}
     .snap-grid {{ display: grid;
                   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }}
     .snap-grid a   {{ display: block; border-radius: 6px; overflow: hidden; position: relative; }}
@@ -1849,9 +1885,42 @@ def timelapse_view(date_or_file):
     <ul>{list_items}</ul>
   </details>
   <div class="snap-grid-section">
-    <p class="snap-grid-label">Recent Sunsets</p>
-    <div class="snap-grid">{snap_grid_items}</div>
+    <div class="snap-grid-header">
+      <span class="snap-grid-label">Sunsets</span>
+      <button class="snap-sort-btn active" data-sort="score" onclick="snapSort(this)">Score</button>
+      <button class="snap-sort-btn" data-sort="rating" onclick="snapSort(this)">Rating</button>
+      <button class="snap-sort-btn" data-sort="date" onclick="snapSort(this)">Date</button>
+    </div>
+    <div class="snap-grid" id="snap-grid">{snap_grid_items}</div>
   </div>
+  <script>
+    function snapSort(btn) {{
+      document.querySelectorAll('.snap-sort-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      var key = btn.dataset.sort;
+      try {{ localStorage.setItem('tl_snap_sort', key); }} catch(e) {{}}
+      var grid = document.getElementById('snap-grid');
+      var items = Array.from(grid.children);
+      items.sort(function(a, b) {{
+        if (key === 'date') return b.dataset.date.localeCompare(a.dataset.date);
+        if (key === 'score') return parseFloat(b.dataset.score || 0) - parseFloat(a.dataset.score || 0);
+        if (key === 'rating') {{
+          var ra = parseFloat(a.dataset.rating || 0), rb = parseFloat(b.dataset.rating || 0);
+          if (rb !== ra) return rb - ra;
+          return parseFloat(b.dataset.score || 0) - parseFloat(a.dataset.score || 0);
+        }}
+        return 0;
+      }});
+      items.forEach(function(el) {{ grid.appendChild(el); }});
+    }}
+    // Restore saved sort, defaulting to score
+    (function() {{
+      var saved = 'score';
+      try {{ saved = localStorage.getItem('tl_snap_sort') || 'score'; }} catch(e) {{}}
+      var btn = document.querySelector('.snap-sort-btn[data-sort="' + saved + '"]');
+      if (btn) snapSort(btn);
+    }})();
+  </script>
   <script>
     const vid = document.getElementById('vid');
 

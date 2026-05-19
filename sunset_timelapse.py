@@ -397,6 +397,37 @@ def run_todays_timelapse(start_dt=None, end_dt=None, frames_root=None):
     # When done, promote CLIP's top pick to replace the fixed-offset snapshot.
     if not custom:
         _start_auto_clip(date_str, output, snapshot_path)
+        _start_auto_score(date_str)
+
+
+# ---------------------------------------------------------------------------
+# Post-assembly sunset scoring
+# ---------------------------------------------------------------------------
+def _start_auto_score(date_str: str) -> None:
+    """
+    Run score_sunset.py --no-clip --write for today's date in a daemon thread,
+    after the timelapse is fully assembled and frames have been cleaned up.
+    Uses --no-clip so it's fast (~30 s) and low-memory; CLIP can be run manually.
+    """
+    def _worker():
+        import subprocess as _sp
+        try:
+            script = Path(__file__).parent / 'scripts' / 'score_sunset.py'
+            venv_python = Path(__file__).parent / 'venv' / 'bin' / 'python3'
+            python = str(venv_python) if venv_python.exists() else 'python3'
+            result = _sp.run(
+                [python, str(script), '--no-clip', '--write', date_str],
+                capture_output=True, text=True, timeout=120,
+            )
+            if result.returncode == 0:
+                log.info(f"Auto score {date_str}: {result.stdout.strip().splitlines()[-1] if result.stdout.strip() else 'ok'}")
+            else:
+                log.warning(f"Auto score {date_str} failed: {result.stderr.strip()[-200:]}")
+        except Exception as exc:
+            log.warning(f"Auto score {date_str} error: {exc}")
+
+    t = threading.Thread(target=_worker, daemon=True, name=f'auto-score-{date_str}')
+    t.start()
 
 
 # ---------------------------------------------------------------------------
