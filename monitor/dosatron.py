@@ -87,7 +87,7 @@ FLOW_CYCLE_LABELS = os.path.join(DATA_DIR, "flow_cycle_labels.json")
 CONFIG_FILE       = os.path.join(DATA_DIR, "config.json")
 SIGNAL_FILE       = os.path.join(DATA_DIR, "pressure_signal.json")
 PID_FILE          = os.path.join(DATA_DIR, "listener.pid")
-RELAY_STATE_FILE  = os.path.join(os.path.expanduser("~/src/pumphouse"), "relay_state.json")
+BYPASS_VALVE_PIN  = 26   # BCM pin — active-low relay (0 = ON); mirrors relay.py
 
 # Optional imports from the wider monitor package — used for event logging and
 # notifications.  Wrapped in a try/except so the listener still runs if the
@@ -331,9 +331,13 @@ def _write_bypass_flow_prediction(log) -> None:
 
 
 def _is_bypass_on() -> bool:
+    """Read bypass state directly from GPIO — active-low relay, pin LOW (0) = ON."""
     try:
-        with open(RELAY_STATE_FILE) as f:
-            return json.load(f).get("bypass", "OFF").upper() == "ON"
+        result = subprocess.run(
+            ["gpio", "-g", "read", str(BYPASS_VALVE_PIN)],
+            capture_output=True, text=True, timeout=1,
+        )
+        return result.returncode == 0 and result.stdout.strip() == "0"
     except Exception:
         return False
 
