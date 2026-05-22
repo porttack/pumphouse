@@ -20,7 +20,7 @@ from monitor.config import (
     NOTIFY_OVERRIDE_SHUTOFF, NOTIFY_WELL_RECOVERY_THRESHOLD,
     NOTIFY_WELL_RECOVERY_STAGNATION_HOURS,
     NOTIFY_HIGH_PRESSURE_ENABLED, NOTIFY_HIGH_PRESSURE_USE_EMAIL,
-    NOTIFY_PRESSURE_LOW_ENABLED, PRESSURE_LOW_WATCH_FILE,
+    NOTIFY_PRESSURE_LOW_ENABLED, NOTIFY_PRESSURE_LOW_REQUIRES_FLOAT_CALLING, PRESSURE_LOW_WATCH_FILE,
     OVERRIDE_MANUAL_OFF_FILE,
     NOTIFY_TANK_OUTAGE_ENABLED, NOTIFY_TANK_OUTAGE_THRESHOLD_MINUTES,
     DASHBOARD_URL,
@@ -241,6 +241,7 @@ class SimplifiedMonitor:
         self.last_pressure_state = None
         self.pressure_high_start = None
         self.last_pressure_high_end_time = None  # when pressure last dropped LOW (for gap detection)
+        self._float_calling_at_pressure_high = False
         self._init_last_pressure_high_end_time()
         
         # Timing
@@ -625,6 +626,7 @@ class SimplifiedMonitor:
                 if current_pressure != self.last_pressure_state:
                     if current_pressure:  # Went HIGH
                         self.pressure_high_start = current_time
+                        self._float_calling_at_pressure_high = (self.state.float_state == FLOAT_STATE_CALLING)
                         self.log_state_event('PRESSURE_HIGH')
                         _write_pressure_signal("HIGH", current_time)
                         if self.debug:
@@ -737,7 +739,9 @@ class SimplifiedMonitor:
 
                             # Defer PRESSURE_LOW notification 30 s so the dosatron cycle
                             # recording captures any trailing clicks before we report the count.
-                            if (NOTIFY_PRESSURE_LOW_ENABLED or PRESSURE_LOW_WATCH_FILE.exists()) and self.notification_manager.can_notify('pressure_low'):
+                            _float_ok = (not NOTIFY_PRESSURE_LOW_REQUIRES_FLOAT_CALLING
+                                         or self._float_calling_at_pressure_high)
+                            if _float_ok and (NOTIFY_PRESSURE_LOW_ENABLED or PRESSURE_LOW_WATCH_FILE.exists()) and self.notification_manager.can_notify('pressure_low'):
                                 self.pending_pressure_low_notif = {
                                     "send_at":    current_time + 30,
                                     "high_start": self.pressure_high_start,

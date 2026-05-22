@@ -115,6 +115,7 @@ NOTIFY_FULL_FLOW_LOOKBACK_HOURS = 24  # How far back to check for full-flow peri
 NOTIFY_HIGH_PRESSURE_ENABLED = False  # Enable immediate high pressure alerts
 NOTIFY_HIGH_PRESSURE_USE_EMAIL = True  # Send email alerts (default: False, use ntfy only)
 NOTIFY_PRESSURE_LOW_ENABLED = False  # Send alert when pressure goes LOW with duration info
+NOTIFY_PRESSURE_LOW_REQUIRES_FLOAT_CALLING = True  # Only alert if float was calling when pressure went HIGH
 
 # Vehicle Detection (unoccupied property only)
 NOTIFY_VEHICLE_DETECTED = True   # Alert when vehicle count changes while property is unoccupied
