@@ -1170,6 +1170,14 @@ class SimplifiedMonitor:
                         except Exception:
                             pass
 
+                    # Archive every daytime snapshot for manual review at /ring-review.
+                    if _ring_jpeg is not None:
+                        try:
+                            from monitor.ring_camera import save_to_archive
+                            save_to_archive(_ring_jpeg)
+                        except Exception:
+                            pass
+
                     # Vehicle arrival/departure detection (unoccupied only)
                     if (NOTIFY_VEHICLE_DETECTED and
                             occupied_status == 'NO' and

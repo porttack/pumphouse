@@ -36,6 +36,10 @@ _VEHICLE_CLASSES = {2, 3, 5, 7}  # car, motorcycle, bus, truck
 # Background subtraction: reference images stored per hour-of-day
 # Collected automatically when property is unoccupied and YOLO sees 0 vehicles.
 _RING_REF_DIR      = Path.home() / '.config' / 'pumphouse' / 'ring_reference'
+
+# Archive: every daytime snapshot saved for manual review / reference approval
+_RING_ARCHIVE_DIR  = Path.home() / '.config' / 'pumphouse' / 'ring_archive'
+_RING_ARCHIVE_DAYS = 30  # days to keep
 _BG_ZONE           = (0.55, 0.15, 1.0, 0.60)  # (x1, y1, x2, y2) as fractions of image
 _BG_DIFF_THRESHOLD = 35    # per-pixel abs diff (0-255) to count as "changed"
 _BG_COVERAGE_FRAC  = 0.08  # fraction of zone pixels that must differ to count as a vehicle
@@ -374,6 +378,48 @@ def maybe_save_reference(jpeg_bytes: bytes) -> bool:
     except Exception as e:
         logger.warning('Failed to save reference image (%s: %s)', type(e).__name__, e)
         return False
+
+
+def save_to_archive(jpeg_bytes: bytes) -> Optional[Path]:
+    """
+    Save jpeg_bytes to the dated archive folder for manual review.
+    Called on every daytime snapshot regardless of occupancy or vehicle count.
+    Files are named HHMM.jpg inside YYYY-MM-DD/ subdirectories.
+    Returns the saved path, or None on failure.
+    """
+    try:
+        now = datetime.now()
+        day_dir = _RING_ARCHIVE_DIR / now.strftime('%Y-%m-%d')
+        day_dir.mkdir(parents=True, exist_ok=True)
+        path = day_dir / now.strftime('%H%M.jpg')
+        path.write_bytes(jpeg_bytes)
+        logger.info('Archived Ring snapshot: %s (%d bytes)', path.name, len(jpeg_bytes))
+        _prune_archive()
+        return path
+    except Exception as e:
+        logger.warning('Failed to archive Ring snapshot (%s: %s)', type(e).__name__, e)
+        return None
+
+
+def _prune_archive() -> None:
+    """Delete archive day-folders older than _RING_ARCHIVE_DAYS."""
+    try:
+        import shutil
+        from datetime import timedelta
+        cutoff = datetime.now().date() - timedelta(days=_RING_ARCHIVE_DAYS)
+        if not _RING_ARCHIVE_DIR.exists():
+            return
+        for day_dir in _RING_ARCHIVE_DIR.iterdir():
+            if not day_dir.is_dir():
+                continue
+            try:
+                if datetime.strptime(day_dir.name, '%Y-%m-%d').date() < cutoff:
+                    shutil.rmtree(day_dir)
+                    logger.info('Pruned old archive: %s', day_dir.name)
+            except ValueError:
+                pass
+    except Exception as e:
+        logger.warning('Archive prune error (%s: %s)', type(e).__name__, e)
 
 
 def _find_nearest_reference(hour: int) -> Optional[Path]:
