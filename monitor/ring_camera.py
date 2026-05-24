@@ -51,12 +51,13 @@ _MODEL_URLS = {
 }
 
 
-def get_snapshot(token_file: Path, camera_name: str = '') -> Optional[bytes]:
+def get_snapshot(token_file: Path, camera_name: str = '', force_refresh: bool = False) -> Optional[bytes]:
     """
     Return a Ring camera JPEG as bytes, using a file-based shared cache.
     All processes (gunicorn workers, monitor daemon) share the same cache file
     so Ring is only called once per RING_CACHE_MINUTES regardless of load.
     Returns None if the token file is missing or Ring is unreachable.
+    Pass force_refresh=True to bypass the cache (e.g. for email notifications).
     """
     from monitor.config import RING_CACHE_FILE, RING_CACHE_MINUTES
 
@@ -64,7 +65,7 @@ def get_snapshot(token_file: Path, camera_name: str = '') -> Optional[bytes]:
     lock_file = RING_CACHE_FILE.with_suffix('.lock')
 
     # Fast path: cache file is fresh — no lock needed
-    if RING_CACHE_FILE.exists():
+    if not force_refresh and RING_CACHE_FILE.exists():
         age = time.time() - RING_CACHE_FILE.stat().st_mtime
         if age < cache_ttl:
             return RING_CACHE_FILE.read_bytes()
@@ -476,7 +477,8 @@ def _count_vehicles_background(img) -> int:
 
 def _count_vehicles_yolov8(img) -> Optional[int]:
     """YOLOv8n inference via onnxruntime. Input: decoded BGR numpy image."""
-    _CONF = 0.15
+    from monitor.config import YOLO_CONF_THRESHOLD
+    _CONF = YOLO_CONF_THRESHOLD
     _NMS  = 0.60
     try:
         import onnxruntime as ort
@@ -523,7 +525,8 @@ def _count_vehicles_yolov8(img) -> Optional[int]:
 
 def _count_vehicles_yolov4(img) -> Optional[int]:
     """YOLOv4-tiny inference via cv2.dnn. Input: decoded BGR numpy image. Fallback only."""
-    _CONF = 0.15
+    from monitor.config import YOLO_CONF_THRESHOLD
+    _CONF = YOLO_CONF_THRESHOLD
     _NMS  = 0.60
     try:
         import cv2
