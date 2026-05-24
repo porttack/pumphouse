@@ -12,7 +12,7 @@ def initialize_events_csv(filepath):
             writer = csv.writer(f)
             writer.writerow([
                 'timestamp', 'event_type', 'pressure_state', 'float_state',
-                'tank_gallons', 'tank_depth', 'tank_percentage', 
+                'tank_gallons', 'tank_depth', 'tank_percentage',
                 'estimated_gallons', 'relay_bypass', 'relay_supply_override', 'notes'
             ])
         return True
@@ -21,6 +21,7 @@ def initialize_events_csv(filepath):
 
 SNAPSHOT_COLUMNS = [
     'timestamp', 'duration_seconds',
+    'dosatron_gallons', 'bypass_gallons', 'gallons_used',
     'tank_gallons', 'tank_gallons_delta', 'tank_data_age_seconds',
     'float_state', 'float_ever_calling', 'float_always_full',
     'pressure_high_seconds', 'pressure_high_percent',
@@ -28,8 +29,7 @@ SNAPSHOT_COLUMNS = [
     'relay_bypass', 'relay_supply_override', 'occupied',
     'outdoor_temp_f', 'indoor_temp_f', 'outdoor_humidity',
     'baro_abs_inhg', 'wind_gust_mph',
-    'tank_rolling_gph', 'vehicle_count', 'dosatron_gallons',
-    'bypass_gallons', 'gallons_used',
+    'tank_rolling_gph', 'vehicle_count',
 ]
 
 
@@ -45,22 +45,26 @@ def initialize_snapshots_csv(filepath):
 
 
 def migrate_snapshots_csv(filepath):
-    """Add any missing columns to an existing snapshots CSV (one-time on startup)."""
+    """Reorder and/or add missing columns to match SNAPSHOT_COLUMNS (one-time on startup)."""
     try:
         with open(filepath, 'r', newline='') as f:
             reader = csv.reader(f)
             header = next(reader)
-            missing = [c for c in SNAPSHOT_COLUMNS if c not in header]
-            if not missing:
-                return
+            if header == SNAPSHOT_COLUMNS:
+                return  # already correct
             rows = list(reader)
-        new_header = header + missing
+
+        # Build index map from old header; unknown columns get ''
+        old_idx = {col: i for i, col in enumerate(header)}
         tmp = filepath + '.tmp'
         with open(tmp, 'w', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow(new_header)
+            writer.writerow(SNAPSHOT_COLUMNS)
             for row in rows:
-                writer.writerow(row + [''] * len(missing))
+                writer.writerow([
+                    row[old_idx[col]] if col in old_idx and old_idx[col] < len(row) else ''
+                    for col in SNAPSHOT_COLUMNS
+                ])
         os.replace(tmp, filepath)
     except Exception as e:
         print(f'Warning: could not migrate {filepath}: {e}')
@@ -69,14 +73,14 @@ def log_event(filepath, event_type, pressure_state, float_state, tank_gallons,
               tank_depth, tank_percentage, estimated_gallons, relay_status, notes=''):
     """Log an event to events.csv"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
-    
+
     if pressure_state is None:
         pressure_str = 'UNKNOWN'
     elif pressure_state:
         pressure_str = 'HIGH'
     else:
         pressure_str = 'LOW'
-    
+
     with open(filepath, 'a', newline='') as f:
         writer = csv.writer(f)
         writer.writerow([
@@ -111,6 +115,9 @@ def log_snapshot(filepath, duration, tank_gallons, tank_gallons_delta, tank_data
         writer = csv.writer(f)
         writer.writerow([
             timestamp, f'{duration:.0f}',
+            str(dosatron_gallons) if dosatron_gallons is not None else '',
+            str(bypass_gallons) if bypass_gallons is not None else '',
+            str(gallons_used) if gallons_used is not None else '',
             f'{tank_gallons:.0f}' if tank_gallons else '',
             delta_str,
             f'{tank_data_age:.0f}' if tank_data_age else '',
@@ -131,7 +138,4 @@ def log_snapshot(filepath, duration, tank_gallons, tank_gallons_delta, tank_data
             f'{wind_gust:.1f}' if wind_gust is not None else '',
             f'{tank_rolling_gph:.1f}' if tank_rolling_gph is not None else '',
             str(vehicle_count) if vehicle_count is not None else '',
-            str(dosatron_gallons) if dosatron_gallons is not None else '',
-            str(bypass_gallons) if bypass_gallons is not None else '',
-            str(gallons_used) if gallons_used is not None else '',
         ])
