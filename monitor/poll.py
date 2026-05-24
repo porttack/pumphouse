@@ -298,6 +298,9 @@ class SimplifiedMonitor:
         self._last_tank_level_time: float = time.time()
         self._bypass_on_since: float | None = None
         self._bypass_accumulated_secs: float = 0.0
+        # Only count dosatron clicks during pressure-HIGH windows (avoids noise when pump is off)
+        self._pressure_windows_since_tank_level: list = []
+        self._pressure_high_window_start: float | None = None  # separate from pressure_high_start
 
         # Weather tracking
         self.last_weather_check = 0
@@ -653,6 +656,7 @@ class SimplifiedMonitor:
                 if current_pressure != self.last_pressure_state:
                     if current_pressure:  # Went HIGH
                         self.pressure_high_start = current_time
+                        self._pressure_high_window_start = current_time
                         self._float_calling_at_pressure_high = (self.state.float_state == FLOAT_STATE_CALLING)
                         self.log_state_event('PRESSURE_HIGH')
                         _write_pressure_signal("HIGH", current_time)
@@ -752,6 +756,11 @@ class SimplifiedMonitor:
                     else:  # Went LOW
                         _write_pressure_signal("LOW", current_time)
                         if self.pressure_high_start:
+                            if self._pressure_high_window_start is not None:
+                                self._pressure_windows_since_tank_level.append(
+                                    (self._pressure_high_window_start, current_time)
+                                )
+                                self._pressure_high_window_start = None
                             duration = current_time - self.pressure_high_start
                             estimated = estimate_gallons(duration)
                             dosatron_clicks = _count_dosatron_clicks(self.pressure_high_start, current_time)
@@ -887,7 +896,13 @@ class SimplifiedMonitor:
                         if prev_gallons and self.state.tank_gallons:
                             if abs(self.state.tank_gallons - prev_gallons) > 0.1:
                                 delta = self.state.tank_gallons - prev_gallons
-                                _dosa_clicks = _count_dosatron_clicks(self._last_tank_level_time, current_time)
+                                # Count clicks only within pressure-HIGH windows (filters noise when pump is off)
+                                _windows = list(self._pressure_windows_since_tank_level)
+                                if self._pressure_high_window_start is not None:
+                                    _windows.append((self._pressure_high_window_start, current_time))
+                                _dosa_clicks = sum(
+                                    _count_dosatron_clicks(ws, we) for ws, we in _windows
+                                )
                                 _dosa_gal = _dosa_clicks * _DOSATRON_GPK
                                 _bypass_secs = self._bypass_accumulated_secs
                                 if self._bypass_on_since is not None:
@@ -902,6 +917,9 @@ class SimplifiedMonitor:
                                 self._bypass_accumulated_secs = 0.0
                                 if self._bypass_on_since is not None:
                                     self._bypass_on_since = current_time
+                                self._pressure_windows_since_tank_level.clear()
+                                if self._pressure_high_window_start is not None:
+                                    self._pressure_high_window_start = current_time  # restart from now
 
                                 # Notify on significant tank increase
                                 if (NOTIFY_TANK_LEVEL_MIN_INCREASE is not None
