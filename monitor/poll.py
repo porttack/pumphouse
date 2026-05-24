@@ -907,35 +907,41 @@ class SimplifiedMonitor:
                                 _bypass_secs = self._bypass_accumulated_secs
                                 if self._bypass_on_since is not None:
                                     _bypass_secs += current_time - self._bypass_on_since
-                                _tank_notes = f'Changed by {delta:+.1f} gal'
-                                if _dosa_gal > 0:
-                                    _tank_notes += f', Dosatron: {_dosa_gal:.2f} gal ({_dosa_clicks} clicks)'
-                                if _bypass_secs >= 1:
-                                    _tank_notes += f', Bypass: {_bypass_secs:.0f}s'
-                                self.log_state_event('TANK_LEVEL', _tank_notes)
-                                self._last_tank_level_time = current_time
-                                self._bypass_accumulated_secs = 0.0
-                                if self._bypass_on_since is not None:
-                                    self._bypass_on_since = current_time
-                                self._pressure_windows_since_tank_level.clear()
-                                if self._pressure_high_window_start is not None:
-                                    self._pressure_high_window_start = current_time  # restart from now
 
-                                # Notify on significant tank increase
-                                if (NOTIFY_TANK_LEVEL_MIN_INCREASE is not None
-                                        and delta >= NOTIFY_TANK_LEVEL_MIN_INCREASE
-                                        and self.notification_manager.can_notify('tank_level_increase')):
-                                    current_gal = self.state.tank_gallons
-                                    _msg = f"Tank gained {delta:.0f} gal"
+                                # Skip sub-8-gal noise when no flow was detected; let state
+                                # accumulate so the next real event gets the full picture.
+                                if _dosa_clicks == 0 and _bypass_secs < 1 and abs(delta) < 8:
+                                    pass
+                                else:
+                                    _tank_notes = f'Changed by {delta:+.1f} gal'
                                     if _dosa_gal > 0:
-                                        _msg += f" ({_dosa_gal:.2f} gal from dosatron, {_dosa_clicks} clicks)"
+                                        _tank_notes += f', Dosatron: {_dosa_gal:.2f} gal ({_dosa_clicks} clicks)'
                                     if _bypass_secs >= 1:
-                                        _msg += f", bypass open {_bypass_secs:.0f}s"
-                                    self.send_alert(
-                                        'NOTIFY_TANK_LEVEL_INCREASE',
-                                        f"{current_gal:.0f} gal ↑{delta:.0f} gal",
-                                        _msg
-                                    )
+                                        _tank_notes += f', Bypass: {_bypass_secs:.0f}s'
+                                    self.log_state_event('TANK_LEVEL', _tank_notes)
+                                    self._last_tank_level_time = current_time
+                                    self._bypass_accumulated_secs = 0.0
+                                    if self._bypass_on_since is not None:
+                                        self._bypass_on_since = current_time
+                                    self._pressure_windows_since_tank_level.clear()
+                                    if self._pressure_high_window_start is not None:
+                                        self._pressure_high_window_start = current_time  # restart from now
+
+                                    # Notify on significant tank increase
+                                    if (NOTIFY_TANK_LEVEL_MIN_INCREASE is not None
+                                            and delta >= NOTIFY_TANK_LEVEL_MIN_INCREASE
+                                            and self.notification_manager.can_notify('tank_level_increase')):
+                                        current_gal = self.state.tank_gallons
+                                        _msg = f"Tank gained {delta:.0f} gal"
+                                        if _dosa_gal > 0:
+                                            _msg += f" ({_dosa_gal:.2f} gal from dosatron, {_dosa_clicks} clicks)"
+                                        if _bypass_secs >= 1:
+                                            _msg += f", bypass open {_bypass_secs:.0f}s"
+                                        self.send_alert(
+                                            'NOTIFY_TANK_LEVEL_INCREASE',
+                                            f"{current_gal:.0f} gal ↑{delta:.0f} gal",
+                                            _msg
+                                        )
 
                                 if self.debug:
                                     print(f"{datetime.now().strftime('%H:%M:%S')} - "
