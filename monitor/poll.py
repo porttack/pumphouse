@@ -272,6 +272,11 @@ class SimplifiedMonitor:
         # the cycle recording captures any last clicks)
         self.pending_pressure_low_notif: dict | None = None
 
+        # TANK_LEVEL enrichment: track dosatron gallons and bypass seconds between events
+        self._last_tank_level_time: float = time.time()
+        self._bypass_on_since: float | None = None
+        self._bypass_accumulated_secs: float = 0.0
+
         # Weather tracking
         self.last_weather_check = 0
         self.weather_interval = AMBIENT_WEATHER_POLL_INTERVAL
@@ -860,8 +865,21 @@ class SimplifiedMonitor:
                         if prev_gallons and self.state.tank_gallons:
                             if abs(self.state.tank_gallons - prev_gallons) > 0.1:
                                 delta = self.state.tank_gallons - prev_gallons
-                                self.log_state_event('TANK_LEVEL',
-                                                    f'Changed by {delta:+.1f} gal')
+                                _dosa_clicks = _count_dosatron_clicks(self._last_tank_level_time, current_time)
+                                _dosa_gal = _dosa_clicks * _DOSATRON_GPK
+                                _bypass_secs = self._bypass_accumulated_secs
+                                if self._bypass_on_since is not None:
+                                    _bypass_secs += current_time - self._bypass_on_since
+                                _tank_notes = f'Changed by {delta:+.1f} gal'
+                                if _dosa_gal > 0:
+                                    _tank_notes += f', Dosatron: {_dosa_gal:.2f} gal ({_dosa_clicks} clicks)'
+                                if _bypass_secs >= 1:
+                                    _tank_notes += f', Bypass: {_bypass_secs:.0f}s'
+                                self.log_state_event('TANK_LEVEL', _tank_notes)
+                                self._last_tank_level_time = current_time
+                                self._bypass_accumulated_secs = 0.0
+                                if self._bypass_on_since is not None:
+                                    self._bypass_on_since = current_time
                                 if self.debug:
                                     print(f"{datetime.now().strftime('%H:%M:%S')} - "
                                          f"Tank: {self.state.tank_gallons:.0f} gal "
@@ -986,6 +1004,15 @@ class SimplifiedMonitor:
                                         self.notification_manager.record_tank_full_alert(self.state.tank_gallons)
 
                     self.last_tank_check = current_time
+
+                    # Update bypass accumulator for TANK_LEVEL notes
+                    _bypass_rs = self.get_relay_status()
+                    if _bypass_rs.get('bypass') == 'ON':
+                        if self._bypass_on_since is None:
+                            self._bypass_on_since = current_time
+                    elif self._bypass_on_since is not None:
+                        self._bypass_accumulated_secs += current_time - self._bypass_on_since
+                        self._bypass_on_since = None
 
                 # WEATHER POLLING
                 if ENABLE_AMBIENT_WEATHER and current_time - self.last_weather_check >= self.weather_interval:
