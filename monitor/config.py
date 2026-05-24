@@ -133,7 +133,8 @@ MAX_PRESSURE_LOG_INTERVAL = 1800  # Log at least every 30 minutes when pressure 
 # Web Dashboard Configuration
 # List of event types to EXCLUDE from the Recent Events table on the web dashboard
 # Common types: TANK_LEVEL, PRESSURE_HIGH, PRESSURE_LOW, INIT, SHUTDOWN, FLOAT_CALLING, FLOAT_FULL
-DASHBOARD_HIDE_EVENT_TYPES = ['TANK_LEVEL', 'PRESSURE_HIGH', 'SHUTDOWN', 'FULL_FLOW', 'NOTIFY_FULL_FLOW']  # Hide noisy tank level change events
+DASHBOARD_HIDE_EVENT_TYPES = ['PRESSURE_HIGH', 'SHUTDOWN', 'FULL_FLOW', 'NOTIFY_FULL_FLOW']
+NOTIFY_TANK_LEVEL_MIN_INCREASE = 15  # Notify when a single TANK_LEVEL event shows this many gallons gained (None to disable)
 DASHBOARD_MAX_EVENTS = 200  # Maximum number of events to show in dashboard and emails (~3 days)
 DASHBOARD_SNAPSHOT_COUNT    = 400  # Raw rows to read (~4 days); older ones aggregated for display
 DASHBOARD_SNAPSHOT_RAW      = 5    # Number of recent 15-min rows shown individually
@@ -251,6 +252,7 @@ RING_CAMERA_NAME = ''  # Name of Ring device to use (e.g. "Front Door"); first d
 RING_TOKEN_FILE = Path.home() / '.config' / 'pumphouse' / 'ring_token.json'
 RING_CACHE_FILE = Path.home() / '.config' / 'pumphouse' / 'ring_snapshot_cache.jpg'
 RING_CACHE_MINUTES = 10  # How long to cache the Ring snapshot (shared across all processes)
+YOLO_CONF_THRESHOLD = 0.20  # Minimum YOLO confidence to count a detection (was 0.15)
 
 # Load secrets from secrets file
 SECRETS_FILE = Path.home() / '.config' / 'pumphouse' / 'secrets.conf'

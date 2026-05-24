@@ -23,6 +23,7 @@ from monitor.config import (
     NOTIFY_PRESSURE_LOW_ENABLED, NOTIFY_PRESSURE_LOW_REQUIRES_FLOAT_CALLING, PRESSURE_LOW_WATCH_FILE,
     OVERRIDE_MANUAL_OFF_FILE,
     NOTIFY_TANK_OUTAGE_ENABLED, NOTIFY_TANK_OUTAGE_THRESHOLD_MINUTES,
+    NOTIFY_TANK_LEVEL_MIN_INCREASE,
     DASHBOARD_URL,
     ENABLE_DAILY_STATUS_EMAIL, DAILY_STATUS_EMAIL_TIME, DAILY_STATUS_EMAIL_CHART_HOURS,
     ENABLE_CHECKOUT_REMINDER, CHECKOUT_REMINDER_TIME,
@@ -880,6 +881,23 @@ class SimplifiedMonitor:
                                 self._bypass_accumulated_secs = 0.0
                                 if self._bypass_on_since is not None:
                                     self._bypass_on_since = current_time
+
+                                # Notify on significant tank increase
+                                if (NOTIFY_TANK_LEVEL_MIN_INCREASE is not None
+                                        and delta >= NOTIFY_TANK_LEVEL_MIN_INCREASE
+                                        and self.notification_manager.can_notify('tank_level_increase')):
+                                    current_gal = self.state.tank_gallons
+                                    _msg = f"Tank gained {delta:.0f} gal"
+                                    if _dosa_gal > 0:
+                                        _msg += f" ({_dosa_gal:.2f} gal from dosatron, {_dosa_clicks} clicks)"
+                                    if _bypass_secs >= 1:
+                                        _msg += f", bypass open {_bypass_secs:.0f}s"
+                                    self.send_alert(
+                                        'NOTIFY_TANK_LEVEL_INCREASE',
+                                        f"{current_gal:.0f} gal ↑{delta:.0f} gal",
+                                        _msg
+                                    )
+
                                 if self.debug:
                                     print(f"{datetime.now().strftime('%H:%M:%S')} - "
                                          f"Tank: {self.state.tank_gallons:.0f} gal "
