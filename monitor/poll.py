@@ -153,10 +153,11 @@ def get_next_daily_status_time(current_time, target_time_str):
 
 class SnapshotTracker:
     """Track data for snapshot intervals"""
-    
+
     def __init__(self):
+        self._bypass_on_since = None  # persists across resets so ongoing segments aren't lost
         self.reset()
-        
+
     def reset(self):
         """Reset for new snapshot interval"""
         self.start_time = time.time()
@@ -166,6 +167,9 @@ class SnapshotTracker:
         self.last_pressure_state = None
         self.estimated_gallons = 0.0
         self.purge_count = 0
+        self.bypass_seconds = 0.0
+        if self._bypass_on_since is not None:
+            self._bypass_on_since = time.time()  # restart segment from new window start
         
     def update_float(self, float_state):
         """Track float state"""
@@ -181,6 +185,16 @@ class SnapshotTracker:
         self.last_pressure_state = is_high
         self.last_pressure_check = current_time
     
+    def update_bypass(self, bypass_is_on: bool):
+        """Track bypass-valve-open seconds within this snapshot window."""
+        current_time = time.time()
+        if bypass_is_on:
+            if self._bypass_on_since is None:
+                self._bypass_on_since = current_time
+        elif self._bypass_on_since is not None:
+            self.bypass_seconds += current_time - self._bypass_on_since
+            self._bypass_on_since = None
+
     def add_estimated_gallons(self, gallons):
         """Add estimated gallons from pressure event"""
         if gallons and gallons > 0:
@@ -206,6 +220,12 @@ class SnapshotTracker:
         if self.pressure_high_time > 0 and estimated_gallons == 0:
             estimated_gallons = estimate_gallons(self.pressure_high_time)
 
+        # Flush any in-progress bypass segment
+        bypass_secs = self.bypass_seconds
+        if self._bypass_on_since is not None:
+            bypass_secs += time.time() - self._bypass_on_since
+        bypass_gallons = bypass_secs / SECONDS_PER_GALLON if bypass_secs > 0 else 0.0
+
         return {
             'duration': duration,
             'tank_gallons': tank_gallons,
@@ -215,9 +235,10 @@ class SnapshotTracker:
             'float_always_full': float_always_full,
             'pressure_high_seconds': self.pressure_high_time,
             'pressure_high_percent': pressure_high_percent,
-            'estimated_gallons': estimated_gallons,
+            'estimated_gallons': estimated_gallons,  # TODO: remove once SECONDS_PER_GALLON is properly calibrated and bypass_gallons is validated
             'purge_count': self.purge_count,
-            'relay_status': relay_status
+            'relay_status': relay_status,
+            'bypass_gallons': round(bypass_gallons, 2),
         }
 
 class SimplifiedMonitor:
@@ -1023,14 +1044,16 @@ class SimplifiedMonitor:
 
                     self.last_tank_check = current_time
 
-                    # Update bypass accumulator for TANK_LEVEL notes
+                    # Update bypass accumulators (TANK_LEVEL notes + snapshot)
                     _bypass_rs = self.get_relay_status()
-                    if _bypass_rs.get('bypass') == 'ON':
+                    _bypass_is_on = _bypass_rs.get('bypass') == 'ON'
+                    if _bypass_is_on:
                         if self._bypass_on_since is None:
                             self._bypass_on_since = current_time
                     elif self._bypass_on_since is not None:
                         self._bypass_accumulated_secs += current_time - self._bypass_on_since
                         self._bypass_on_since = None
+                    self.snapshot_tracker.update_bypass(_bypass_is_on)
 
                 # WEATHER POLLING
                 if ENABLE_AMBIENT_WEATHER and current_time - self.last_weather_check >= self.weather_interval:
@@ -1294,6 +1317,15 @@ class SimplifiedMonitor:
                         tank_rolling_gph,
                         snapshot_vehicle_count,
                         dosatron_gallons=round(snapshot_dosatron_gal * _DOSATRON_GPK, 2),
+                        bypass_gallons=snapshot_data['bypass_gallons'],
+                        gallons_used=(
+                            round(snapshot_dosatron_gal * _DOSATRON_GPK
+                                  + snapshot_data['bypass_gallons']
+                                  - tank_gallons_delta, 1)
+                            if tank_gallons_delta is not None
+                            else round(snapshot_dosatron_gal * _DOSATRON_GPK
+                                       + snapshot_data['bypass_gallons'], 1)
+                        ),
                     )
 
                     # Update last snapshot tank gallons for next delta calculation
