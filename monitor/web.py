@@ -271,7 +271,8 @@ def aggregate_snapshots(headers, rows, raw_count=5, bucket_hours=1):
 
     agg_rules = {
         'timestamp':              'hour_start',
-        'duration_seconds':       'sum',
+        'gallons_in':             'sum',
+        'gallons_used':           'sum',
         'tank_gallons':           'last',
         'tank_gallons_delta':     'sum_signed',
         'tank_data_age_seconds':  'last',
@@ -292,6 +293,8 @@ def aggregate_snapshots(headers, rows, raw_count=5, bucket_hours=1):
         'wind_gust_mph':          'max1',
         'tank_rolling_gph':       'avg1',
         'vehicle_count':          'last_nonblank',  # blank at night; use last daytime reading
+        'dosatron_gallons':       'sum',
+        'bypass_gallons':         'sum',
     }
 
     raw_rows   = rows[-raw_count:]
