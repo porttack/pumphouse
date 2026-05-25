@@ -110,6 +110,18 @@ from monitor.ntfy import send_notification
 from monitor.email_notifier import send_email_notification
 from monitor.occupancy import is_occupied, load_reservations, get_checkout_datetime, get_checkin_datetime, parse_date
 
+def _intersect_windows(windows_a, windows_b):
+    """Return intersection of two lists of (start, end) intervals."""
+    result = []
+    for a_start, a_end in windows_a:
+        for b_start, b_end in windows_b:
+            start = max(a_start, b_start)
+            end = min(a_end, b_end)
+            if start < end:
+                result.append((start, end))
+    return result
+
+
 def estimate_gallons(duration_seconds):
     """Estimate gallons pumped based on pressure duration"""
     effective_pumping_time = duration_seconds - RESIDUAL_PRESSURE_SECONDS
@@ -157,6 +169,7 @@ class SnapshotTracker:
     def __init__(self):
         self._bypass_on_since = None    # persists across resets so ongoing segments aren't lost
         self._pressure_high_since = None  # persists so in-progress window survives reset
+        self._float_calling_since = None  # persists so in-progress CALLING window survives reset
         self.reset()
 
     def reset(self):
@@ -174,9 +187,20 @@ class SnapshotTracker:
         self.pressure_windows = []       # completed (start, end) HIGH windows this snapshot
         if self._pressure_high_since is not None:
             self._pressure_high_since = time.time()  # restart in-progress window
+        self.float_calling_windows = []  # completed (start, end) CALLING windows this snapshot
+        if self._float_calling_since is not None:
+            self._float_calling_since = time.time()  # restart in-progress window
 
     def update_float(self, float_state):
-        """Track float state"""
+        """Track float state and CALLING windows."""
+        current_time = time.time()
+        if float_state == FLOAT_STATE_CALLING:
+            if self._float_calling_since is None:
+                self._float_calling_since = current_time
+        else:
+            if self._float_calling_since is not None:
+                self.float_calling_windows.append((self._float_calling_since, current_time))
+                self._float_calling_since = None
         if float_state:
             self.float_states.append(float_state)
 
@@ -235,10 +259,18 @@ class SnapshotTracker:
             bypass_secs += time.time() - self._bypass_on_since
         bypass_gallons = bypass_secs / SECONDS_PER_GALLON if bypass_secs > 0 else 0.0
 
-        # Pressure windows for click filtering
-        windows = list(self.pressure_windows)
+        # Pressure-HIGH windows (split at snapshot boundary via reset())
+        pressure_windows = list(self.pressure_windows)
         if self._pressure_high_since is not None:
-            windows.append((self._pressure_high_since, time.time()))
+            pressure_windows.append((self._pressure_high_since, time.time()))
+
+        # Float-CALLING windows (split at snapshot boundary via reset())
+        calling_windows = list(self.float_calling_windows)
+        if self._float_calling_since is not None:
+            calling_windows.append((self._float_calling_since, time.time()))
+
+        # Dosatron flow = pressure HIGH while float CALLING (correct per-snapshot attribution)
+        dosatron_windows = _intersect_windows(pressure_windows, calling_windows)
 
         return {
             'duration': duration,
@@ -253,7 +285,7 @@ class SnapshotTracker:
             'purge_count': self.purge_count,
             'relay_status': relay_status,
             'bypass_gallons': round(bypass_gallons, 2),
-            'pressure_windows': windows,
+            'dosatron_windows': dosatron_windows,
         }
 
 class SimplifiedMonitor:
@@ -316,7 +348,8 @@ class SimplifiedMonitor:
         # Only count dosatron clicks during pressure-HIGH windows (avoids noise when pump is off)
         self._pressure_windows_since_tank_level: list = []
         self._pressure_high_window_start: float | None = None  # separate from pressure_high_start
-        self._float_ever_calling_since_tank_level: bool = False
+        self._float_calling_windows_since_tank_level: list = []
+        self._float_calling_window_start_tl: float | None = None
 
         # Weather tracking
         self.last_weather_check = 0
@@ -908,28 +941,34 @@ class SimplifiedMonitor:
                                 self.tank_fetch_failures = 0
 
                     if tank_fetch_success:
+                        # Track float-CALLING windows for TANK_LEVEL dosatron counting
                         if self.state.float_state == FLOAT_STATE_CALLING:
-                            self._float_ever_calling_since_tank_level = True
+                            if self._float_calling_window_start_tl is None:
+                                self._float_calling_window_start_tl = current_time
+                        elif self._float_calling_window_start_tl is not None:
+                            self._float_calling_windows_since_tank_level.append(
+                                (self._float_calling_window_start_tl, current_time)
+                            )
+                            self._float_calling_window_start_tl = None
                         # Log tank level change
                         if prev_gallons and self.state.tank_gallons:
                             if abs(self.state.tank_gallons - prev_gallons) > 0.1:
                                 delta = self.state.tank_gallons - prev_gallons
-                                # Count clicks only within pressure-HIGH windows (filters noise when pump is off)
-                                _windows = list(self._pressure_windows_since_tank_level)
+                                # Count clicks only during pressure-HIGH AND float-CALLING overlap
+                                _pressure_wins = list(self._pressure_windows_since_tank_level)
                                 if self._pressure_high_window_start is not None:
-                                    _windows.append((self._pressure_high_window_start, current_time))
+                                    _pressure_wins.append((self._pressure_high_window_start, current_time))
+                                _calling_wins = list(self._float_calling_windows_since_tank_level)
+                                if self._float_calling_window_start_tl is not None:
+                                    _calling_wins.append((self._float_calling_window_start_tl, current_time))
                                 _dosa_clicks = sum(
-                                    _count_dosatron_clicks(ws, we) for ws, we in _windows
+                                    _count_dosatron_clicks(ws, we)
+                                    for ws, we in _intersect_windows(_pressure_wins, _calling_wins)
                                 )
                                 _dosa_gal = _dosa_clicks * _DOSATRON_GPK
                                 _bypass_secs = self._bypass_accumulated_secs
                                 if self._bypass_on_since is not None:
                                     _bypass_secs += current_time - self._bypass_on_since
-
-                                # Dosatron only flows when float is CALLING or bypass is ON.
-                                if _dosa_clicks > 0 and not self._float_ever_calling_since_tank_level and _bypass_secs < 1:
-                                    _dosa_clicks = 0
-                                    _dosa_gal = 0.0
 
                                 # Skip sub-8-gal noise when no flow was detected; let state
                                 # accumulate so the next real event gets the full picture.
@@ -948,8 +987,10 @@ class SimplifiedMonitor:
                                         self._bypass_on_since = current_time
                                     self._pressure_windows_since_tank_level.clear()
                                     if self._pressure_high_window_start is not None:
-                                        self._pressure_high_window_start = current_time  # restart from now
-                                    self._float_ever_calling_since_tank_level = False
+                                        self._pressure_high_window_start = current_time
+                                    self._float_calling_windows_since_tank_level.clear()
+                                    if self._float_calling_window_start_tl is not None:
+                                        self._float_calling_window_start_tl = current_time
 
                                     # Notify on significant tank increase
                                     if (NOTIFY_TANK_LEVEL_MIN_INCREASE is not None
@@ -1341,13 +1382,8 @@ class SimplifiedMonitor:
 
                     snapshot_dosatron_gal = sum(
                         _count_dosatron_clicks(ws, we)
-                        for ws, we in snapshot_data['pressure_windows']
+                        for ws, we in snapshot_data['dosatron_windows']
                     )
-                    # Dosatron only flows when float is CALLING or bypass is ON.
-                    # If neither happened this window, any detections are noise.
-                    if (not snapshot_data['float_ever_calling']
-                            and snapshot_data['bypass_gallons'] == 0):
-                        snapshot_dosatron_gal = 0
                     log_snapshot(
                         self.snapshots_file,
                         snapshot_data['duration'],
@@ -1373,9 +1409,9 @@ class SimplifiedMonitor:
                         dosatron_gallons=round(snapshot_dosatron_gal * _DOSATRON_GPK, 2),
                         bypass_gallons=snapshot_data['bypass_gallons'],
                         gallons_used=(
-                            round(snapshot_dosatron_gal * _DOSATRON_GPK
+                            max(0.0, round(snapshot_dosatron_gal * _DOSATRON_GPK
                                   + snapshot_data['bypass_gallons']
-                                  - tank_gallons_delta, 1)
+                                  - tank_gallons_delta, 1))
                             if tank_gallons_delta is not None
                             else round(snapshot_dosatron_gal * _DOSATRON_GPK
                                        + snapshot_data['bypass_gallons'], 1)
