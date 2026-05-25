@@ -155,7 +155,8 @@ class SnapshotTracker:
     """Track data for snapshot intervals"""
 
     def __init__(self):
-        self._bypass_on_since = None  # persists across resets so ongoing segments aren't lost
+        self._bypass_on_since = None    # persists across resets so ongoing segments aren't lost
+        self._pressure_high_since = None  # persists so in-progress window survives reset
         self.reset()
 
     def reset(self):
@@ -169,19 +170,27 @@ class SnapshotTracker:
         self.purge_count = 0
         self.bypass_seconds = 0.0
         if self._bypass_on_since is not None:
-            self._bypass_on_since = time.time()  # restart segment from new window start
-        
+            self._bypass_on_since = time.time()
+        self.pressure_windows = []       # completed (start, end) HIGH windows this snapshot
+        if self._pressure_high_since is not None:
+            self._pressure_high_since = time.time()  # restart in-progress window
+
     def update_float(self, float_state):
         """Track float state"""
         if float_state:
             self.float_states.append(float_state)
-    
+
     def update_pressure(self, is_high):
-        """Update pressure tracking"""
+        """Update pressure tracking and window list."""
         current_time = time.time()
         if self.last_pressure_state and is_high:
-            # Was high, still high - accumulate time
             self.pressure_high_time += current_time - self.last_pressure_check
+        # Window tracking for click filtering
+        if is_high and not self.last_pressure_state:
+            self._pressure_high_since = current_time
+        elif not is_high and self.last_pressure_state and self._pressure_high_since is not None:
+            self.pressure_windows.append((self._pressure_high_since, current_time))
+            self._pressure_high_since = None
         self.last_pressure_state = is_high
         self.last_pressure_check = current_time
     
@@ -226,6 +235,11 @@ class SnapshotTracker:
             bypass_secs += time.time() - self._bypass_on_since
         bypass_gallons = bypass_secs / SECONDS_PER_GALLON if bypass_secs > 0 else 0.0
 
+        # Pressure windows for click filtering
+        windows = list(self.pressure_windows)
+        if self._pressure_high_since is not None:
+            windows.append((self._pressure_high_since, time.time()))
+
         return {
             'duration': duration,
             'tank_gallons': tank_gallons,
@@ -239,6 +253,7 @@ class SnapshotTracker:
             'purge_count': self.purge_count,
             'relay_status': relay_status,
             'bypass_gallons': round(bypass_gallons, 2),
+            'pressure_windows': windows,
         }
 
 class SimplifiedMonitor:
@@ -1315,8 +1330,9 @@ class SimplifiedMonitor:
                     if snapshot_vehicle_count is not None:
                         self.last_vehicle_count = snapshot_vehicle_count
 
-                    snapshot_dosatron_gal = _count_dosatron_clicks(
-                        self.snapshot_start_time, current_time
+                    snapshot_dosatron_gal = sum(
+                        _count_dosatron_clicks(ws, we)
+                        for ws, we in snapshot_data['pressure_windows']
                     )
                     log_snapshot(
                         self.snapshots_file,
