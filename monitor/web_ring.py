@@ -88,6 +88,9 @@ h1{color:#4CAF50;font-size:1.3em;margin-bottom:4px}
 .toast.show{opacity:1}
 
 .empty{color:#555;margin-top:16px;font-size:0.9em}
+.btn-approve-all{margin-top:12px;background:#1e3b1e;color:#4CAF50;border:1px solid #4CAF50;border-radius:4px;padding:6px 18px;font-size:0.82em;cursor:pointer;font-family:inherit}
+.btn-approve-all:hover{background:#2a5a2a}
+.btn-approve-all:disabled{opacity:.45;cursor:default}
 </style>
 </head>
 <body>
@@ -97,6 +100,7 @@ h1{color:#4CAF50;font-size:1.3em;margin-bottom:4px}
 <div class="ref-section">
   <div class="ref-title">Reference coverage &mdash; one baseline image per hour slot (approve images below to fill gaps)</div>
   <div class="ref-grid" id="ref-grid"></div>
+  <button class="btn-approve-all" id="btn-approve-all" onclick="approveAll()">Approve latest per hour</button>
 </div>
 
 <div id="archive"></div>
@@ -228,6 +232,18 @@ async function del(date, file) {
   else toast('Error');
 }
 
+async function approveAll() {
+  const btn = document.getElementById('btn-approve-all');
+  btn.disabled = true;
+  btn.textContent = 'Approving...';
+  const r = await fetch('/api/ring-approve-latest', {method: 'POST'});
+  const result = await r.json();
+  btn.disabled = false;
+  btn.textContent = 'Approve latest per hour';
+  if (r.ok) { toast('Approved ' + result.approved + ' reference' + (result.approved !== 1 ? 's' : '') + ' ✓'); await load(); }
+  else toast('Error');
+}
+
 async function approveModal() { await approve(mDate, mFile); closeModal(); }
 async function deleteModal()  { await del(mDate, mFile);    closeModal(); }
 
@@ -349,3 +365,33 @@ def delete_archive(date_str, filename):
     except Exception:
         pass
     return Response('ok')
+
+
+@ring_bp.route('/api/ring-approve-latest', methods=['POST'])
+def approve_latest():
+    """For each hour that has archived images, promote the most recent one as the reference."""
+    if not _ARCHIVE_DIR.exists():
+        return jsonify({'approved': 0})
+
+    # Build a map: hour -> most recent (date, filename) across all archive days
+    latest: dict[int, tuple[str, str]] = {}
+    for day_dir in sorted(_ARCHIVE_DIR.iterdir()):
+        if not day_dir.is_dir() or not _DATE_RE.match(day_dir.name):
+            continue
+        for f in day_dir.glob('????.jpg'):
+            if not _FILE_RE.match(f.name):
+                continue
+            hour = int(f.stem[:2])
+            latest[hour] = (day_dir.name, f.name)  # sorted days → last wins = most recent
+
+    _REF_DIR.mkdir(parents=True, exist_ok=True)
+    approved = 0
+    for hour, (date_str, filename) in latest.items():
+        src = _ARCHIVE_DIR / date_str / filename
+        shutil.copy2(src, _REF_DIR / f'{hour:02d}.jpg')
+        (_REF_DIR / f'{hour:02d}.json').write_text(
+            json.dumps({'from': f'{date_str}/{filename}'})
+        )
+        approved += 1
+
+    return jsonify({'approved': approved})
