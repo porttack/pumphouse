@@ -316,6 +316,7 @@ class SimplifiedMonitor:
         # Only count dosatron clicks during pressure-HIGH windows (avoids noise when pump is off)
         self._pressure_windows_since_tank_level: list = []
         self._pressure_high_window_start: float | None = None  # separate from pressure_high_start
+        self._float_ever_calling_since_tank_level: bool = False
 
         # Weather tracking
         self.last_weather_check = 0
@@ -907,6 +908,8 @@ class SimplifiedMonitor:
                                 self.tank_fetch_failures = 0
 
                     if tank_fetch_success:
+                        if self.state.float_state == FLOAT_STATE_CALLING:
+                            self._float_ever_calling_since_tank_level = True
                         # Log tank level change
                         if prev_gallons and self.state.tank_gallons:
                             if abs(self.state.tank_gallons - prev_gallons) > 0.1:
@@ -922,6 +925,11 @@ class SimplifiedMonitor:
                                 _bypass_secs = self._bypass_accumulated_secs
                                 if self._bypass_on_since is not None:
                                     _bypass_secs += current_time - self._bypass_on_since
+
+                                # Dosatron only flows when float is CALLING or bypass is ON.
+                                if _dosa_clicks > 0 and not self._float_ever_calling_since_tank_level and _bypass_secs < 1:
+                                    _dosa_clicks = 0
+                                    _dosa_gal = 0.0
 
                                 # Skip sub-8-gal noise when no flow was detected; let state
                                 # accumulate so the next real event gets the full picture.
@@ -941,6 +949,7 @@ class SimplifiedMonitor:
                                     self._pressure_windows_since_tank_level.clear()
                                     if self._pressure_high_window_start is not None:
                                         self._pressure_high_window_start = current_time  # restart from now
+                                    self._float_ever_calling_since_tank_level = False
 
                                     # Notify on significant tank increase
                                     if (NOTIFY_TANK_LEVEL_MIN_INCREASE is not None
@@ -1334,6 +1343,11 @@ class SimplifiedMonitor:
                         _count_dosatron_clicks(ws, we)
                         for ws, we in snapshot_data['pressure_windows']
                     )
+                    # Dosatron only flows when float is CALLING or bypass is ON.
+                    # If neither happened this window, any detections are noise.
+                    if (not snapshot_data['float_ever_calling']
+                            and snapshot_data['bypass_gallons'] == 0):
+                        snapshot_dosatron_gal = 0
                     log_snapshot(
                         self.snapshots_file,
                         snapshot_data['duration'],
