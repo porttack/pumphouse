@@ -30,7 +30,7 @@ def _aggregate_daily_gallons(snapshots_path, target_date):
     from snapshots.csv. Returns dict with totals (None if no rows found).
     """
     date_prefix = target_date.strftime('%Y-%m-%d')
-    totals = {'dosatron_gallons': 0.0, 'bypass_gallons': 0.0, 'gallons_used': 0.0}
+    totals = {'gallons_in': 0.0, 'gallons_used': 0.0, 'dosatron_gallons': 0.0, 'bypass_gallons': 0.0}
     row_count = 0
 
     try:
@@ -40,7 +40,7 @@ def _aggregate_daily_gallons(snapshots_path, target_date):
                 if not row.get('timestamp', '').startswith(date_prefix):
                     continue
                 row_count += 1
-                for col in ('dosatron_gallons', 'bypass_gallons', 'gallons_used'):
+                for col in totals:
                     val = row.get(col, '').strip()
                     if val:
                         try:
@@ -79,8 +79,8 @@ def main():
     if daily:
         notes += (
             f" | {yesterday}: "
-            f"dosatron {daily['dosatron_gallons']:.1f} gal, "
-            f"bypass {daily['bypass_gallons']:.1f} gal, "
+            f"in {daily['gallons_in']:.1f} gal "
+            f"(dosatron {daily['dosatron_gallons']:.1f}, bypass {daily['bypass_gallons']:.1f}), "
             f"used {daily['gallons_used']:.1f} gal"
         )
 

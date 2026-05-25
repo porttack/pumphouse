@@ -1384,6 +1384,14 @@ class SimplifiedMonitor:
                         _count_dosatron_clicks(ws, we)
                         for ws, we in snapshot_data['dosatron_windows']
                     )
+                    _dosatron_gal = round(snapshot_dosatron_gal * _DOSATRON_GPK, 2)
+                    _bypass_gal = snapshot_data['bypass_gallons']
+                    _gallons_in = round(_dosatron_gal + _bypass_gal, 2)
+                    _gallons_used = (
+                        max(0.0, round(_gallons_in - tank_gallons_delta, 1))
+                        if tank_gallons_delta is not None
+                        else _gallons_in
+                    )
                     log_snapshot(
                         self.snapshots_file,
                         snapshot_data['duration'],
@@ -1406,16 +1414,10 @@ class SimplifiedMonitor:
                         self.state.wind_gust,
                         tank_rolling_gph,
                         snapshot_vehicle_count,
-                        dosatron_gallons=round(snapshot_dosatron_gal * _DOSATRON_GPK, 2),
-                        bypass_gallons=snapshot_data['bypass_gallons'],
-                        gallons_used=(
-                            max(0.0, round(snapshot_dosatron_gal * _DOSATRON_GPK
-                                  + snapshot_data['bypass_gallons']
-                                  - tank_gallons_delta, 1))
-                            if tank_gallons_delta is not None
-                            else round(snapshot_dosatron_gal * _DOSATRON_GPK
-                                       + snapshot_data['bypass_gallons'], 1)
-                        ),
+                        dosatron_gallons=_dosatron_gal,
+                        bypass_gallons=_bypass_gal,
+                        gallons_in=_gallons_in,
+                        gallons_used=_gallons_used,
                     )
 
                     # Update last snapshot tank gallons for next delta calculation

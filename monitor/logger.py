@@ -20,8 +20,8 @@ def initialize_events_csv(filepath):
         return False
 
 SNAPSHOT_COLUMNS = [
-    'timestamp', 'duration_seconds',
-    'dosatron_gallons', 'bypass_gallons', 'gallons_used',
+    'timestamp',
+    'gallons_in', 'gallons_used',
     'tank_gallons', 'tank_gallons_delta', 'tank_data_age_seconds',
     'float_state', 'float_ever_calling', 'float_always_full',
     'pressure_high_seconds', 'pressure_high_percent',
@@ -30,6 +30,7 @@ SNAPSHOT_COLUMNS = [
     'outdoor_temp_f', 'indoor_temp_f', 'outdoor_humidity',
     'baro_abs_inhg', 'wind_gust_mph',
     'tank_rolling_gph', 'vehicle_count',
+    'dosatron_gallons', 'bypass_gallons', 'duration_seconds',
 ]
 
 
@@ -54,17 +55,32 @@ def migrate_snapshots_csv(filepath):
                 return  # already correct
             rows = list(reader)
 
-        # Build index map from old header; unknown columns get ''
         old_idx = {col: i for i, col in enumerate(header)}
+
+        def _get(row, col):
+            return row[old_idx[col]] if col in old_idx and old_idx[col] < len(row) else ''
+
         tmp = filepath + '.tmp'
         with open(tmp, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(SNAPSHOT_COLUMNS)
             for row in rows:
-                writer.writerow([
-                    row[old_idx[col]] if col in old_idx and old_idx[col] < len(row) else ''
-                    for col in SNAPSHOT_COLUMNS
-                ])
+                new_row = []
+                for col in SNAPSHOT_COLUMNS:
+                    if col == 'gallons_in' and col not in old_idx:
+                        # Compute from dosatron + bypass for old rows
+                        if 'dosatron_gallons' in old_idx or 'bypass_gallons' in old_idx:
+                            try:
+                                d = float(_get(row, 'dosatron_gallons') or 0)
+                                b = float(_get(row, 'bypass_gallons') or 0)
+                                new_row.append(str(round(d + b, 2)))
+                            except (ValueError, TypeError):
+                                new_row.append('')
+                        else:
+                            new_row.append('')
+                    else:
+                        new_row.append(_get(row, col))
+                writer.writerow(new_row)
         os.replace(tmp, filepath)
     except Exception as e:
         print(f'Warning: could not migrate {filepath}: {e}')
@@ -101,7 +117,7 @@ def log_snapshot(filepath, duration, tank_gallons, tank_gallons_delta, tank_data
                 outdoor_temp=None, indoor_temp=None, outdoor_humidity=None,
                 baro_abs=None, wind_gust=None, tank_rolling_gph=None,
                 vehicle_count=None, dosatron_gallons=None,
-                bypass_gallons=None, gallons_used=None):
+                bypass_gallons=None, gallons_in=None, gallons_used=None):
     """Log a snapshot to snapshots.csv"""
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
 
@@ -114,9 +130,8 @@ def log_snapshot(filepath, duration, tank_gallons, tank_gallons_delta, tank_data
     with open(filepath, 'a', newline='') as f:
         writer = csv.writer(f)
         writer.writerow([
-            timestamp, f'{duration:.0f}',
-            str(dosatron_gallons) if dosatron_gallons is not None else '',
-            str(bypass_gallons) if bypass_gallons is not None else '',
+            timestamp,
+            str(gallons_in) if gallons_in is not None else '',
             str(gallons_used) if gallons_used is not None else '',
             f'{tank_gallons:.0f}' if tank_gallons else '',
             delta_str,
@@ -138,4 +153,7 @@ def log_snapshot(filepath, duration, tank_gallons, tank_gallons_delta, tank_data
             f'{wind_gust:.1f}' if wind_gust is not None else '',
             f'{tank_rolling_gph:.1f}' if tank_rolling_gph is not None else '',
             str(vehicle_count) if vehicle_count is not None else '',
+            str(dosatron_gallons) if dosatron_gallons is not None else '',
+            str(bypass_gallons) if bypass_gallons is not None else '',
+            f'{duration:.0f}',
         ])
