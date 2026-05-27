@@ -1297,6 +1297,7 @@ class SimplifiedMonitor:
 
                     # Vehicle count: daytime only; fetch a fresh Ring snapshot (uses cache if still fresh)
                     snapshot_vehicle_count = None
+                    snapshot_vehicle_conf  = None
                     _ring_jpeg = None
                     try:
                         from astral import LocationInfo as _LI
@@ -1308,10 +1309,11 @@ class SimplifiedMonitor:
                         _st  = _asun(_loc.observer, date=_now.date(), tzinfo=_tz)
                         if _st['sunrise'] <= _now <= _st['sunset']:
                             from monitor.config import RING_TOKEN_FILE, RING_CAMERA_NAME
-                            from monitor.ring_camera import get_snapshot, read_vehicle_count_from_exif
+                            from monitor.ring_camera import get_snapshot, read_vehicle_count_from_exif, read_vehicle_conf_from_exif
                             _ring_jpeg = get_snapshot(RING_TOKEN_FILE, RING_CAMERA_NAME)
                             if _ring_jpeg:
                                 snapshot_vehicle_count = read_vehicle_count_from_exif(_ring_jpeg)
+                                snapshot_vehicle_conf  = read_vehicle_conf_from_exif(_ring_jpeg)
                     except Exception:
                         pass
 
@@ -1342,9 +1344,10 @@ class SimplifiedMonitor:
                             self.last_vehicle_count is not None and
                             snapshot_vehicle_count != self.last_vehicle_count):
                         delta = snapshot_vehicle_count - self.last_vehicle_count
+                        _conf_str = f' conf={snapshot_vehicle_conf:.2f}' if snapshot_vehicle_conf else ''
                         if delta > 0:
                             self.log_state_event('VEHICLE_DETECTED',
-                                f'Vehicle count {self.last_vehicle_count}→{snapshot_vehicle_count} at unoccupied property')
+                                f'Vehicle count {self.last_vehicle_count}→{snapshot_vehicle_count}{_conf_str} at unoccupied property')
                             if self.notification_manager.can_notify('vehicle_detected'):
                                 send_notification(
                                     title=f'🚗 Vehicle arrived ({self.last_vehicle_count}→{snapshot_vehicle_count})',
@@ -1366,7 +1369,7 @@ class SimplifiedMonitor:
                                     )
                         else:
                             self.log_state_event('VEHICLE_DEPARTED',
-                                f'Vehicle count {self.last_vehicle_count}→{snapshot_vehicle_count} at unoccupied property')
+                                f'Vehicle count {self.last_vehicle_count}→{snapshot_vehicle_count}{_conf_str} at unoccupied property')
                             if self.notification_manager.can_notify('vehicle_departed'):
                                 send_notification(
                                     title=f'🚗 Vehicle left ({self.last_vehicle_count}→{snapshot_vehicle_count})',

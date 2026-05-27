@@ -95,14 +95,17 @@ def get_snapshot(token_file: Path, camera_name: str = '', force_refresh: bool = 
                 data = _fetch_from_ring(token_file, camera_name)
 
             if data:
-                vehicle_count = _count_vehicles(data)
+                result = _count_vehicles(data)
+                vehicle_count = result[0] if result is not None else None
+                avg_conf      = result[1] if result is not None else None
                 if vehicle_count is not None:
                     _write_count_cache(vehicle_count)
-                data = _stamp_timestamp(data, vehicle_count)
-                data = _add_exif_metadata(data, vehicle_count)
+                data = _stamp_timestamp(data, vehicle_count, avg_conf)
+                data = _add_exif_metadata(data, vehicle_count, avg_conf)
                 RING_CACHE_FILE.write_bytes(data)
-                logger.info('Ring snapshot fetched and cached (%d bytes, vehicles=%s)',
-                            len(data), vehicle_count)
+                logger.info('Ring snapshot fetched and cached (%d bytes, vehicles=%s, conf=%s)',
+                            len(data), vehicle_count,
+                            f'{avg_conf:.2f}' if avg_conf is not None else 'n/a')
             else:
                 if RING_CACHE_FILE.exists():
                     age_s = int(time.time() - RING_CACHE_FILE.stat().st_mtime)
@@ -138,8 +141,9 @@ def get_vehicle_count() -> Optional[int]:
         from monitor.config import RING_CACHE_FILE
         if not RING_CACHE_FILE.exists():
             return cached_count
-        count = _count_vehicles(RING_CACHE_FILE.read_bytes())
-        if count is not None:
+        result = _count_vehicles(RING_CACHE_FILE.read_bytes())
+        if result is not None:
+            count, _ = result
             _write_count_cache(count)
             return count
     except Exception as e:
@@ -226,9 +230,10 @@ def _fetch_from_ring(token_file: Path, camera_name: str) -> Optional[bytes]:
         return None
 
 
-def _stamp_timestamp(jpeg_bytes: bytes, vehicle_count: Optional[int] = None) -> bytes:
+def _stamp_timestamp(jpeg_bytes: bytes, vehicle_count: Optional[int] = None,
+                     avg_conf: Optional[float] = None) -> bytes:
     """
-    Overlay the current time (and vehicle count if available) on the bottom-left.
+    Overlay the current time (and vehicle count + confidence if available) on the bottom-left.
     Falls back to the original bytes if cv2 is unavailable or decoding fails.
     """
     try:
@@ -248,7 +253,11 @@ def _stamp_timestamp(jpeg_bytes: bytes, vehicle_count: Optional[int] = None) -> 
         _num_words = ['Zero','One','Two','Three','Four','Five',
                       'Six','Seven','Eight','Nine','Ten']
         _vc_word = _num_words[vehicle_count] if 0 <= vehicle_count < len(_num_words) else str(vehicle_count)
-        label = f'{time_str}  {_vc_word} car{"s" if vehicle_count != 1 else ""}'
+        cars_str = f'{_vc_word} car{"s" if vehicle_count != 1 else ""}'
+        if avg_conf is not None and vehicle_count > 0:
+            label = f'{time_str}  {cars_str} ({avg_conf:.0%})'
+        else:
+            label = f'{time_str}  {cars_str}'
     else:
         label = time_str
     font  = cv2.FONT_HERSHEY_SIMPLEX
@@ -322,12 +331,11 @@ def _ensure_models() -> bool:
     return True
 
 
-def _count_vehicles(jpeg_bytes: bytes) -> Optional[int]:
+def _count_vehicles(jpeg_bytes: bytes) -> Optional[tuple]:
     """
-    Count vehicles (cars, trucks, buses, motorcycles) in a JPEG.
-    Uses YOLOv8n (onnxruntime) when available, falls back to YOLOv4-tiny (cv2.dnn).
-    Supplements YOLO with background subtraction for occluded zones.
-    Returns None if no model is available or inference fails.
+    Count vehicles in a JPEG. Returns (count, avg_conf) or None if inference fails.
+    avg_conf is the mean YOLO confidence of kept detections (0.0 if count==0).
+    Background subtraction count is included in total but not in avg_conf.
     """
     try:
         import cv2
@@ -342,21 +350,22 @@ def _count_vehicles(jpeg_bytes: bytes) -> Optional[int]:
         return None
 
     if _YOLOV8_ONNX.exists():
-        yolo_count = _count_vehicles_yolov8(img)
-        if yolo_count is None:
+        result = _count_vehicles_yolov8(img)
+        if result is None:
             logger.warning('YOLOv8n inference failed; falling back to YOLOv4-tiny')
-            yolo_count = _count_vehicles_yolov4(img)
+            result = _count_vehicles_yolov4(img)
     else:
-        yolo_count = _count_vehicles_yolov4(img)
+        result = _count_vehicles_yolov4(img)
 
-    if yolo_count is None:
+    if result is None:
         return None
 
+    yolo_count, avg_conf = result
     bg_count = _count_vehicles_background(img)
     total = yolo_count + bg_count
     if bg_count:
         logger.info('Vehicle count: YOLO=%d + background zone=%d = %d', yolo_count, bg_count, total)
-    return total
+    return total, avg_conf
 
 
 def maybe_save_reference(jpeg_bytes: bytes) -> bool:
@@ -475,8 +484,8 @@ def _count_vehicles_background(img) -> int:
         return 0
 
 
-def _count_vehicles_yolov8(img) -> Optional[int]:
-    """YOLOv8n inference via onnxruntime. Input: decoded BGR numpy image."""
+def _count_vehicles_yolov8(img) -> Optional[tuple]:
+    """YOLOv8n inference via onnxruntime. Returns (count, avg_conf) or None on failure."""
     from monitor.config import YOLO_CONF_THRESHOLD
     _CONF = YOLO_CONF_THRESHOLD
     _NMS  = 0.60
@@ -505,7 +514,6 @@ def _count_vehicles_yolov8(img) -> Optional[int]:
             conf = float(class_scores[class_id])
             if conf >= _CONF and class_id in _VEHICLE_CLASSES:
                 cx, cy, bw, bh = row[:4]
-                # Coordinates are relative to 640×640 input; scale back to original
                 x = int((cx - bw / 2) * w0 / 640)
                 y = int((cy - bh / 2) * h0 / 640)
                 w = int(bw * w0 / 640)
@@ -516,15 +524,18 @@ def _count_vehicles_yolov8(img) -> Optional[int]:
         indices = cv2.dnn.NMSBoxes(boxes, confidences,
                                    score_threshold=_CONF, nms_threshold=_NMS)
         count = len(indices) if len(indices) > 0 else 0
-        logger.info('Vehicle count (YOLOv8n): %d after NMS (raw=%d)', count, len(boxes))
-        return count
+        flat  = list(indices.flatten()) if hasattr(indices, 'flatten') else list(indices)
+        avg_conf = sum(confidences[i] for i in flat) / len(flat) if flat else 0.0
+        logger.info('Vehicle count (YOLOv8n): %d after NMS (raw=%d, avg_conf=%.2f)',
+                    count, len(boxes), avg_conf)
+        return count, avg_conf
     except Exception as e:
         logger.error('YOLOv8n vehicle count error (%s: %s)', type(e).__name__, e)
         return None
 
 
-def _count_vehicles_yolov4(img) -> Optional[int]:
-    """YOLOv4-tiny inference via cv2.dnn. Input: decoded BGR numpy image. Fallback only."""
+def _count_vehicles_yolov4(img) -> Optional[tuple]:
+    """YOLOv4-tiny inference via cv2.dnn. Returns (count, avg_conf) or None on failure."""
     from monitor.config import YOLO_CONF_THRESHOLD
     _CONF = YOLO_CONF_THRESHOLD
     _NMS  = 0.60
@@ -558,23 +569,31 @@ def _count_vehicles_yolov4(img) -> Optional[int]:
         indices = cv2.dnn.NMSBoxes(boxes, confidences,
                                    score_threshold=_CONF, nms_threshold=_NMS)
         count = len(indices) if len(indices) > 0 else 0
-        logger.info('Vehicle count (YOLOv4-tiny): %d after NMS (raw=%d)', count, len(boxes))
-        return count
+        flat  = list(indices.flatten()) if hasattr(indices, 'flatten') else list(indices)
+        avg_conf = sum(confidences[i] for i in flat) / len(flat) if flat else 0.0
+        logger.info('Vehicle count (YOLOv4-tiny): %d after NMS (raw=%d, avg_conf=%.2f)',
+                    count, len(boxes), avg_conf)
+        return count, avg_conf
     except Exception as e:
         logger.error('YOLOv4-tiny vehicle count error (%s: %s)', type(e).__name__, e)
         return None
 
 
-def _add_exif_metadata(jpeg_bytes: bytes, vehicle_count: Optional[int]) -> bytes:
-    """Embed vehicle count in the JPEG UserComment EXIF tag via Pillow."""
+def _add_exif_metadata(jpeg_bytes: bytes, vehicle_count: Optional[int],
+                       avg_conf: Optional[float] = None) -> bytes:
+    """Embed vehicle count (and avg YOLO confidence) in the JPEG UserComment EXIF tag."""
     try:
         import io
         from PIL import Image
 
         img = Image.open(io.BytesIO(jpeg_bytes))
         exif = img.getexif()
-        # Tag 0x9286 = UserComment; prefix with ASCII charset marker
-        comment = f'vehicles={vehicle_count}' if vehicle_count is not None else 'vehicles=unknown'
+        if vehicle_count is not None:
+            comment = f'vehicles={vehicle_count}'
+            if avg_conf is not None:
+                comment += f',conf={avg_conf:.2f}'
+        else:
+            comment = 'vehicles=unknown'
         exif[0x9286] = comment.encode()
         buf = io.BytesIO()
         img.save(buf, format='JPEG', quality=88, exif=exif.tobytes())
@@ -585,11 +604,8 @@ def _add_exif_metadata(jpeg_bytes: bytes, vehicle_count: Optional[int]) -> bytes
         return jpeg_bytes
 
 
-def read_vehicle_count_from_exif(jpeg_bytes: bytes) -> Optional[int]:
-    """
-    Read the vehicle count embedded by _add_exif_metadata() from a JPEG's
-    EXIF UserComment tag.  Returns None if the tag is absent or unparseable.
-    """
+def _parse_exif_comment(jpeg_bytes: bytes) -> dict:
+    """Return the key=value pairs from the EXIF UserComment tag as a dict."""
     try:
         import io
         from PIL import Image
@@ -598,10 +614,26 @@ def read_vehicle_count_from_exif(jpeg_bytes: bytes) -> Optional[int]:
         if comment:
             if isinstance(comment, bytes):
                 comment = comment.decode('utf-8', errors='ignore')
-            if comment.startswith('vehicles='):
-                val = comment.split('=', 1)[1]
-                if val.isdigit():
-                    return int(val)
+            return dict(part.split('=', 1) for part in comment.split(',') if '=' in part)
+    except Exception:
+        pass
+    return {}
+
+
+def read_vehicle_count_from_exif(jpeg_bytes: bytes) -> Optional[int]:
+    """Read the vehicle count from the JPEG EXIF UserComment tag."""
+    val = _parse_exif_comment(jpeg_bytes).get('vehicles')
+    if val is not None and val.isdigit():
+        return int(val)
+    return None
+
+
+def read_vehicle_conf_from_exif(jpeg_bytes: bytes) -> Optional[float]:
+    """Read the avg YOLO confidence from the JPEG EXIF UserComment tag."""
+    try:
+        val = _parse_exif_comment(jpeg_bytes).get('conf')
+        if val is not None:
+            return float(val)
     except Exception:
         pass
     return None
