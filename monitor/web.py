@@ -272,7 +272,7 @@ def aggregate_snapshots(headers, rows, raw_count=5, bucket_hours=1):
     agg_rules = {
         'timestamp':              'hour_start',
         'gallons_in':             'sum',
-        'gallons_used':           'sum',
+        'gallons_used':           'recompute_used',
         'tank_gallons':           'last',
         'tank_gallons_delta':     'sum_signed',
         'tank_data_age_seconds':  'last',
@@ -396,6 +396,22 @@ def aggregate_snapshots(headers, rows, raw_count=5, bucket_hours=1):
         if rule == 'last_nonblank':
             nonempty = [v for v in vals if v.strip()]
             return nonempty[-1] if nonempty else ''
+
+        if rule == 'recompute_used':
+            # Recompute as max(0, sum(gallons_in) - net tank delta) so per-sample
+            # sensor noise cancels rather than accumulating via summed max(0,...).
+            gin_idx = headers.index('gallons_in') if 'gallons_in' in headers else -1
+            tg_idx  = headers.index('tank_gallons') if 'tank_gallons' in headers else -1
+            if gin_idx >= 0 and tg_idx >= 0:
+                total_in = sum(safe_float(row[gin_idx] if gin_idx < len(row) else '') or 0
+                               for row in group)
+                tanks = [safe_float(row[tg_idx] if tg_idx < len(row) else '') for row in group]
+                tanks = [t for t in tanks if t is not None]
+                if len(tanks) >= 2:
+                    net_delta = tanks[-1] - tanks[0]
+                    result = max(0.0, round(total_in - net_delta, 1))
+                    return str(int(result)) if result == int(result) else str(result)
+            return ''
 
         return vals[-1]  # fallback: last
 

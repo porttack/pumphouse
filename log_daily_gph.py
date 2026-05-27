@@ -30,7 +30,9 @@ def _aggregate_daily_gallons(snapshots_path, target_date):
     from snapshots.csv. Returns dict with totals (None if no rows found).
     """
     date_prefix = target_date.strftime('%Y-%m-%d')
-    totals = {'gallons_in': 0.0, 'gallons_used': 0.0, 'dosatron_gallons': 0.0, 'bypass_gallons': 0.0}
+    totals = {'gallons_in': 0.0, 'dosatron_gallons': 0.0, 'bypass_gallons': 0.0}
+    first_tank = None
+    last_tank = None
     row_count = 0
 
     try:
@@ -47,13 +49,28 @@ def _aggregate_daily_gallons(snapshots_path, target_date):
                             totals[col] += float(val)
                         except ValueError:
                             pass
+                tg = row.get('tank_gallons', '').strip()
+                if tg:
+                    try:
+                        tg_f = float(tg)
+                        if first_tank is None:
+                            first_tank = tg_f
+                        last_tank = tg_f
+                    except ValueError:
+                        pass
     except FileNotFoundError:
         return None
 
     if row_count == 0:
         return None
 
-    return {k: round(v, 1) for k, v in totals.items()}
+    result = {k: round(v, 1) for k, v in totals.items()}
+    if first_tank is not None and last_tank is not None:
+        net_delta = last_tank - first_tank
+        result['gallons_used'] = max(0.0, round(totals['gallons_in'] - net_delta, 1))
+    else:
+        result['gallons_used'] = round(totals['gallons_in'], 1)
+    return result
 
 
 def main():
