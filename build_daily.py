@@ -52,6 +52,8 @@ FIELDNAMES = [
     # ── Priority columns (most useful at a glance) ────────────────────────
     'date',
     'occupied_pct',
+    'gallons_in',               # total water delivered via dosatron + bypass
+    'gallons_used',             # gallons_in - net tank change (water consumed)
     'gallons_end',              # tank level at end of day
     'gallons_net_change',
     'tank_rolling_gph_avg',     # avg fill rate during calling windows
@@ -107,6 +109,9 @@ def summarize_day(date, rows, checkout_net_income=0.0, is_checkout=False):
         return None
 
     gallons = [flt(r, 'tank_gallons') for r in rows]
+    gallons_in_total = round(sum(flt(r, 'gallons_in') for r in rows), 1)
+    gallons_net = gallons[-1] - gallons[0]
+    gallons_used_total = max(0.0, round(gallons_in_total - gallons_net, 1))
 
     bypass_rows = [r for r in rows if r.get('relay_bypass', '').upper() == 'ON']
     non_bypass  = [r for r in rows if r.get('relay_bypass', '').upper() != 'ON']
@@ -228,6 +233,8 @@ def summarize_day(date, rows, checkout_net_income=0.0, is_checkout=False):
 
     return {
         'date':                      date,
+        'gallons_in':                gallons_in_total,
+        'gallons_used':              gallons_used_total,
         'n_snapshots':               n,
         'hours_covered':             round(dur_all / 3600, 1),
         'gallons_start':             int(gallons[0]),
