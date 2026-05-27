@@ -255,7 +255,7 @@ def _stamp_timestamp(jpeg_bytes: bytes, vehicle_count: Optional[int] = None,
         _vc_word = _num_words[vehicle_count] if 0 <= vehicle_count < len(_num_words) else str(vehicle_count)
         cars_str = f'{_vc_word} car{"s" if vehicle_count != 1 else ""}'
         if avg_conf is not None and vehicle_count > 0:
-            label = f'{time_str}  {cars_str} ({avg_conf:.0%})'
+            label = f'{time_str}  {cars_str} ({avg_conf:.2f})'
         else:
             label = f'{time_str}  {cars_str}'
     else:
@@ -365,7 +365,8 @@ def _count_vehicles(jpeg_bytes: bytes) -> Optional[tuple]:
     total = yolo_count + bg_count
     if bg_count:
         logger.info('Vehicle count: YOLO=%d + background zone=%d = %d', yolo_count, bg_count, total)
-    return total, avg_conf
+    # avg_conf is only meaningful when YOLO made detections; bg-only detections have no conf score
+    return total, avg_conf if yolo_count > 0 else None
 
 
 def maybe_save_reference(jpeg_bytes: bytes) -> bool:
