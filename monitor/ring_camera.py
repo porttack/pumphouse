@@ -98,10 +98,11 @@ def get_snapshot(token_file: Path, camera_name: str = '', force_refresh: bool = 
                 result = _count_vehicles(data)
                 vehicle_count = result[0] if result is not None else None
                 avg_conf      = result[1] if result is not None else None
+                bg_coverage   = result[2] if result is not None else None
                 if vehicle_count is not None:
                     _write_count_cache(vehicle_count)
-                data = _stamp_timestamp(data, vehicle_count, avg_conf)
-                data = _add_exif_metadata(data, vehicle_count, avg_conf)
+                data = _stamp_timestamp(data, vehicle_count, avg_conf, bg_coverage)
+                data = _add_exif_metadata(data, vehicle_count, avg_conf, bg_coverage)
                 RING_CACHE_FILE.write_bytes(data)
                 logger.info('Ring snapshot fetched and cached (%d bytes, vehicles=%s, conf=%s)',
                             len(data), vehicle_count,
@@ -143,7 +144,7 @@ def get_vehicle_count() -> Optional[int]:
             return cached_count
         result = _count_vehicles(RING_CACHE_FILE.read_bytes())
         if result is not None:
-            count, _ = result
+            count = result[0]
             _write_count_cache(count)
             return count
     except Exception as e:
@@ -231,7 +232,8 @@ def _fetch_from_ring(token_file: Path, camera_name: str) -> Optional[bytes]:
 
 
 def _stamp_timestamp(jpeg_bytes: bytes, vehicle_count: Optional[int] = None,
-                     avg_conf: Optional[float] = None) -> bytes:
+                     avg_conf: Optional[float] = None,
+                     bg_coverage: Optional[float] = None) -> bytes:
     """
     Overlay the current time (and vehicle count + confidence if available) on the bottom-left.
     Falls back to the original bytes if cv2 is unavailable or decoding fails.
@@ -255,7 +257,9 @@ def _stamp_timestamp(jpeg_bytes: bytes, vehicle_count: Optional[int] = None,
         _vc_word = _num_words[vehicle_count] if 0 <= vehicle_count < len(_num_words) else str(vehicle_count)
         cars_str = f'{_vc_word} car{"s" if vehicle_count != 1 else ""}'
         if avg_conf is not None and vehicle_count > 0:
-            label = f'{time_str}  {cars_str} ({avg_conf:.2f})'
+            label = f'{time_str}  {cars_str} (yolo:{avg_conf:.2f})'
+        elif bg_coverage is not None and vehicle_count > 0:
+            label = f'{time_str}  {cars_str} (bg:{bg_coverage:.2f})'
         else:
             label = f'{time_str}  {cars_str}'
     else:
@@ -361,12 +365,14 @@ def _count_vehicles(jpeg_bytes: bytes) -> Optional[tuple]:
         return None
 
     yolo_count, avg_conf = result
-    bg_count = _count_vehicles_background(img)
+    bg_count, bg_coverage = _count_vehicles_background(img)
     total = yolo_count + bg_count
     if bg_count:
         logger.info('Vehicle count: YOLO=%d + background zone=%d = %d', yolo_count, bg_count, total)
-    # avg_conf is only meaningful when YOLO made detections; bg-only detections have no conf score
-    return total, avg_conf if yolo_count > 0 else None
+    # Return yolo conf and bg coverage separately so the stamp can label the source
+    return (total,
+            avg_conf if yolo_count > 0 else None,
+            bg_coverage if bg_count > 0 else None)
 
 
 def maybe_save_reference(jpeg_bytes: bytes) -> bool:
@@ -443,11 +449,11 @@ def _find_nearest_reference(hour: int) -> Optional[Path]:
     return min(refs, key=lambda p: min(abs(int(p.stem) - hour), 24 - abs(int(p.stem) - hour)))
 
 
-def _count_vehicles_background(img) -> int:
+def _count_vehicles_background(img) -> tuple:
     """
     Compare the background zone of img against the nearest-hour reference image.
-    Returns 1 if a significant change is detected (vehicle present), 0 otherwise.
-    Returns 0 if no reference images exist yet.
+    Returns (hit, coverage): hit is 1 if coverage >= threshold, 0 otherwise.
+    Returns (0, 0.0) if no reference images exist yet.
     """
     try:
         import cv2
@@ -455,12 +461,12 @@ def _count_vehicles_background(img) -> int:
 
         ref_path = _find_nearest_reference(datetime.now().hour)
         if ref_path is None:
-            return 0
+            return 0, 0.0
 
         ref_data = np.frombuffer(ref_path.read_bytes(), dtype=np.uint8)
         ref_img  = cv2.imdecode(ref_data, cv2.IMREAD_COLOR)
         if ref_img is None:
-            return 0
+            return 0, 0.0
 
         h, w = img.shape[:2]
         if ref_img.shape[:2] != (h, w):
@@ -479,10 +485,10 @@ def _count_vehicles_background(img) -> int:
         logger.info('Background zone vs %s: mean_diff=%.1f coverage=%.3f threshold=%.3f',
                     ref_path.name, mean_diff, coverage, _BG_COVERAGE_FRAC)
 
-        return 1 if coverage >= _BG_COVERAGE_FRAC else 0
+        return (1, coverage) if coverage >= _BG_COVERAGE_FRAC else (0, coverage)
     except Exception as e:
         logger.warning('Background subtraction error (%s: %s)', type(e).__name__, e)
-        return 0
+        return 0, 0.0
 
 
 def _count_vehicles_yolov8(img) -> Optional[tuple]:
@@ -581,8 +587,9 @@ def _count_vehicles_yolov4(img) -> Optional[tuple]:
 
 
 def _add_exif_metadata(jpeg_bytes: bytes, vehicle_count: Optional[int],
-                       avg_conf: Optional[float] = None) -> bytes:
-    """Embed vehicle count (and avg YOLO confidence) in the JPEG UserComment EXIF tag."""
+                       avg_conf: Optional[float] = None,
+                       bg_coverage: Optional[float] = None) -> bytes:
+    """Embed vehicle count, YOLO confidence, and bg coverage in the JPEG UserComment EXIF tag."""
     try:
         import io
         from PIL import Image
@@ -593,6 +600,8 @@ def _add_exif_metadata(jpeg_bytes: bytes, vehicle_count: Optional[int],
             comment = f'vehicles={vehicle_count}'
             if avg_conf is not None:
                 comment += f',conf={avg_conf:.2f}'
+            if bg_coverage is not None:
+                comment += f',bgcov={bg_coverage:.2f}'
         else:
             comment = 'vehicles=unknown'
         exif[0x9286] = comment.encode()
