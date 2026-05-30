@@ -346,6 +346,37 @@ def _ensure_models() -> bool:
     return True
 
 
+def _suppress_contained_boxes(boxes: list, containment_threshold: float = 0.80) -> list:
+    """
+    Remove boxes where >= containment_threshold of the box's area falls inside another box.
+    Handles the case where YOLO detects both a full car and a sub-region (e.g. license plate),
+    which would have low IoU (so NMS misses it) but high containment.
+    When a box is suppressed, the larger enclosing box is kept.
+    """
+    if len(boxes) <= 1:
+        return boxes
+    suppress = set()
+    for i, (xi, yi, wi, hi, *_) in enumerate(boxes):
+        area_i = wi * hi
+        if area_i <= 0:
+            suppress.add(i)
+            continue
+        for j, (xj, yj, wj, hj, *_) in enumerate(boxes):
+            if i == j or j in suppress:
+                continue
+            # Intersection of box i and box j
+            ix1, iy1 = max(xi, xj), max(yi, yj)
+            ix2, iy2 = min(xi + wi, xj + wj), min(yi + hi, yj + hj)
+            if ix2 <= ix1 or iy2 <= iy1:
+                continue
+            inter = (ix2 - ix1) * (iy2 - iy1)
+            if inter / area_i >= containment_threshold:
+                suppress.add(i)  # box i is mostly inside box j — suppress the smaller one
+                logger.debug('Suppressed contained box %d (%.0f%% inside box %d)', i, 100*inter/area_i, j)
+                break
+    return [b for i, b in enumerate(boxes) if i not in suppress]
+
+
 def _count_vehicles(jpeg_bytes: bytes) -> Optional[tuple]:
     """
     Count vehicles using bg subtraction as a gate for YOLO.
@@ -398,6 +429,9 @@ def _count_vehicles(jpeg_bytes: bytes) -> Optional[tuple]:
             kept.append((x, y, w, h, conf, False))
         elif bg_hit and conf >= YOLO_CONF_THRESHOLD_BG_ASSISTED:
             kept.append((x, y, w, h, conf, True))
+
+    # Suppress boxes that are mostly inside a larger box (e.g. license plate inside car)
+    kept = _suppress_contained_boxes(kept)
 
     count    = len(kept)
     avg_conf = sum(b[4] for b in kept) / count if count > 0 else None
