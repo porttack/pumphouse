@@ -99,9 +99,10 @@ def get_snapshot(token_file: Path, camera_name: str = '', force_refresh: bool = 
                 vehicle_count = result[0] if result is not None else None
                 avg_conf      = result[1] if result is not None else None
                 bg_coverage   = result[2] if result is not None else None
+                boxes         = result[3] if result is not None else None
                 if vehicle_count is not None:
                     _write_count_cache(vehicle_count)
-                data = _stamp_timestamp(data, vehicle_count, avg_conf, bg_coverage)
+                data = _stamp_timestamp(data, vehicle_count, avg_conf, bg_coverage, boxes)
                 data = _add_exif_metadata(data, vehicle_count, avg_conf, bg_coverage)
                 RING_CACHE_FILE.write_bytes(data)
                 logger.info('Ring snapshot fetched and cached (%d bytes, vehicles=%s, conf=%s)',
@@ -233,9 +234,10 @@ def _fetch_from_ring(token_file: Path, camera_name: str) -> Optional[bytes]:
 
 def _stamp_timestamp(jpeg_bytes: bytes, vehicle_count: Optional[int] = None,
                      avg_conf: Optional[float] = None,
-                     bg_coverage: Optional[float] = None) -> bytes:
+                     bg_coverage: Optional[float] = None,
+                     boxes: Optional[list] = None) -> bytes:
     """
-    Overlay the current time (and vehicle count + confidence if available) on the bottom-left.
+    Draw bounding boxes (green=standalone, yellow=bg-assisted) and overlay timestamp/count.
     Falls back to the original bytes if cv2 is unavailable or decoding fails.
     """
     try:
@@ -249,7 +251,17 @@ def _stamp_timestamp(jpeg_bytes: bytes, vehicle_count: Optional[int] = None,
     if img is None:
         return jpeg_bytes
 
-    h, w  = img.shape[:2]
+    h, w = img.shape[:2]
+
+    # Draw bounding boxes for each kept detection
+    if boxes:
+        box_scale = max(0.40, w / 3000)
+        for (bx, by, bw, bh, bconf, is_bg) in boxes:
+            color = (0, 200, 255) if is_bg else (0, 230, 0)  # yellow=bg-assisted, green=standalone
+            cv2.rectangle(img, (bx, by), (bx + bw, by + bh), color, 2)
+            cv2.putText(img, f'{bconf:.2f}', (bx, max(by - 4, 12)),
+                        cv2.FONT_HERSHEY_SIMPLEX, box_scale, color, 1, cv2.LINE_AA)
+
     time_str = datetime.now().strftime('%-I:%M %p')
     if vehicle_count is not None:
         _num_words = ['Zero','One','Two','Three','Four','Five',
@@ -257,9 +269,8 @@ def _stamp_timestamp(jpeg_bytes: bytes, vehicle_count: Optional[int] = None,
         _vc_word = _num_words[vehicle_count] if 0 <= vehicle_count < len(_num_words) else str(vehicle_count)
         cars_str = f'{_vc_word} car{"s" if vehicle_count != 1 else ""}'
         if avg_conf is not None and vehicle_count > 0:
-            label = f'{time_str}  {cars_str} (yolo:{avg_conf:.2f})'
-        elif bg_coverage is not None and vehicle_count > 0:
-            label = f'{time_str}  {cars_str} (bg:{bg_coverage:.2f})'
+            suffix = f' ({avg_conf:.2f} bg)' if bg_coverage is not None else f' ({avg_conf:.2f})'
+            label = f'{time_str}  {cars_str}{suffix}'
         else:
             label = f'{time_str}  {cars_str}'
     else:
@@ -337,10 +348,19 @@ def _ensure_models() -> bool:
 
 def _count_vehicles(jpeg_bytes: bytes) -> Optional[tuple]:
     """
-    Count vehicles in a JPEG. Returns (count, avg_conf) or None if inference fails.
-    avg_conf is the mean YOLO confidence of kept detections (0.0 if count==0).
-    Background subtraction count is included in total but not in avg_conf.
+    Count vehicles using bg subtraction as a gate for YOLO.
+    Returns (count, avg_conf, bg_coverage, boxes) or None if inference fails.
+
+    bg subtraction runs first. If it fires, YOLO candidates down to
+    YOLO_CONF_THRESHOLD_BG_ASSISTED are kept (bg-assisted). Without bg,
+    only candidates >= YOLO_CONF_THRESHOLD are kept. bg alone never counts.
+
+    boxes: list of (x, y, w, h, conf, is_bg_assisted) for kept detections.
+    avg_conf: mean conf of kept detections, or None if count == 0.
+    bg_coverage: coverage fraction if bg fired AND contributed a kept detection, else None.
     """
+    from monitor.config import YOLO_CONF_THRESHOLD, YOLO_CONF_THRESHOLD_BG_ASSISTED
+
     try:
         import cv2
         import numpy as np
@@ -353,26 +373,39 @@ def _count_vehicles(jpeg_bytes: bytes) -> Optional[tuple]:
         logger.warning('Vehicle count: failed to decode JPEG')
         return None
 
+    # Run bg subtraction first — fast, informs YOLO threshold
+    bg_hit, bg_coverage = _count_vehicles_background(img)
+
+    # Run YOLO at the lower threshold to surface all candidates
     if _YOLOV8_ONNX.exists():
-        result = _count_vehicles_yolov8(img)
+        result = _count_vehicles_yolov8(img, YOLO_CONF_THRESHOLD_BG_ASSISTED)
         if result is None:
             logger.warning('YOLOv8n inference failed; falling back to YOLOv4-tiny')
-            result = _count_vehicles_yolov4(img)
+            result = _count_vehicles_yolov4(img, YOLO_CONF_THRESHOLD_BG_ASSISTED)
     else:
-        result = _count_vehicles_yolov4(img)
+        result = _count_vehicles_yolov4(img, YOLO_CONF_THRESHOLD_BG_ASSISTED)
 
     if result is None:
         return None
 
-    yolo_count, avg_conf = result
-    bg_count, bg_coverage = _count_vehicles_background(img)
-    total = yolo_count + bg_count
-    if bg_count:
-        logger.info('Vehicle count: YOLO=%d + background zone=%d = %d', yolo_count, bg_count, total)
-    # Return yolo conf and bg coverage separately so the stamp can label the source
-    return (total,
-            avg_conf if yolo_count > 0 else None,
-            bg_coverage if bg_count > 0 else None)
+    _, _, candidate_boxes = result  # [x, y, w, h, conf]
+
+    # Gate: standalone >= high threshold, or bg fired AND >= low threshold
+    kept = []
+    for box in candidate_boxes:
+        x, y, w, h, conf = box
+        if conf >= YOLO_CONF_THRESHOLD:
+            kept.append((x, y, w, h, conf, False))
+        elif bg_hit and conf >= YOLO_CONF_THRESHOLD_BG_ASSISTED:
+            kept.append((x, y, w, h, conf, True))
+
+    count    = len(kept)
+    avg_conf = sum(b[4] for b in kept) / count if count > 0 else None
+    bg_cov   = bg_coverage if (bg_hit and any(b[5] for b in kept)) else None
+
+    logger.info('Vehicle count: %d (bg_hit=%s, bg_cov=%.3f, candidates=%d, kept=%d)',
+                count, bool(bg_hit), bg_coverage, len(candidate_boxes), count)
+    return count, avg_conf, bg_cov, kept
 
 
 def maybe_save_reference(jpeg_bytes: bytes) -> bool:
@@ -491,11 +524,10 @@ def _count_vehicles_background(img) -> tuple:
         return 0, 0.0
 
 
-def _count_vehicles_yolov8(img) -> Optional[tuple]:
-    """YOLOv8n inference via onnxruntime. Returns (count, avg_conf) or None on failure."""
-    from monitor.config import YOLO_CONF_THRESHOLD
-    _CONF = YOLO_CONF_THRESHOLD
-    _NMS  = 0.60
+def _count_vehicles_yolov8(img, conf_threshold: float) -> Optional[tuple]:
+    """YOLOv8n inference via onnxruntime. Returns (count, avg_conf, boxes) or None on failure.
+    boxes is a list of [x, y, w, h, conf] for detections kept after NMS."""
+    _NMS = 0.60
     try:
         import onnxruntime as ort
         import numpy as np
@@ -504,48 +536,45 @@ def _count_vehicles_yolov8(img) -> Optional[tuple]:
         sess = ort.InferenceSession(str(_YOLOV8_ONNX),
                                     providers=['CPUExecutionProvider'])
 
-        # Preprocess: resize to 640×640, RGB, float32, NCHW
         h0, w0 = img.shape[:2]
         inp = cv2.resize(img, (640, 640))
         inp = cv2.cvtColor(inp, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-        inp = inp.transpose(2, 0, 1)[np.newaxis]  # NCHW
+        inp = inp.transpose(2, 0, 1)[np.newaxis]
 
         outputs = sess.run(None, {sess.get_inputs()[0].name: inp})
-        # YOLOv8 output: [1, 84, 8400]  (4 box + 80 class scores, no objectness)
-        preds = outputs[0][0].T  # → [8400, 84]
+        preds = outputs[0][0].T  # [8400, 84]
 
-        boxes, confidences = [], []
+        raw_boxes, confidences = [], []
         for row in preds:
             class_scores = row[4:]
             class_id = int(class_scores.argmax())
             conf = float(class_scores[class_id])
-            if conf >= _CONF and class_id in _VEHICLE_CLASSES:
+            if conf >= conf_threshold and class_id in _VEHICLE_CLASSES:
                 cx, cy, bw, bh = row[:4]
                 x = int((cx - bw / 2) * w0 / 640)
                 y = int((cy - bh / 2) * h0 / 640)
                 w = int(bw * w0 / 640)
                 h = int(bh * h0 / 640)
-                boxes.append([x, y, w, h])
+                raw_boxes.append([x, y, w, h])
                 confidences.append(conf)
 
-        indices = cv2.dnn.NMSBoxes(boxes, confidences,
-                                   score_threshold=_CONF, nms_threshold=_NMS)
-        count = len(indices) if len(indices) > 0 else 0
+        indices = cv2.dnn.NMSBoxes(raw_boxes, confidences,
+                                   score_threshold=conf_threshold, nms_threshold=_NMS)
         flat  = list(indices.flatten()) if hasattr(indices, 'flatten') else list(indices)
-        avg_conf = sum(confidences[i] for i in flat) / len(flat) if flat else 0.0
-        logger.info('Vehicle count (YOLOv8n): %d after NMS (raw=%d, avg_conf=%.2f)',
-                    count, len(boxes), avg_conf)
-        return count, avg_conf
+        kept  = [[*raw_boxes[i], confidences[i]] for i in flat]
+        avg_conf = sum(b[4] for b in kept) / len(kept) if kept else 0.0
+        logger.info('Vehicle count (YOLOv8n): %d after NMS (raw=%d, avg_conf=%.2f, threshold=%.2f)',
+                    len(kept), len(raw_boxes), avg_conf, conf_threshold)
+        return len(kept), avg_conf, kept
     except Exception as e:
         logger.error('YOLOv8n vehicle count error (%s: %s)', type(e).__name__, e)
         return None
 
 
-def _count_vehicles_yolov4(img) -> Optional[tuple]:
-    """YOLOv4-tiny inference via cv2.dnn. Returns (count, avg_conf) or None on failure."""
-    from monitor.config import YOLO_CONF_THRESHOLD
-    _CONF = YOLO_CONF_THRESHOLD
-    _NMS  = 0.60
+def _count_vehicles_yolov4(img, conf_threshold: float) -> Optional[tuple]:
+    """YOLOv4-tiny inference via cv2.dnn. Returns (count, avg_conf, boxes) or None on failure.
+    boxes is a list of [x, y, w, h, conf] for detections kept after NMS."""
+    _NMS = 0.60
     try:
         import cv2
         import numpy as np
@@ -562,25 +591,25 @@ def _count_vehicles_yolov4(img) -> Optional[tuple]:
         net.setInput(blob)
         outputs = net.forward(net.getUnconnectedOutLayersNames())
 
-        boxes, confidences = [], []
+        raw_boxes, confidences = [], []
         for output in outputs:
             for det in output:
                 scores = det[5:]
                 class_id = int(scores.argmax())
                 conf = float(scores[class_id])
-                if conf >= _CONF and class_id in _VEHICLE_CLASSES:
+                if conf >= conf_threshold and class_id in _VEHICLE_CLASSES:
                     cx, cy, bw, bh = (det[:4] * [w, h, w, h]).astype(int)
-                    boxes.append([cx - bw // 2, cy - bh // 2, bw, bh])
+                    raw_boxes.append([cx - bw // 2, cy - bh // 2, bw, bh])
                     confidences.append(conf)
 
-        indices = cv2.dnn.NMSBoxes(boxes, confidences,
-                                   score_threshold=_CONF, nms_threshold=_NMS)
-        count = len(indices) if len(indices) > 0 else 0
+        indices = cv2.dnn.NMSBoxes(raw_boxes, confidences,
+                                   score_threshold=conf_threshold, nms_threshold=_NMS)
         flat  = list(indices.flatten()) if hasattr(indices, 'flatten') else list(indices)
-        avg_conf = sum(confidences[i] for i in flat) / len(flat) if flat else 0.0
-        logger.info('Vehicle count (YOLOv4-tiny): %d after NMS (raw=%d, avg_conf=%.2f)',
-                    count, len(boxes), avg_conf)
-        return count, avg_conf
+        kept  = [[*raw_boxes[i], confidences[i]] for i in flat]
+        avg_conf = sum(b[4] for b in kept) / len(kept) if kept else 0.0
+        logger.info('Vehicle count (YOLOv4-tiny): %d after NMS (raw=%d, avg_conf=%.2f, threshold=%.2f)',
+                    len(kept), len(raw_boxes), avg_conf, conf_threshold)
+        return len(kept), avg_conf, kept
     except Exception as e:
         logger.error('YOLOv4-tiny vehicle count error (%s: %s)', type(e).__name__, e)
         return None

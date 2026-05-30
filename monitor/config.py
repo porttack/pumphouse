@@ -252,7 +252,8 @@ RING_CAMERA_NAME = ''  # Name of Ring device to use (e.g. "Front Door"); first d
 RING_TOKEN_FILE = Path.home() / '.config' / 'pumphouse' / 'ring_token.json'
 RING_CACHE_FILE = Path.home() / '.config' / 'pumphouse' / 'ring_snapshot_cache.jpg'
 RING_CACHE_MINUTES = 10  # How long to cache the Ring snapshot (shared across all processes)
-YOLO_CONF_THRESHOLD = 0.20  # Minimum YOLO confidence to count a detection (was 0.15)
+YOLO_CONF_THRESHOLD = 0.20             # Standalone YOLO confidence threshold
+YOLO_CONF_THRESHOLD_BG_ASSISTED = 0.12  # Lower threshold when background subtraction also fires
 
 # Load secrets from secrets file
 SECRETS_FILE = Path.home() / '.config' / 'pumphouse' / 'secrets.conf'
