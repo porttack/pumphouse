@@ -28,7 +28,13 @@ _MODELS_DIR   = Path(__file__).parent.parent / 'models'
 _YOLO_CFG     = _MODELS_DIR / 'yolov4-tiny.cfg'
 _YOLO_WEIGHTS = _MODELS_DIR / 'yolov4-tiny.weights'
 _COCO_NAMES   = _MODELS_DIR / 'coco.names'
-_YOLOV8_ONNX  = _MODELS_DIR / 'yolov8n.onnx'
+
+def _yolov8_onnx_path() -> Path:
+    """Return the configured YOLOv8 ONNX path, falling back to yolov8n if the preferred model is missing."""
+    from monitor.config import YOLO_MODEL
+    preferred = _MODELS_DIR / f'{YOLO_MODEL}.onnx'
+    fallback  = _MODELS_DIR / 'yolov8n.onnx'
+    return preferred if preferred.exists() else fallback
 
 # COCO class indices that count as "vehicles"
 _VEHICLE_CLASSES = {2, 3, 5, 7}  # car, motorcycle, bus, truck
@@ -408,10 +414,11 @@ def _count_vehicles(jpeg_bytes: bytes) -> Optional[tuple]:
     bg_hit, bg_coverage = _count_vehicles_background(img)
 
     # Run YOLO at the lower threshold to surface all candidates
-    if _YOLOV8_ONNX.exists():
+    onnx_path = _yolov8_onnx_path()
+    if onnx_path.exists():
         result = _count_vehicles_yolov8(img, YOLO_CONF_THRESHOLD_BG_ASSISTED)
         if result is None:
-            logger.warning('YOLOv8n inference failed; falling back to YOLOv4-tiny')
+            logger.warning('%s inference failed; falling back to YOLOv4-tiny', onnx_path.stem)
             result = _count_vehicles_yolov4(img, YOLO_CONF_THRESHOLD_BG_ASSISTED)
     else:
         result = _count_vehicles_yolov4(img, YOLO_CONF_THRESHOLD_BG_ASSISTED)
@@ -558,8 +565,22 @@ def _count_vehicles_background(img) -> tuple:
         return 0, 0.0
 
 
+def _apply_clahe(img):
+    """Apply CLAHE to the L channel in LAB space to normalize glare and low-light areas."""
+    import cv2
+    from monitor.config import YOLO_CLAHE_ENABLED, YOLO_CLAHE_CLIP_LIMIT, YOLO_CLAHE_TILE_SIZE
+    if not YOLO_CLAHE_ENABLED:
+        return img
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=YOLO_CLAHE_CLIP_LIMIT,
+                             tileGridSize=(YOLO_CLAHE_TILE_SIZE, YOLO_CLAHE_TILE_SIZE))
+    l = clahe.apply(l)
+    return cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
+
+
 def _count_vehicles_yolov8(img, conf_threshold: float) -> Optional[tuple]:
-    """YOLOv8n inference via onnxruntime. Returns (count, avg_conf, boxes) or None on failure.
+    """YOLOv8s inference via onnxruntime. Returns (count, avg_conf, boxes) or None on failure.
     boxes is a list of [x, y, w, h, conf] for detections kept after NMS."""
     _NMS = 0.60
     try:
@@ -567,7 +588,8 @@ def _count_vehicles_yolov8(img, conf_threshold: float) -> Optional[tuple]:
         import numpy as np
         import cv2
 
-        sess = ort.InferenceSession(str(_YOLOV8_ONNX),
+        img = _apply_clahe(img)
+        sess = ort.InferenceSession(str(_yolov8_onnx_path()),
                                     providers=['CPUExecutionProvider'])
 
         h0, w0 = img.shape[:2]
@@ -613,6 +635,7 @@ def _count_vehicles_yolov4(img, conf_threshold: float) -> Optional[tuple]:
         import cv2
         import numpy as np
 
+        img = _apply_clahe(img)
         if not _ensure_models():
             return None
 

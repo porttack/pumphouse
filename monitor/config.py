@@ -254,6 +254,10 @@ RING_CACHE_FILE = Path.home() / '.config' / 'pumphouse' / 'ring_snapshot_cache.j
 RING_CACHE_MINUTES = 10  # How long to cache the Ring snapshot (shared across all processes)
 YOLO_CONF_THRESHOLD = 0.20             # Standalone YOLO confidence threshold
 YOLO_CONF_THRESHOLD_BG_ASSISTED = 0.12  # Lower threshold when background subtraction also fires
+YOLO_MODEL = 'yolov8s'                 # Model name: 'yolov8n' (faster) or 'yolov8s' (more accurate)
+YOLO_CLAHE_ENABLED = True              # Apply CLAHE preprocessing to improve glare/low-light detection
+YOLO_CLAHE_CLIP_LIMIT = 2.0           # CLAHE clip limit (higher = more contrast enhancement)
+YOLO_CLAHE_TILE_SIZE = 8              # CLAHE tile grid size (smaller = more local)
 
 # Load secrets from secrets file
 SECRETS_FILE = Path.home() / '.config' / 'pumphouse' / 'secrets.conf'
