@@ -277,6 +277,8 @@ def _stamp_timestamp(jpeg_bytes: bytes, vehicle_count: Optional[int] = None,
         if avg_conf is not None and vehicle_count > 0:
             suffix = f' ({avg_conf:.2f} bg)' if bg_coverage is not None else f' ({avg_conf:.2f})'
             label = f'{time_str}  {cars_str}{suffix}'
+        elif bg_coverage is not None and vehicle_count > 0:
+            label = f'{time_str}  {cars_str} (bg:{bg_coverage:.2f})'
         else:
             label = f'{time_str}  {cars_str}'
     else:
@@ -449,6 +451,19 @@ def _count_vehicles(jpeg_bytes: bytes) -> Optional[tuple]:
 
     # Suppress boxes that are mostly inside a larger box (e.g. license plate inside car)
     kept = _suppress_contained_boxes(kept)
+
+    # If YOLO found zero vehicle candidates at all (not even at the low threshold),
+    # fall back to bg subtraction alone when coverage is strong.
+    # This handles IR night-vision images where YOLO is trained on daytime color photos
+    # and simply cannot recognize car shapes — bg subtraction compares IR to IR directly.
+    from monitor.config import YOLO_BG_STANDALONE_THRESHOLD
+    if not candidate_boxes and bg_hit and bg_coverage >= YOLO_BG_STANDALONE_THRESHOLD:
+        logger.info('YOLO found no candidates; using bg-only detection (coverage=%.3f >= %.3f)',
+                    bg_coverage, YOLO_BG_STANDALONE_THRESHOLD)
+        count    = 1
+        avg_conf = None
+        bg_cov   = bg_coverage
+        return count, avg_conf, bg_cov, []  # no boxes to draw — we don't know where in frame
 
     count    = len(kept)
     avg_conf = sum(b[4] for b in kept) / count if count > 0 else None
