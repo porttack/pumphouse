@@ -428,10 +428,20 @@ def _count_vehicles(jpeg_bytes: bytes) -> Optional[tuple]:
 
     _, _, candidate_boxes = result  # [x, y, w, h, conf]
 
+    from monitor.config import YOLO_DRIVEWAY_ZONE
+    img_h, img_w = img.shape[:2]
+    zx1 = int(YOLO_DRIVEWAY_ZONE[0] * img_w); zy1 = int(YOLO_DRIVEWAY_ZONE[1] * img_h)
+    zx2 = int(YOLO_DRIVEWAY_ZONE[2] * img_w); zy2 = int(YOLO_DRIVEWAY_ZONE[3] * img_h)
+
     # Gate: standalone >= high threshold, or bg fired AND >= low threshold
+    # Also require box center to fall within the driveway zone
     kept = []
     for box in candidate_boxes:
         x, y, w, h, conf = box
+        cx, cy = x + w // 2, y + h // 2
+        if not (zx1 <= cx <= zx2 and zy1 <= cy <= zy2):
+            logger.debug('Ignoring detection at (%d,%d) outside driveway zone', cx, cy)
+            continue
         if conf >= YOLO_CONF_THRESHOLD:
             kept.append((x, y, w, h, conf, False))
         elif bg_hit and conf >= YOLO_CONF_THRESHOLD_BG_ASSISTED:

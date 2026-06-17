@@ -43,7 +43,11 @@ DAILY_PURGE_HOUR   = 3      # Hour (0-23) after which the daily purge becomes el
 
 # Override Shutoff Configuration
 ENABLE_OVERRIDE_SHUTOFF = True  # Enable automatic override shutoff to prevent tank overflow
-OVERRIDE_SHUTOFF_THRESHOLD = 1400  # Gallons at which to turn off override valve
+OVERRIDE_SHUTOFF_THRESHOLD = 1400  # Gallons at which to turn off override valve (tank sensor)
+
+# Override Dosatron Safety Shutoff — catches high-flow events the tank sensor can't respond to fast enough
+OVERRIDE_DOSATRON_SHUTOFF_ENABLED = True   # Shut off override when estimated fill reaches threshold
+OVERRIDE_DOSATRON_SHUTOFF_GALLONS = 1425  # Est. gallons (tank-at-override-on + dosatron-since) to trigger shutoff
 
 # Override Auto-On Configuration
 OVERRIDE_ON_THRESHOLD = 1370  # Gallons at which to turn on override valve (None = disabled, e.g., 1350)
@@ -258,6 +262,9 @@ YOLO_MODEL = 'yolov8s'                 # Model name: 'yolov8n' (faster) or 'yolo
 YOLO_CLAHE_ENABLED = True              # Apply CLAHE preprocessing to improve glare/low-light detection
 YOLO_CLAHE_CLIP_LIMIT = 2.0           # CLAHE clip limit (higher = more contrast enhancement)
 YOLO_CLAHE_TILE_SIZE = 8              # CLAHE tile grid size (smaller = more local)
+# Driveway zone: only count YOLO detections whose center falls inside this region.
+# Fractions of image width/height: (x1, y1, x2, y2). Set to (0,0,1,1) to use full frame.
+YOLO_DRIVEWAY_ZONE = (0.30, 0.20, 1.0, 0.90)
 
 # Load secrets from secrets file
 SECRETS_FILE = Path.home() / '.config' / 'pumphouse' / 'secrets.conf'
