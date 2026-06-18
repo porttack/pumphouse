@@ -74,9 +74,11 @@ from monitor.web_timelapse import timelapse_bp  # noqa: E402
 from monitor.weather_api import current_weather_desc, get_wind_forecast  # noqa: E402
 from monitor.web_dosatron import dosatron_bp  # noqa: E402
 from monitor.web_ring import ring_bp  # noqa: E402
+from monitor.web_weather import weather_bp  # noqa: E402
 app.register_blueprint(timelapse_bp)
 app.register_blueprint(dosatron_bp)
 app.register_blueprint(ring_bp)
+app.register_blueprint(weather_bp)
 
 # Configuration
 USERNAME = os.environ.get('PUMPHOUSE_USER', 'admin')
@@ -2786,6 +2788,9 @@ def control(token):
         """
     else:
         return Response(f'Failed to execute: {action_taken}', status=500)
+
+
+
 
 def main():
     """Main entry point"""
