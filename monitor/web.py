@@ -84,7 +84,6 @@ app.register_blueprint(weather_bp)
 _SUBDOMAIN_REDIRECTS = {
     'weather.': '/weather',
     'tides.': '/weather',
-    'uptime.': 'https://onblackberryhill.com/internet',
 }
 
 @app.before_request
@@ -94,6 +93,11 @@ def _subdomain_redirect():
     for prefix, target in _SUBDOMAIN_REDIRECTS.items():
         if host.startswith(prefix) and request.path == '/':
             return redirect(target, code=302)
+
+@app.route('/uptime')
+def uptime_redirect():
+    from flask import redirect
+    return redirect('/internet', code=302)
 
 # Configuration
 USERNAME = os.environ.get('PUMPHOUSE_USER', 'admin')

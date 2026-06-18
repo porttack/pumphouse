@@ -234,22 +234,25 @@ curl -k https://localhost:6443/timelapse
 
 ---
 
-## Subdomain CNAMEs
+## Subdomain Hostnames
 
-CNAME records pointing to the tunnel, with Flask `before_request` handler
-(`web.py`) redirecting bare `/` to the correct path:
+Tunnel hostname routes (configured in Cloudflare dashboard under
+Connectors → pumphouse → Published Application Routes) with Flask
+`before_request` handler (`web.py`) redirecting bare `/` to the correct path:
 
-| Subdomain | Domain | Redirects `/` to |
-|-----------|--------|------------------|
-| `weather` | onblackberryhill.com | `/weather` |
-| `tides` | onblackberryhill.com | `/weather` |
-| `uptime` | blackberryhill.com | `https://onblackberryhill.com/internet` |
+| Hostname | Redirects `/` to |
+|----------|------------------|
+| `weather.onblackberryhill.com` | `/weather` |
+| `tides.onblackberryhill.com` | `/weather` |
 
-All three are CNAME records pointing to the tunnel ID (same as apex/www).
-Tunnel ingress rules route them to the same Flask app on the Pi.
-No Page Rules consumed — the redirect logic is in Flask.
+These are added as tunnel hostname routes (not manual CNAME records) — Cloudflare
+creates the DNS automatically. The redirect logic is in Flask (`_SUBDOMAIN_REDIRECTS`).
 
-Terraform: `tunnel.tf` (ingress rules + DNS records), `variables.tf` (`blackberryhill_zone_id`).
+**Uptime monitoring** (`/internet`) runs as a Cloudflare Worker — intentionally
+NOT routed through the tunnel so it can detect when the tunnel is down.
+Flask provides `/uptime` as a convenience redirect to `/internet`.
+
+Terraform: `tunnel.tf` (ingress rules + DNS records).
 
 ---
 
@@ -259,9 +262,9 @@ Terraform: `tunnel.tf` (ingress rules + DNS records), `variables.tf` (`blackberr
 |-----|-------------|-----|
 | `https://onblackberryhill.com/timelapse` | Public | Cloudflare CDN → Tunnel → Pi |
 | `https://onblackberryhill.com/weather` | Public | Weather, tides, forecast |
+| `https://onblackberryhill.com/uptime` | Public | Redirects to `/internet` |
 | `https://weather.onblackberryhill.com` | Public | Redirects to `/weather` |
 | `https://tides.onblackberryhill.com` | Public | Redirects to `/weather` |
-| `https://uptime.blackberryhill.com` | Public | Redirects to `/internet` |
 | `https://www.onblackberryhill.com` | Public | Redirects to apex |
 | `https://your-hostname.tplinkdns.com:6443` | You only (private) | Router → Pi direct |
 

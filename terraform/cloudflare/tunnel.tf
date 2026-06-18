@@ -54,15 +54,6 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "pumphouse" {
       }
     }
 
-    ingress_rule {
-      hostname = "uptime.blackberryhill.com"
-      service  = "https://localhost:${var.flask_port}"
-
-      origin_request {
-        no_tls_verify = true
-      }
-    }
-
     # Catch-all: any request that doesn't match a hostname above returns 404.
     # Required by cloudflared — must be the last rule.
     ingress_rule {
@@ -110,11 +101,3 @@ resource "cloudflare_record" "tides" {
   proxied = true
 }
 
-resource "cloudflare_record" "uptime" {
-  count   = var.blackberryhill_zone_id != "" ? 1 : 0
-  zone_id = var.blackberryhill_zone_id
-  name    = "uptime"
-  type    = "CNAME"
-  content = "${cloudflare_zero_trust_tunnel_cloudflared.pumphouse.id}.cfargotunnel.com"
-  proxied = true
-}

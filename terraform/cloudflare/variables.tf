@@ -28,12 +28,6 @@ variable "domain" {
   default     = "onblackberryhill.com"
 }
 
-variable "blackberryhill_zone_id" {
-  description = "Cloudflare Zone ID for blackberryhill.com (used for uptime subdomain)."
-  type        = string
-  default     = ""
-}
-
 variable "flask_port" {
   description = "HTTPS port Flask listens on locally on the Pi."
   type        = number
