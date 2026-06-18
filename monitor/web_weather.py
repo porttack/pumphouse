@@ -826,8 +826,8 @@ def weather_page():
         </div>
         <div class="stat">
           <div class="stat-value sun-times">
-            <div>🌅 {rise_str}</div>
-            <div>🌇 {set_str}</div>
+            <div>↑ {rise_str}</div>
+            <div>↓ {set_str}</div>
           </div>
           <div class="stat-label">Sunrise &amp; Sunset</div>
         </div>
