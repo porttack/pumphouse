@@ -234,11 +234,34 @@ curl -k https://localhost:6443/timelapse
 
 ---
 
+## Subdomain CNAMEs
+
+CNAME records pointing to the tunnel, with Flask `before_request` handler
+(`web.py`) redirecting bare `/` to the correct path:
+
+| Subdomain | Domain | Redirects `/` to |
+|-----------|--------|------------------|
+| `weather` | onblackberryhill.com | `/weather` |
+| `tides` | onblackberryhill.com | `/weather` |
+| `uptime` | blackberryhill.com | `https://onblackberryhill.com/internet` |
+
+All three are CNAME records pointing to the tunnel ID (same as apex/www).
+Tunnel ingress rules route them to the same Flask app on the Pi.
+No Page Rules consumed — the redirect logic is in Flask.
+
+Terraform: `tunnel.tf` (ingress rules + DNS records), `variables.tf` (`blackberryhill_zone_id`).
+
+---
+
 ## URL Reference
 
 | URL | Who Uses It | Via |
 |-----|-------------|-----|
 | `https://onblackberryhill.com/timelapse` | Public | Cloudflare CDN → Tunnel → Pi |
+| `https://onblackberryhill.com/weather` | Public | Weather, tides, forecast |
+| `https://weather.onblackberryhill.com` | Public | Redirects to `/weather` |
+| `https://tides.onblackberryhill.com` | Public | Redirects to `/weather` |
+| `https://uptime.blackberryhill.com` | Public | Redirects to `/internet` |
 | `https://www.onblackberryhill.com` | Public | Redirects to apex |
 | `https://your-hostname.tplinkdns.com:6443` | You only (private) | Router → Pi direct |
 

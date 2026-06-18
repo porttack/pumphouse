@@ -80,6 +80,21 @@ app.register_blueprint(dosatron_bp)
 app.register_blueprint(ring_bp)
 app.register_blueprint(weather_bp)
 
+# Hostname-based redirects for CNAME subdomains
+_SUBDOMAIN_REDIRECTS = {
+    'weather.': '/weather',
+    'tides.': '/weather',
+    'uptime.': 'https://onblackberryhill.com/internet',
+}
+
+@app.before_request
+def _subdomain_redirect():
+    from flask import request, redirect
+    host = request.host.split(':')[0].lower()
+    for prefix, target in _SUBDOMAIN_REDIRECTS.items():
+        if host.startswith(prefix) and request.path == '/':
+            return redirect(target, code=302)
+
 # Configuration
 USERNAME = os.environ.get('PUMPHOUSE_USER', 'admin')
 PASSWORD = os.environ.get('PUMPHOUSE_PASS', 'pumphouse')
