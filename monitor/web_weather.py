@@ -659,7 +659,7 @@ def weather_page():
     }}
     .temp-now-unit {{ font-size: 1.2rem; color: #94a3b8; vertical-align: super; }}
     .temp-now-updated {{
-      font-size: 0.62rem; color: #475569; margin-top: 6px;
+      font-size: 0.62rem; color: #94a3b8; margin-top: 6px;
     }}
     .stats-grid {{
       display: grid; grid-template-columns: repeat(4, 1fr);
@@ -675,7 +675,9 @@ def weather_page():
     .sun-times {{ font-size: 0.85rem; line-height: 1.6; }}
     .moon-info {{ font-size: 0.9rem; line-height: 1.4; }}
     .moon-times {{ font-size: 0.7rem; color: #64748b; }}
-    .updated {{ text-align: center; font-size: 0.72rem; color: #334155; margin-top: 18px; }}
+    .updated {{ text-align: center; font-size: 0.72rem; color: #94a3b8; margin-top: 18px; }}
+    .updated a {{ color: #94a3b8; text-decoration: none; }}
+    .updated a:hover {{ color: #e2e8f0; text-decoration: underline; }}
     .fc-card {{
       background: #111d35; border-radius: 16px; width: 100%; max-width: 680px;
       padding: 18px 16px 20px; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
@@ -824,8 +826,8 @@ def weather_page():
         </div>
         <div class="stat">
           <div class="stat-value sun-times">
-            <div>☀ {rise_str}</div>
-            <div>☀ {set_str}</div>
+            <div>🌅 {rise_str}</div>
+            <div>🌇 {set_str}</div>
           </div>
           <div class="stat-label">Sunrise &amp; Sunset</div>
         </div>
@@ -838,7 +840,7 @@ def weather_page():
           <div class="stat-label">{moon['name']}</div>
         </div>
       </div>
-      <div class="updated">Ambient Weather station</div>
+      <div class="updated"><a href="{AMBIENT_WEATHER_DASHBOARD_URL}" target="_blank" rel="noopener">Ambient Weather station</a></div>
     </div>
   </div>
 
