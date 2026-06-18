@@ -36,6 +36,19 @@ CHUNK_SAMPLES    = 512        # ~12 ms per chunk
 CHUNK_BYTES      = CHUNK_SAMPLES * CHANNELS * BYTES_PER_SAMPLE
 CHUNKS_PER_SEC   = SAMPLE_RATE // CHUNK_SAMPLES   # ≈ 86
 DEVICE           = "dosatron_in"   # dsnoop virtual device (see ~/.asoundrc)
+_ASOUNDRC_PATH   = os.path.expanduser("~/.asoundrc")
+_ASOUNDRC_CONTENT = """\
+pcm.dosatron_in {
+    type dsnoop
+    ipc_key 1024
+    slave {
+        pcm "hw:CARD=Device,DEV=0"
+        channels 1
+        rate 44100
+        format S16_LE
+    }
+}
+"""
 
 # ── dosatron calibration ──────────────────────────────────────────────────────
 # Each dosatron firing produces a click + clack (2 sounds). Together they
@@ -863,7 +876,16 @@ def _backfill_clip_name(clip_name: str):
 
 # ── entry point ────────────────────────────────────────────────────────────────
 
+def _ensure_asoundrc():
+    if os.path.exists(_ASOUNDRC_PATH):
+        return
+    with open(_ASOUNDRC_PATH, "w") as f:
+        f.write(_ASOUNDRC_CONTENT)
+    print(f"Created missing {_ASOUNDRC_PATH}")
+
+
 def main():
+    _ensure_asoundrc()
     _ensure_dirs()
     parser = argparse.ArgumentParser(description="Dosatron click detector")
     parser.add_argument("--calibrate", action="store_true")

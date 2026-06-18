@@ -42,7 +42,7 @@ pcm.dosatron_in {
 
 Using `CARD=Device` (the card's stable name) rather than `hw:3,0` (a card number that changes on reboot) prevents the device from silently breaking after a reboot.
 
-**This file is not tracked in git.** If it goes missing (e.g. after a fresh Pi setup), recreate it manually and restart the audio service.
+**This file is not tracked in git.** If it goes missing, the listener auto-creates it on startup.
 
 Verify the device works:
 ```bash
