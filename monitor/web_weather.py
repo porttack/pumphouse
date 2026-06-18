@@ -15,6 +15,7 @@ import csv
 import gzip
 import io
 import json
+import math
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -46,6 +47,70 @@ _WMO_EMOJI = {
     85: '🌨️', 86: '❄️',
     95: '⛈️', 96: '⛈️', 99: '⛈️',
 }
+
+
+_MOON_EMOJIS = [
+    (0.0625, '🌑'), (0.1875, '🌒'), (0.3125, '🌓'), (0.4375, '🌔'),
+    (0.5625, '🌕'), (0.6875, '🌖'), (0.8125, '🌗'), (0.9375, '🌘'),
+    (1.0001, '🌑'),
+]
+_MOON_NAMES = [
+    (0.0625, 'New'), (0.1875, 'Waxing Crescent'), (0.3125, 'First Quarter'),
+    (0.4375, 'Waxing Gibbous'), (0.5625, 'Full'), (0.6875, 'Waning Gibbous'),
+    (0.8125, 'Last Quarter'), (0.9375, 'Waning Crescent'), (1.0001, 'New'),
+]
+
+
+def _moon_info():
+    """Return moon phase emoji, name, illumination %, and rise/set times."""
+    tz = ZoneInfo('America/Los_Angeles')
+    now = datetime.now(tz)
+
+    # Moon phase from synodic cycle (known new moon: 2000-01-06 18:14 UTC)
+    days = (now - datetime(2000, 1, 6, 18, 14, tzinfo=ZoneInfo('UTC'))).total_seconds() / 86400
+    phase = (days % 29.53058770576) / 29.53058770576
+    illumination = round((1 - math.cos(2 * math.pi * phase)) / 2 * 100)
+    emoji = next(e for t, e in _MOON_EMOJIS if phase < t)
+    name = next(n for t, n in _MOON_NAMES if phase < t)
+
+    # Moonrise/moonset from Norwegian Met API (free, no key)
+    moonrise = moonset = None
+    try:
+        date_str = now.strftime('%Y-%m-%d')
+        url = (
+            f'https://api.met.no/weatherapi/sunrise/3.0/moon'
+            f'?lat={_LAT}&lon={_LON}&date={date_str}&offset=-07:00'
+        )
+        req = urllib.request.Request(url, headers={'User-Agent': 'pumphouse/1.0'})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+        props = data.get('properties', {})
+        mr = props.get('moonrise', {}).get('time')
+        ms = props.get('moonset', {}).get('time')
+        if mr:
+            moonrise = datetime.fromisoformat(mr).strftime('%-I:%M %p')
+        if ms:
+            moonset = datetime.fromisoformat(ms).strftime('%-I:%M %p')
+    except Exception:
+        pass
+
+    # Next new or full moon date
+    cycle = 29.53058770576
+    age = days % cycle
+    if phase < 0.5:
+        days_to_full = (0.5 - phase) * cycle
+        next_event_dt = now + timedelta(days=days_to_full)
+        next_event = f'🌕 {next_event_dt.strftime("%b %-d")}'
+    else:
+        days_to_new = (1.0 - phase) * cycle
+        next_event_dt = now + timedelta(days=days_to_new)
+        next_event = f'🌑 {next_event_dt.strftime("%b %-d")}'
+
+    return {
+        'emoji': emoji, 'name': name, 'illumination': illumination,
+        'moonrise': moonrise, 'moonset': moonset,
+        'next_event': next_event,
+    }
 
 
 def _current_conditions():
@@ -491,11 +556,11 @@ def weather_page():
     chart_json    = _build_chart_data()
     mini_json     = _temp_chart_data(sunrise_hm, sunset_hm)
     tides         = _fetch_tides()
+    moon          = _moon_info()
 
     temp_str     = f'{cond["temp"]:.0f}'      if cond['temp']     is not None else '–'
     humid_str    = f'{cond["humid"]:.0f}'     if cond['humid']    is not None else '–'
     wind_str     = f'{cond["wind"]:.0f}'      if cond['wind']     is not None else '–'
-    pressure_str = f'{cond["pressure"]:.2f}'  if cond['pressure'] is not None else '–'
     updated_str  = f'Updated {cond["ts"]}'    if cond['ts']       else ''
     desc_str     = weather_desc or '&nbsp;'
     fc_html      = _forecast_html(forecast_days)
@@ -607,7 +672,9 @@ def weather_page():
       font-size: 0.65rem; color: #475569; text-transform: uppercase;
       letter-spacing: 0.08em; margin-top: 4px;
     }}
-    .sun-times {{ font-size: 1rem; line-height: 1.6; }}
+    .sun-times {{ font-size: 0.85rem; line-height: 1.6; }}
+    .moon-info {{ font-size: 0.9rem; line-height: 1.4; }}
+    .moon-times {{ font-size: 0.7rem; color: #64748b; }}
     .updated {{ text-align: center; font-size: 0.72rem; color: #334155; margin-top: 18px; }}
     .fc-card {{
       background: #111d35; border-radius: 16px; width: 100%; max-width: 680px;
@@ -756,15 +823,19 @@ def weather_page():
           <div class="stat-label">Wind Gust</div>
         </div>
         <div class="stat">
-          <div class="stat-value">{pressure_str}<span class="stat-unit"> inHg</span></div>
-          <div class="stat-label">Pressure</div>
+          <div class="stat-value sun-times">
+            <div>☀ {rise_str}</div>
+            <div>☀ {set_str}</div>
+          </div>
+          <div class="stat-label">Sunrise &amp; Sunset</div>
         </div>
         <div class="stat">
-          <div class="stat-value sun-times">
-            <div>{rise_str}</div>
-            <div>{set_str}</div>
+          <div class="stat-value moon-info">
+            <div>{moon['emoji']} {moon['illumination']}%</div>
+            <div class="moon-times">{moon['moonrise'] or '–'} / {moon['moonset'] or '–'}</div>
+            <div class="moon-times">{moon['next_event']}</div>
           </div>
-          <div class="stat-label">Rise &amp; Set</div>
+          <div class="stat-label">{moon['name']}</div>
         </div>
       </div>
       <div class="updated">Ambient Weather station</div>
@@ -930,7 +1001,7 @@ def weather_page():
           ctx.restore();
         }}
         sunIcon(mini.risePct, '☀️');
-        sunIcon(mini.setPct, '🌙');
+        sunIcon(mini.setPct, '{moon["emoji"]}');
       }}
     }};
     new Chart(sparkCtx, {{
