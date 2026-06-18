@@ -4,6 +4,7 @@ Simplified event-based polling loop
 import csv
 import json
 import os
+import shutil
 import threading
 import time
 from collections import deque
@@ -16,6 +17,7 @@ from monitor.config import (
     RESIDUAL_PRESSURE_SECONDS, SECONDS_PER_GALLON,
     ENABLE_PURGE, MIN_PURGE_INTERVAL, ENABLE_DAILY_PURGE, DAILY_PURGE_HOUR,
     ENABLE_OVERRIDE_SHUTOFF, OVERRIDE_SHUTOFF_THRESHOLD,
+    OVERRIDE_DOSATRON_SHUTOFF_ENABLED, OVERRIDE_DOSATRON_SHUTOFF_GALLONS,
     OVERRIDE_ON_THRESHOLD,
     NOTIFY_OVERRIDE_SHUTOFF, NOTIFY_WELL_RECOVERY_THRESHOLD,
     NOTIFY_WELL_RECOVERY_STAGNATION_HOURS,
@@ -366,6 +368,11 @@ class SimplifiedMonitor:
         # Override shutoff control
         self.enable_override_shutoff = ENABLE_OVERRIDE_SHUTOFF
         self.override_shutoff_threshold = OVERRIDE_SHUTOFF_THRESHOLD
+
+        # Override dosatron safety shutoff
+        self.override_dosatron_shutoff_gallons = OVERRIDE_DOSATRON_SHUTOFF_GALLONS
+        self._override_on_time = None          # time.time() when override went ON
+        self._override_on_tank_gallons = None  # tank level at that moment
 
         # Override auto-on control
         self.override_on_threshold = OVERRIDE_ON_THRESHOLD
@@ -1085,6 +1092,10 @@ class SimplifiedMonitor:
                                         self.log_state_event('OVERRIDE_AUTO_ON',
                                             f'Auto-on: tank at {self.state.tank_gallons:.0f} gal (threshold: {self.override_on_threshold})')
 
+                                        # Seed dosatron safety shutoff tracking
+                                        self._override_on_time = current_time
+                                        self._override_on_tank_gallons = self.state.tank_gallons
+
                                         # Send notification
                                         if NOTIFY_OVERRIDE_SHUTOFF and self.notification_manager.can_notify('override_auto_on'):
                                             self.send_alert(
@@ -1101,6 +1112,7 @@ class SimplifiedMonitor:
                             import importlib
                             importlib.reload(config)
                             self.override_shutoff_threshold = config.OVERRIDE_SHUTOFF_THRESHOLD
+                            self.override_dosatron_shutoff_gallons = config.OVERRIDE_DOSATRON_SHUTOFF_GALLONS
 
                             relay_status = self.get_relay_status()
                             if (relay_status['supply_override'] == 'ON' and
@@ -1480,6 +1492,15 @@ class SimplifiedMonitor:
                         subject = f"{current_gal:.0f} gal - Daily Status"
                         message = f"Daily status report for {datetime.now().strftime('%A, %B %d, %Y')}"
 
+                    # Disk space warning
+                    disk = shutil.disk_usage('/')
+                    disk_pct_free = disk.free / disk.total * 100
+                    if disk_pct_free < 20:
+                        disk_warn = (f"⚠️ Low disk space: {disk_pct_free:.0f}% free "
+                                     f"({disk.free / 1e9:.1f} GB of {disk.total / 1e9:.1f} GB remaining)")
+                        subject = f"⚠️ Low disk ({disk_pct_free:.0f}% free) - {subject}"
+                        message = disk_warn + "\n\n" + message
+
                     # Find yesterday's best sunset frame to attach
                     sunset_image_path = None
                     sunset_image_link = None
@@ -1575,8 +1596,53 @@ class SimplifiedMonitor:
                         next_checkout_dt = datetime.fromtimestamp(self.next_checkout_reminder_time)
                         print(f"  Next checkout reminder at: {next_checkout_dt.strftime('%Y-%m-%d %H:%M:%S')}\n")
 
+                # DOSATRON SAFETY SHUTOFF — checked every poll cycle (~10 seconds)
+                # Prevents overflow during high-flow events that the 5-min tank sensor can't catch in time.
+                # Estimates current fill as (tank level when override turned on) + (dosatron gallons since).
+                # Self-healing: seeds tracking state from relay status each cycle.
+                if OVERRIDE_DOSATRON_SHUTOFF_ENABLED and self.relay_control_enabled:
+                    _dos_relay = self.get_relay_status()
+                    _dos_override_on = _dos_relay['supply_override'] == 'ON'
+
+                    if _dos_override_on:
+                        if self._override_on_time is None:
+                            # Override was already ON at startup or turned on externally; seed from now
+                            self._override_on_time = current_time
+                            self._override_on_tank_gallons = self.state.tank_gallons
+                        elif self._override_on_tank_gallons is not None:
+                            _dos_clicks = _count_dosatron_clicks(self._override_on_time, current_time)
+                            _dos_gal = round(_dos_clicks * _DOSATRON_GPK, 2)
+                            _dos_est = self._override_on_tank_gallons + _dos_gal
+                            if _dos_est >= self.override_dosatron_shutoff_gallons:
+                                from monitor.relay import set_supply_override
+                                if set_supply_override('OFF', debug=self.debug):
+                                    OVERRIDE_MANUAL_OFF_FILE.unlink(missing_ok=True)
+                                    _dos_start_gal = self._override_on_tank_gallons
+                                    self._override_on_time = None
+                                    self._override_on_tank_gallons = None
+                                    _dos_msg = (
+                                        f'Dosatron safety shutoff: {_dos_gal:.1f} gal in since override-on '
+                                        f'(tank was {_dos_start_gal:.0f} gal, '
+                                        f'est. now {_dos_est:.0f} gal >= {self.override_dosatron_shutoff_gallons})'
+                                    )
+                                    self.log_state_event('OVERRIDE_SHUTOFF', _dos_msg)
+                                    if self.debug:
+                                        print(f"  → {_dos_msg}")
+                                    if (NOTIFY_OVERRIDE_SHUTOFF and
+                                            self.notification_manager.can_notify('override_shutoff_safety')):
+                                        self.send_alert(
+                                            'NOTIFY_TANK_FULL',
+                                            f"Est. {_dos_est:.0f} gal - Dosatron Safety Shutoff",
+                                            _dos_msg,
+                                            priority='high'
+                                        )
+                    else:
+                        # Override is off; clear tracking so next ON starts fresh
+                        self._override_on_time = None
+                        self._override_on_tank_gallons = None
+
                 time.sleep(self.poll_interval)
-        
+
         except Exception as e:
             import traceback
             tb = traceback.format_exc()

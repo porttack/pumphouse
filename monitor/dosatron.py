@@ -52,7 +52,7 @@ POST_ROLL_SECS        = 5.0   # 1 s pre + 5 s post = 6 s clip
 MAX_CYCLE_SECS    = 3600    # hard cap: 60 minutes
 POST_LOW_SECS     = 30      # keep recording after PRESSURE_LOW
 CYCLE_RETAIN_DAYS = 14
-CLIP_RETAIN_DAYS  = 7
+CLIP_RETAIN_DAYS  = 14
 
 # ── bypass / flow detection ────────────────────────────────────────────────────
 # FFT-based detection: the bypass water makes a hollow 190–210 Hz resonance.
