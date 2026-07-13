@@ -5,6 +5,7 @@ Serves HTTPS on port 6443 with basic authentication
 """
 import os
 import csv
+import json
 import argparse
 import io
 import threading
@@ -39,7 +40,8 @@ from monitor.config import (
     BYPASS_CYCLE_FILE,
     BYPASS_CYCLE_ON_HOURS,
     BYPASS_CYCLE_OFF_HOURS,
-    NATIONAL_WEATHER_URL
+    NATIONAL_WEATHER_URL,
+    DOS_ESTIMATE_FILE,
 )
 from monitor.gpio_helpers import (
     read_pressure, read_float_sensor, init_gpio, cleanup_gpio,
@@ -1530,6 +1532,17 @@ def epaper_bmp():
     except Exception:
         pass
 
+    # Read dosatron running estimate written by the monitor process every ~5s
+    _dos_est_gal = None
+    try:
+        if DOS_ESTIMATE_FILE.exists():
+            _est = json.loads(DOS_ESTIMATE_FILE.read_text())
+            _est_age = (datetime.now() - datetime.fromisoformat(_est['timestamp'])).total_seconds()
+            if _est_age < 300:
+                _dos_est_gal = float(_est['gallons'])
+    except Exception:
+        pass
+
     # Try live tank data first (30s timeout), fall back to latest snapshot
     tank_gallons = None
     tank_pct = None
@@ -1542,6 +1555,12 @@ def epaper_bmp():
             live_reading_ts = live.get('last_updated')
     except Exception:
         pass
+
+    # Prefer dosatron estimate when it's ahead of the sensor (mid-fill) or sensor failed
+    if _dos_est_gal is not None and (tank_gallons is None or _dos_est_gal > tank_gallons):
+        tank_gallons = _dos_est_gal
+        tank_pct = (tank_gallons / TANK_CAPACITY_GALLONS) * 100
+        live_reading_ts = None
 
     if tank_gallons is None and rows:
         try:
@@ -1684,6 +1703,10 @@ def epaper_bmp():
                 smoothed.append(sum(window_vals) / len(window_vals))
         graph_gallons = smoothed
 
+    # Append dosatron estimate as the live right-edge point (unsmoothed, always "now")
+    if _dos_est_gal is not None and graph_gallons:
+        graph_gallons.append(_dos_est_gal)
+
     # Compute Y-axis range
     g_min_raw = min(graph_gallons) if len(graph_gallons) >= 2 else 0
     g_max_raw = max(graph_gallons) if len(graph_gallons) >= 2 else 0
@@ -1731,18 +1754,6 @@ def epaper_bmp():
     # X-axis labels
     hours_label = f"{hours // 24}d ago" if hours % 24 == 0 else f"{hours}h ago"
     draw.text((graph_left + s(1), graph_bottom + s(1)), hours_label, font=font_small, fill=0)
-    try:
-        if live_reading_ts:
-            now_label = live_reading_ts.strftime("%-m/%d %-I:%M %p")
-        else:
-            last_ts = datetime.fromisoformat(rows[-1]['timestamp'])
-            data_age = float(rows[-1].get('tank_data_age_seconds', 0))
-            reading_ts = last_ts - timedelta(seconds=data_age)
-            now_label = reading_ts.strftime("%-m/%d %-I:%M %p")
-    except Exception:
-        now_label = "now"
-    nl_bbox = draw.textbbox((0, 0), now_label, font=font_small)
-    draw.text((graph_right - (nl_bbox[2] - nl_bbox[0]) - s(1), graph_bottom + s(1)), now_label, font=font_small, fill=0)
 
     # Plot graph
     if len(graph_gallons) >= 2:

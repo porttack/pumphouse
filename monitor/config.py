@@ -47,7 +47,8 @@ OVERRIDE_SHUTOFF_THRESHOLD = 1400  # Gallons at which to turn off override valve
 
 # Override Dosatron Safety Shutoff — catches high-flow events the tank sensor can't respond to fast enough
 OVERRIDE_DOSATRON_SHUTOFF_ENABLED = True   # Shut off override when estimated fill reaches threshold
-OVERRIDE_DOSATRON_SHUTOFF_GALLONS = 1425  # Est. gallons (tank-at-override-on + dosatron-since) to trigger shutoff
+OVERRIDE_DOSATRON_SHUTOFF_GALLONS = 1425   # Est. gallons to trigger shutoff
+OVERRIDE_DOSATRON_RUNNING_ESTIMATE = True  # Use running estimate: last real reading + dosatron since (resets each tank fetch)
 
 # Override Auto-On Configuration
 OVERRIDE_ON_THRESHOLD = 1370  # Gallons at which to turn on override valve (None = disabled, e.g., 1350)
@@ -201,6 +202,10 @@ PURGE_PENDING_FILE = Path.home() / '.config' / 'pumphouse' / 'purge_pending'
 BYPASS_CYCLE_FILE     = Path.home() / '.config' / 'pumphouse' / 'bypass_cycle.json'
 BYPASS_CYCLE_ON_HOURS  = 4   # Default ON duration  (hours)
 BYPASS_CYCLE_OFF_HOURS = 2   # Default OFF duration (hours)
+
+# Dosatron running estimate: written by the monitor every poll cycle, read by the web server
+# for the current-level display and as the live right-edge graph point.
+DOS_ESTIMATE_FILE = Path.home() / '.local/share/pumphouse/dos_estimate.json'
 
 def load_config_file():
     """
