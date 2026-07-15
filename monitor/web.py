@@ -2187,14 +2187,38 @@ def api_flow_status():
         'tank_gallons':         None,
         'tank_reading_age_min': None,
         'tank_is_estimate':     False,
+        'tank_base_gallons':    None,
+        'tank_base_age_min':    None,
     }
 
-    # Real sensor reading — authoritative, shown with its age so the delayed
-    # graph is never the only reference.
-    real_gal, real_ts = _last_tank_reading()
-    if real_gal is not None:
-        result['tank_gallons']         = round(real_gal)
-        result['tank_reading_age_min'] = round((now - real_ts) / 60)
+    # Current tank level — same live source the graph uses. dos_estimate.json is
+    # written by the monitor every ~10s as (last successful sensor fetch + clicks
+    # since), so when idle it equals the graph's live reading, and during a fill it's
+    # the real-time estimate. Falls back to the last TANK_LEVEL event only if the
+    # monitor's estimate is stale/unavailable (e.g. monitor down).
+    est_gal = None
+    base_gal = base_ts = None
+    try:
+        _e = json.loads(DOS_ESTIMATE_FILE.read_text())
+        if (datetime.now() - datetime.fromisoformat(_e['timestamp'])).total_seconds() < 300:
+            est_gal  = float(_e['gallons'])
+            base_gal = _e.get('base_gallons')
+            base_ts  = _e.get('base_time')
+    except Exception:
+        pass
+
+    if est_gal is not None:
+        result['tank_gallons']     = round(est_gal)
+        result['tank_is_estimate'] = float_calling   # includes live clicks during a fill
+        if base_gal is not None:
+            result['tank_base_gallons'] = round(base_gal)
+            if base_ts:
+                result['tank_base_age_min'] = round((now - float(base_ts)) / 60)
+    else:
+        real_gal, real_ts = _last_tank_reading()
+        if real_gal is not None:
+            result['tank_gallons']         = round(real_gal)
+            result['tank_reading_age_min'] = round((now - real_ts) / 60)
 
     win_start, win_end, label = _fill_window(float_calling, now)
     result['duty_window_label'] = label
@@ -2219,15 +2243,6 @@ def api_flow_status():
 
         if win_start:
             result['duty_cycle_pct'] = _click_duty_pct(clicks, win_start, win_end)
-
-        # Live tank level during a fill: real reading + clicks since it was taken.
-        # Computed here (not from dos_estimate.json, which double-counts when the
-        # pressure signal sticks HIGH). Capped so it can't exceed the tank.
-        if float_calling and real_gal is not None and real_ts:
-            since_gal = sum(1 for t in clicks if t >= real_ts) * _GPK
-            est = min(real_gal + since_gal, TANK_CAPACITY_GALLONS * 1.10)
-            result['tank_gallons']     = round(est)
-            result['tank_is_estimate'] = True
 
     else:
         # ── bypass mode: flow from FFT detection, no dosatron clicks ──────────
@@ -2303,14 +2318,15 @@ def water2_status():
         + '</div>'
     )
     if via_cloudflare:
-        img_html    = img_tag
+        img_inner   = img_tag
         extra_links = ''
     else:
-        img_html    = f'<a href="{dashboard_url}" style="display:block;">{img_tag}</a>'
+        img_inner   = f'<a href="{dashboard_url}">{img_tag}</a>'
         extra_links = (
             '\n    <span>&bull;</span>'
             '\n    <a href="/">Dashboard</a>'
         )
+    img_html = f'<div class="img-wrap">{img_inner}<div class="spinner" id="tank-spinner"></div></div>'
 
     back = '/water2'
 
@@ -2380,12 +2396,38 @@ def water2_status():
       width: 100%;
       box-shadow: 0 4px 24px rgba(0,0,0,0.4);
     }}
+    /* Reserve the graph's box before the JPEG loads so text below doesn't jump.
+       The e-paper JPEG renders at a fixed 1000x488. */
+    .img-wrap {{
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1000 / 488;
+      border-radius: 6px;
+      overflow: hidden;
+    }}
     .card img {{
       width: 100%;
-      height: auto;
+      height: 100%;
+      object-fit: contain;
       border-radius: 6px;
       display: block;
     }}
+    .img-wrap a {{ display: block; width: 100%; height: 100%; }}
+    .spinner {{
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 40px;
+      height: 40px;
+      margin: -20px 0 0 -20px;
+      border: 4px solid rgba(143,179,232,0.25);
+      border-top-color: #8fb3e8;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      pointer-events: none;
+    }}
+    .spinner.hidden {{ display: none; }}
+    @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
     .flow-card {{
       background: #1e2d54;
       border-radius: 12px;
@@ -2450,8 +2492,13 @@ def water2_status():
     </div>
     <div class="flow-row" id="flow-tank-row" style="display:none">
       <div style="width:10px"></div>
-      <span class="flow-label">Tank level:</span>
+      <span class="flow-label" id="flow-tank-label">Tank level:</span>
       <span class="flow-value" id="flow-tank-text">&mdash;</span>
+    </div>
+    <div class="flow-row" id="flow-sensor-row" style="display:none">
+      <div style="width:10px"></div>
+      <span class="flow-label">Last sensor:</span>
+      <span class="flow-value" id="flow-sensor-text">&mdash;</span>
     </div>
     <div class="flow-ts" id="flow-updated"></div>
   </div>
@@ -2461,18 +2508,33 @@ def water2_status():
     <span>&bull;</span>
     <a href="/water">Public view</a>
     <span>&bull;</span>
-    <a href="{AMBIENT_WEATHER_DASHBOARD_URL}" target="_blank">Weather</a>{extra_links}
+    <a href="https://onblackberryhill.com/weather">Weather</a>{extra_links}
   </div>
   <script>
     const IMG_BASE = {json.dumps(img_base)};
     let _lastFlowing = false;
     let _imgTimer = null;
 
+    function showSpinner(on) {{
+      const sp = document.getElementById('tank-spinner');
+      if (sp) sp.classList.toggle('hidden', !on);
+    }}
+
     function refreshImage() {{
       const img = document.getElementById('tank-img');
       if (!img) return;
+      showSpinner(true);
       img.src = IMG_BASE + '&_t=' + Math.floor(Date.now() / 1000);
     }}
+
+    (function initImg() {{
+      const img = document.getElementById('tank-img');
+      if (!img) return;
+      img.addEventListener('load',  () => showSpinner(false));
+      img.addEventListener('error', () => showSpinner(false));
+      // If it was cached and already complete, hide immediately.
+      if (img.complete && img.naturalWidth > 0) showSpinner(false);
+    }})();
 
     function scheduleImg(flowing) {{
       if (_imgTimer) clearTimeout(_imgTimer);
@@ -2529,20 +2591,35 @@ def water2_status():
             dutyRow.style.display = 'none';
           }}
 
-          // Tank level: live estimate while filling, else real sensor + age
+          // Tank level: while filling show the live estimate AND the sensor base it
+          // builds on; when idle the estimate equals the sensor, so show one line.
+          const tankLabel  = document.getElementById('flow-tank-label');
+          const sensorRow  = document.getElementById('flow-sensor-row');
+          const sensorEl   = document.getElementById('flow-sensor-text');
+          const fmtAge = (m) => (m === null || m === undefined) ? ''
+            : (m < 1 ? 'just now' : m + 'm ago');
           if (d.tank_gallons !== null && d.tank_gallons !== undefined) {{
             tankRow.style.display = '';
             if (d.tank_is_estimate) {{
+              tankLabel.textContent = 'Est. level:';
               tankEl.textContent = '~' + d.tank_gallons + ' gal (filling)';
+              // second line: the sensor reading the estimate is built on
+              if (d.tank_base_gallons !== null && d.tank_base_gallons !== undefined) {{
+                sensorRow.style.display = '';
+                const a = fmtAge(d.tank_base_age_min);
+                sensorEl.textContent = d.tank_base_gallons + ' gal' + (a ? ' (' + a + ')' : '');
+              }} else {{
+                sensorRow.style.display = 'none';
+              }}
             }} else {{
-              const age = d.tank_reading_age_min;
-              const suffix = (age !== null && age !== undefined)
-                ? ' (sensor, ' + (age < 1 ? 'just now' : age + 'm ago') + ')'
-                : '';
-              tankEl.textContent = d.tank_gallons + ' gal' + suffix;
+              tankLabel.textContent = 'Tank level:';
+              const a = fmtAge(d.tank_reading_age_min);
+              tankEl.textContent = d.tank_gallons + ' gal' + (a ? ' (sensor, ' + a + ')' : '');
+              sensorRow.style.display = 'none';
             }}
           }} else {{
             tankRow.style.display = 'none';
+            sensorRow.style.display = 'none';
           }}
 
           updEl.textContent = 'Updated ' + new Date().toLocaleTimeString();

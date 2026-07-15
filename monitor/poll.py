@@ -59,13 +59,23 @@ except Exception:
     _DOSATRON_PREDICTION_FILE = None
 
 
-def _write_dos_estimate(gallons: float) -> None:
-    """Write real-time dosatron running estimate to file for the web server."""
+def _write_dos_estimate(gallons: float, base_gallons=None, base_time=None) -> None:
+    """Write real-time dosatron running estimate to file for the web server.
+
+    gallons      = base sensor reading + dosatron clicks since it was taken.
+    base_gallons = that last sensor reading (so the web can show reading vs estimate).
+    base_time    = unix time of that reading.
+    """
     try:
-        DOS_ESTIMATE_FILE.write_text(json.dumps({
+        data = {
             'gallons': round(gallons, 2),
             'timestamp': datetime.now().isoformat(),
-        }))
+        }
+        if base_gallons is not None:
+            data['base_gallons'] = round(base_gallons, 2)
+        if base_time is not None:
+            data['base_time'] = base_time
+        DOS_ESTIMATE_FILE.write_text(json.dumps(data))
     except Exception:
         pass
 
@@ -1637,7 +1647,9 @@ class SimplifiedMonitor:
                     _since_gal = round(_since_clicks * _DOSATRON_GPK, 2)
 
                 if self._dos_est_gallons is not None:
-                    _write_dos_estimate(self._dos_est_gallons + _since_gal)
+                    _write_dos_estimate(self._dos_est_gallons + _since_gal,
+                                        base_gallons=self._dos_est_gallons,
+                                        base_time=self._dos_est_base_time)
 
                 if OVERRIDE_DOSATRON_SHUTOFF_ENABLED and self.relay_control_enabled:
                     _dos_relay = self.get_relay_status()
