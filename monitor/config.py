@@ -343,3 +343,12 @@ if SECRETS_FILE.exists():
 # Compute DASHBOARD_URL from host/port (after secrets load)
 if PUMPHOUSE_HOST and not DASHBOARD_URL:
     DASHBOARD_URL = f"https://{PUMPHOUSE_HOST}:{PUMPHOUSE_PORT}/"
+
+# Derived control tokens — variants of the base bypass/purge secrets so no
+# secrets.conf changes are needed for the extra remote-control actions.
+SECRET_BYPASS_TIMED_TOKEN        = (SECRET_BYPASS_ON_TOKEN + '-4h')          if SECRET_BYPASS_ON_TOKEN else ''
+SECRET_BYPASS_CANCEL_TIMER_TOKEN = (SECRET_BYPASS_ON_TOKEN + '-cancel')      if SECRET_BYPASS_ON_TOKEN else ''
+SECRET_BYPASS_CYCLE_TOKEN        = (SECRET_BYPASS_ON_TOKEN + '-cycle')       if SECRET_BYPASS_ON_TOKEN else ''
+SECRET_TEST_FILTER_TOKEN         = (SECRET_BYPASS_ON_TOKEN + '-test-filter') if SECRET_BYPASS_ON_TOKEN else ''
+SECRET_PURGE_NEXT_TOKEN          = (SECRET_PURGE_TOKEN + '-next')            if SECRET_PURGE_TOKEN else ''
+SECRET_PURGE_CANCEL_NEXT_TOKEN   = (SECRET_PURGE_TOKEN + '-cancel')          if SECRET_PURGE_TOKEN else ''
