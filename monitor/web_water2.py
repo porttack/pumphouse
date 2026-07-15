@@ -22,6 +22,7 @@ from flask import Blueprint, Response, request, jsonify
 from monitor.config import (
     EVENTS_FILE,
     DOS_ESTIMATE_FILE,
+    TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS,
     SECRET_BYPASS_ON_TOKEN, SECRET_BYPASS_OFF_TOKEN,
     SECRET_OVERRIDE_ON_TOKEN, SECRET_OVERRIDE_OFF_TOKEN,
     SECRET_PURGE_TOKEN, SECRET_TEST_FILTER_TOKEN,
@@ -30,6 +31,13 @@ from monitor.gpio_helpers import read_float_sensor, FLOAT_STATE_CALLING
 from monitor.relay import get_all_relay_status
 
 water2_bp = Blueprint('water2', __name__)
+
+
+def _depth_inches(gallons):
+    """Convert gallons to tank depth in inches (linear; 1522 gal = 60")."""
+    if gallons is None:
+        return None
+    return round(gallons * TANK_HEIGHT_INCHES / TANK_CAPACITY_GALLONS, 1)
 
 
 def _read_events_tail_raw(chunk: int = 262144) -> str:
@@ -166,13 +174,16 @@ def api_flow_status():
         'float_calling':        float_calling,
         'is_flowing':           False,
         'gpm':                  None,
+        'last_gpm':             None,
         'last_click_age_s':     None,
         'duty_cycle_pct':       None,
         'duty_window_label':    None,
         'tank_gallons':         None,
+        'tank_inches':          None,
         'tank_reading_age_min': None,
         'tank_is_estimate':     False,
         'tank_base_gallons':    None,
+        'tank_base_inches':     None,
         'tank_base_age_min':    None,
     }
 
@@ -194,15 +205,19 @@ def api_flow_status():
 
     if est_gal is not None:
         result['tank_gallons']     = round(est_gal)
+        result['tank_inches']      = _depth_inches(est_gal)
         result['tank_is_estimate'] = float_calling   # includes live clicks during a fill
         if base_gal is not None:
             result['tank_base_gallons'] = round(base_gal)
+            result['tank_base_inches']  = _depth_inches(base_gal)
             if base_ts:
+                # Age of the last real sensor reading (shown filling *and* stopped).
                 result['tank_base_age_min'] = round((now - float(base_ts)) / 60)
     else:
         real_gal, real_ts = _last_tank_reading()
         if real_gal is not None:
             result['tank_gallons']         = round(real_gal)
+            result['tank_inches']          = _depth_inches(real_gal)
             result['tank_reading_age_min'] = round((now - real_ts) / 60)
 
     win_start, win_end, label = _fill_window(float_calling, now)
@@ -228,6 +243,16 @@ def api_flow_status():
 
         if win_start:
             result['duty_cycle_pct'] = _click_duty_pct(clicks, win_start, win_end)
+
+            # Average GPM over the fill window's *active* (clicking) time — shown as
+            # the "last fill" rate when we're not currently flowing. Active time is
+            # counted from 30s buckets that contain a click (matches the duty calc).
+            win_clicks = [t for t in clicks if win_start <= t <= win_end]
+            if win_clicks:
+                active_buckets = len({int((t - win_start) // 30) for t in win_clicks})
+                active_min = active_buckets * 30 / 60
+                if active_min > 0:
+                    result['last_gpm'] = round(len(win_clicks) * _GPK / active_min, 2)
 
     else:
         # ── bypass mode: flow from FFT detection, no dosatron clicks ──────────
@@ -467,7 +492,7 @@ def water2_status():
     </div>
     <div class="flow-row" id="flow-gpm-row" style="display:none">
       <div style="width:10px"></div>
-      <span class="flow-label">Est. GPM (60s):</span>
+      <span class="flow-label" id="flow-gpm-label">Est. GPM (60s):</span>
       <span class="flow-value" id="flow-gpm-text">&mdash;</span>
     </div>
     <div class="flow-row" id="flow-duty-row" style="display:none">
@@ -559,10 +584,16 @@ def water2_status():
             statusEl.textContent = 'Calling for water (no flow detected yet)';
           }}
 
-          // GPM: only while actually flowing
+          // GPM: live rate while flowing; otherwise the last fill's average rate
+          const gpmLabel = document.getElementById('flow-gpm-label');
           if (d.gpm !== null && d.gpm !== undefined) {{
             gpmRow.style.display = '';
+            gpmLabel.textContent = 'Est. GPM (60s):';
             gpmEl.textContent = d.gpm.toFixed(2) + ' gal/min';
+          }} else if (d.last_gpm !== null && d.last_gpm !== undefined) {{
+            gpmRow.style.display = '';
+            gpmLabel.textContent = 'Last fill GPM:';
+            gpmEl.textContent = d.last_gpm.toFixed(2) + ' gal/min';
           }} else {{
             gpmRow.style.display = 'none';
           }}
@@ -583,23 +614,28 @@ def water2_status():
           const sensorEl   = document.getElementById('flow-sensor-text');
           const fmtAge = (m) => (m === null || m === undefined) ? ''
             : (m < 1 ? 'just now' : m + 'm ago');
+          const fmtGalIn = (gal, inches) => gal + ' gal'
+            + ((inches !== null && inches !== undefined) ? ' / ' + inches + ' in' : '');
           if (d.tank_gallons !== null && d.tank_gallons !== undefined) {{
             tankRow.style.display = '';
             if (d.tank_is_estimate) {{
               tankLabel.textContent = 'Est. level:';
-              tankEl.textContent = '~' + d.tank_gallons + ' gal (filling)';
+              tankEl.textContent = '~' + fmtGalIn(d.tank_gallons, d.tank_inches) + ' (filling)';
               // second line: the sensor reading the estimate is built on
               if (d.tank_base_gallons !== null && d.tank_base_gallons !== undefined) {{
                 sensorRow.style.display = '';
                 const a = fmtAge(d.tank_base_age_min);
-                sensorEl.textContent = d.tank_base_gallons + ' gal' + (a ? ' (' + a + ')' : '');
+                sensorEl.textContent = fmtGalIn(d.tank_base_gallons, d.tank_base_inches) + (a ? ' (' + a + ')' : '');
               }} else {{
                 sensorRow.style.display = 'none';
               }}
             }} else {{
               tankLabel.textContent = 'Tank level:';
-              const a = fmtAge(d.tank_reading_age_min);
-              tankEl.textContent = d.tank_gallons + ' gal' + (a ? ' (sensor, ' + a + ')' : '');
+              // when stopped, show when the tank was last actually read
+              const age = (d.tank_base_age_min !== null && d.tank_base_age_min !== undefined)
+                ? d.tank_base_age_min : d.tank_reading_age_min;
+              const a = fmtAge(age);
+              tankEl.textContent = fmtGalIn(d.tank_gallons, d.tank_inches) + (a ? ' (read ' + a + ')' : '');
               sensorRow.style.display = 'none';
             }}
           }} else {{
