@@ -658,3 +658,152 @@ def api_live():
     resp.headers["Cache-Control"] = "no-cache, no-store"
     resp.headers["X-Accel-Buffering"] = "no"
     return resp
+
+
+# ── training page ────────────────────────────────────────────────────────────
+
+@dosatron_bp.route("/dosatron/training")
+def dosatron_training():
+    return render_template("dosatron_training.html")
+
+
+@dosatron_bp.route("/api/dosatron/training_clips")
+def api_training_clips():
+    """Return curated clips grouped by diagnostic category."""
+    labels = _read_labels(LABELS_FILE)
+
+    # Build clip index directly from JSONL (not limited by hours)
+    clip_idx = {}
+    try:
+        with open(JSONL_FILE) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                rec = json.loads(line)
+                clip = rec.get("clip", "")
+                resolved = _audio_exists(CLIPS_DIR, clip) if clip else None
+                if resolved:
+                    clip_idx[resolved] = rec
+    except FileNotFoundError:
+        pass
+
+    groups = []
+
+    def _get_label(fn):
+        lbl = labels.get(fn)
+        if lbl is not None:
+            return lbl
+        base, ext = os.path.splitext(fn)
+        return labels.get(base + (".ogg" if ext == ".wav" else ".wav"))
+
+    def _add_group(title, description, clips_list):
+        items = []
+        for clip_name, peak, ts_str, note in clips_list:
+            if clip_name not in clip_idx:
+                continue
+            items.append({
+                "clip": clip_name,
+                "peak": peak,
+                "ts": ts_str,
+                "note": note,
+                "label": _get_label(clip_name),
+            })
+        if items:
+            groups.append({"title": title, "description": description, "items": items})
+
+    # 1. Good fill — 06/14 10:29-11:04 (76 gal actual, strong fill)
+    fill_0614 = [(c, r["peak"], r["ts"], "")
+                 for c, r in sorted(clip_idx.items())
+                 if (c.startswith("click_20260614_10") or c.startswith("click_20260614_11"))
+                 and r["peak"] < 10000]
+    _add_group(
+        "Good fill (06/14 10:29–11:04)",
+        "76 gal actual, strong fill. These should be real dosatron clicks.",
+        fill_0614[:10],
+    )
+
+    # 2. Good fill — 06/17 08:04-08:34 (35 gal actual ≈ 40 detected)
+    fill_0617 = [(c, r["peak"], r["ts"], "")
+                 for c, r in sorted(clip_idx.items())
+                 if c.startswith("click_20260617_08") and r["peak"] < 10000]
+    _add_group(
+        "Good fill (06/17 08:04–08:34)",
+        "35 gal actual, 40.1 detected — close match.",
+        fill_0617[:8],
+    )
+
+    # 3. Bad fill clusters — 06/18 pump cycles (~60 events/cycle at 0.5/sec)
+    bad_fill = [(c, r["peak"], r["ts"], "from ~2-min pump cycle")
+                for c, r in sorted(clip_idx.items())
+                if c.startswith("click_20260618_09") or c.startswith("click_20260618_10")
+                or c.startswith("click_20260618_11") or c.startswith("click_20260618_12")]
+    _add_group(
+        "Bad fill clusters (06/18 09:00–13:00)",
+        "Part of 11h period: 23 gal actual but 82.6 detected. Pump cycling every 26 min for ~2 min.",
+        bad_fill[:10],
+    )
+
+    # 4. Short between-cycle bursts on 06/18 (3-7 events in a few seconds)
+    short_burst_names = [
+        "click_20260618_091330_306.wav",
+        "click_20260618_092423_855.wav",
+        "click_20260618_092921_920.wav",
+        "click_20260618_105957_371.wav",
+        "click_20260618_133526_199.wav",
+        "click_20260618_140421_069.wav",
+        "click_20260618_155130_530.wav",
+        "click_20260618_160951_280.wav",
+    ]
+    short_bursts = []
+    for c in short_burst_names:
+        resolved = _audio_exists(CLIPS_DIR, c) or c
+        if resolved in clip_idx:
+            short_bursts.append((resolved, clip_idx[resolved]["peak"],
+                                 clip_idx[resolved]["ts"], "between pump cycles"))
+    _add_group(
+        "Short bursts between pump cycles (06/18)",
+        "3–7 events in a few seconds, between the main ~2-min clusters. False positives?",
+        short_bursts,
+    )
+
+    # 5. High-peak transients (>=8000)
+    high_peak = [(c, r["peak"], r["ts"], "")
+                 for c, r in sorted(clip_idx.items(), key=lambda x: -x[1]["peak"])
+                 if r["peak"] >= 8000]
+    _add_group(
+        "High-peak events (≥8000)",
+        "Relay actuations? Pressure transients? Or loud dosatron clicks?",
+        high_peak[:12],
+    )
+
+    # 6. Quiet nighttime (1-5 AM, should have no water flowing)
+    quiet = [(c, r["peak"], r["ts"], "")
+             for c, r in sorted(clip_idx.items())
+             if r["peak"] < 10000
+             and r["ts"] > "2026-06-14"
+             and (r["ts"][11:13] in ("01", "02", "03", "04"))]
+    _add_group(
+        "Nighttime quiet (1–5 AM, Jun 14+)",
+        "No water should be flowing. If these sound like clicks, something is wrong.",
+        quiet[:10],
+    )
+
+    # 7. Recent detections (last 12h) for ongoing calibration
+    cutoff = (datetime.now() - timedelta(hours=12)).isoformat()
+    recent = [(c, r["peak"], r["ts"], "")
+              for c, r in sorted(clip_idx.items(), reverse=True)
+              if r["ts"] >= cutoff]
+    _add_group(
+        "Recent (last 12 hours)",
+        "Latest detections for ongoing labeling.",
+        recent[:12],
+    )
+
+    label_stats = {
+        "total_labeled": sum(1 for v in labels.values()),
+        "clicks": sum(1 for v in labels.values() if v == "click"),
+        "noise": sum(1 for v in labels.values() if v == "noise"),
+    }
+
+    return jsonify({"groups": groups, "label_stats": label_stats})

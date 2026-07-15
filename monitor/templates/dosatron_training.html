@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dosatron — Click Training</title>
+  <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+      background: #1a1a1a; color: #e0e0e0; padding: 20px; line-height: 1.6;
+    }
+    a { color: #4CAF50; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .container { max-width: 800px; margin: 0 auto; }
+    h1 { color: #4CAF50; margin-bottom: 4px; font-size: 24px; }
+    .subtitle { color: #888; font-size: 13px; margin-bottom: 20px; }
+    .stats { color: #888; font-size: 13px; margin-bottom: 20px; }
+    .stats span { color: #fff; font-weight: bold; }
+
+    .group {
+      background: #2a2a2a; border: 1px solid #444;
+      padding: 16px 20px; margin-bottom: 18px; border-radius: 4px;
+    }
+    .group h2 {
+      color: #4CAF50; font-size: 15px;
+      border-bottom: 1px solid #444; padding-bottom: 6px; margin-bottom: 4px;
+    }
+    .group-desc { color: #888; font-size: 12px; margin-bottom: 14px; }
+
+    .clip-card {
+      background: #1a1a1a; border: 1px solid #333; border-radius: 3px;
+      padding: 10px 12px; margin-bottom: 8px;
+    }
+    .clip-card.labeled-click { border-left: 3px solid #4CAF50; }
+    .clip-card.labeled-noise { border-left: 3px solid #f44336; }
+
+    .clip-meta { color: #888; font-size: 12px; display: flex; gap: 16px; flex-wrap: wrap; }
+    .clip-meta span { color: #aaa; }
+    .clip-note { color: #666; font-style: italic; }
+
+    audio {
+      width: 100%; height: 32px; margin: 6px 0 8px;
+      filter: invert(0.85) hue-rotate(90deg);
+    }
+
+    .label-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .btn {
+      border: none; padding: 4px 14px; border-radius: 3px; cursor: pointer;
+      font-family: inherit; font-size: 12px;
+    }
+    .btn-click  { background: #1b5e20; border: 1px solid #4CAF50; color: #4CAF50; }
+    .btn-click:hover  { background: #2e7d32; color: #fff; }
+    .btn-click.active { background: #4CAF50; color: #000; font-weight: bold; }
+    .btn-noise  { background: #4a1919; border: 1px solid #f44336; color: #f44336; }
+    .btn-noise:hover  { background: #7f1919; color: #fff; }
+    .btn-noise.active { background: #f44336; color: #fff; font-weight: bold; }
+    .btn-clear { background: #333; border: 1px solid #666; color: #aaa; font-size: 11px; }
+    .btn-clear:hover { background: #444; }
+    .label-saved { color: #4CAF50; font-size: 11px; opacity: 0; transition: opacity 0.3s; }
+    .label-saved.show { opacity: 1; }
+
+    .loading { color: #888; text-align: center; padding: 40px; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Click Training</h1>
+  <div class="subtitle">
+    <a href="/dosatron">← dosatron</a> &nbsp;|&nbsp;
+    <a href="/">dashboard</a>
+  </div>
+  <div class="stats" id="stats"></div>
+  <div id="content"><div class="loading">Loading clips…</div></div>
+</div>
+
+<script>
+let data = null;
+
+async function load() {
+  const resp = await fetch('/api/dosatron/training_clips');
+  data = await resp.json();
+  render();
+}
+
+function render() {
+  const stats = data.label_stats;
+  document.getElementById('stats').innerHTML =
+    `Labeled: <span>${stats.total_labeled}</span> ` +
+    `(<span style="color:#4CAF50">${stats.clicks} click</span> / ` +
+    `<span style="color:#f44336">${stats.noise} noise</span>)`;
+
+  const el = document.getElementById('content');
+  if (!data.groups.length) {
+    el.innerHTML = '<div class="loading">No clips available.</div>';
+    return;
+  }
+
+  let html = '';
+  for (const g of data.groups) {
+    html += `<div class="group">`;
+    html += `<h2>${esc(g.title)}</h2>`;
+    html += `<div class="group-desc">${esc(g.description)}</div>`;
+    for (const item of g.items) {
+      const cls = item.label === 'click' ? 'labeled-click'
+                : item.label === 'noise' ? 'labeled-noise' : '';
+      html += `<div class="clip-card ${cls}" id="card-${item.clip}">`;
+      html += `<div class="clip-meta">`;
+      html += `<span>${item.ts.replace('T', ' ').slice(0, 19)}</span>`;
+      html += `<span>peak: ${item.peak}</span>`;
+      if (item.note) html += `<span class="clip-note">${esc(item.note)}</span>`;
+      html += `</div>`;
+      html += `<audio controls preload="none" src="/api/dosatron/clips/${item.clip}"></audio>`;
+      html += `<div class="label-row">`;
+      html += `<button class="btn btn-click${item.label==='click'?' active':''}" `
+            + `onclick="setLabel('${item.clip}','click',this)">Click</button>`;
+      html += `<button class="btn btn-noise${item.label==='noise'?' active':''}" `
+            + `onclick="setLabel('${item.clip}','noise',this)">Noise</button>`;
+      if (item.label) {
+        html += `<button class="btn btn-clear" onclick="setLabel('${item.clip}',null,this)">clear</button>`;
+      }
+      html += `<span class="label-saved" id="saved-${item.clip}">saved</span>`;
+      html += `</div></div>`;
+    }
+    html += `</div>`;
+  }
+  el.innerHTML = html;
+}
+
+async function setLabel(clip, label, btn) {
+  await fetch(`/api/dosatron/label/${clip}`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({label}),
+  });
+  // update card
+  const card = document.getElementById('card-' + clip);
+  card.className = 'clip-card ' + (label === 'click' ? 'labeled-click' : label === 'noise' ? 'labeled-noise' : '');
+  // flash saved
+  const saved = document.getElementById('saved-' + clip);
+  saved.classList.add('show');
+  setTimeout(() => saved.classList.remove('show'), 1500);
+  // reload stats
+  load();
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+load();
+</script>
+</body>
+</html>
