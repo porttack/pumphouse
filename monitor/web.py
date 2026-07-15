@@ -2047,6 +2047,224 @@ def water_status():
     return resp
 
 
+def _read_events_tail_raw(chunk: int = 262144) -> str:
+    """Read last `chunk` bytes of events.csv as a decoded string."""
+    try:
+        with open(EVENTS_FILE, 'rb') as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - chunk))
+            return f.read().decode('utf-8', errors='replace')
+    except Exception:
+        return ''
+
+
+def _click_times(start_unix: float, end_unix: float) -> 'list[float]':
+    """Return sorted unix timestamps of dosatron clicks in [start,end] via tail read.
+
+    Clicks are the ground truth for "water is moving through the dosatron" — far
+    more reliable than the pressure signal, which can stick HIGH for hours.
+    """
+    from monitor.dosatron import JSONL_FILE
+    out = []
+    try:
+        with open(JSONL_FILE, 'rb') as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 524288))   # ~last few thousand clicks
+            data = f.read()
+        for line in data.split(b'\n'):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+                ts = datetime.fromisoformat(rec['ts']).timestamp()
+                if start_unix <= ts <= end_unix:
+                    out.append(ts)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    out.sort()
+    return out
+
+
+def _click_duty_pct(click_ts: 'list[float]', win_start: float, win_end: float,
+                    bucket: float = 30.0) -> 'float | None':
+    """Duty cycle = fraction of `bucket`-second slots in the window with ≥1 click.
+
+    This is "% of time we're actually receiving water": slots with clicks are
+    pumping/flowing, empty slots are idle (between pump cycles, or valve closed)."""
+    span = win_end - win_start
+    if span <= 0:
+        return None
+    n_buckets = max(1, int((span + bucket - 1) // bucket))
+    filled = set()
+    for t in click_ts:
+        if win_start <= t <= win_end:
+            filled.add(int((t - win_start) // bucket))
+    return round(len(filled) / n_buckets * 100, 1)
+
+
+def _last_tank_reading() -> 'tuple[float | None, float]':
+    """Return (gallons, unix_ts) of the most recent real TANK_LEVEL sensor event."""
+    raw = _read_events_tail_raw(262144)
+    gal, ts = None, 0.0
+    for line in raw.splitlines():
+        parts = line.split(',')
+        if len(parts) < 5 or parts[1].strip() != 'TANK_LEVEL':
+            continue
+        try:
+            gal = float(parts[4])
+            ts  = datetime.fromisoformat(parts[0].strip()).timestamp()
+        except Exception:
+            pass
+    return gal, ts
+
+
+def _fill_window(float_calling: bool, now: float) -> 'tuple[float | None, float, str | None]':
+    """Return (win_start, win_end, label) for duty-cycle scoping, from float events.
+
+    Calling  → this fill: last FLOAT_CALLING … now.
+    Full     → last completed fill: last FLOAT_CALLING … following FLOAT_FULL.
+    """
+    raw = _read_events_tail_raw(262144)
+    calling_ts = None
+    full_ts    = None
+    for line in raw.splitlines():
+        parts = line.split(',', 2)
+        if len(parts) < 2:
+            continue
+        et = parts[1].strip()
+        if et not in ('FLOAT_CALLING', 'FLOAT_FULL'):
+            continue
+        try:
+            ts = datetime.fromisoformat(parts[0].strip()).timestamp()
+        except Exception:
+            continue
+        if et == 'FLOAT_CALLING':
+            calling_ts, full_ts = ts, None
+        else:
+            full_ts = ts
+
+    if calling_ts is None:
+        return None, now, None
+    if float_calling:
+        return calling_ts, now, f'since calling ({round((now - calling_ts) / 60)}m)'
+    win_end = full_ts if full_ts else now
+    return calling_ts, win_end, f'last fill ({round((win_end - calling_ts) / 60)}m)'
+
+
+@app.route('/api/flow_status')
+def api_flow_status():
+    """Real-time flow status: is water flowing, GPM, duty cycle, live tank level.
+
+    Flow/GPM/duty are derived from dosatron *clicks* (ground truth for water
+    moving), not the pressure signal. The tank number is the real sensor reading
+    when the tank is full; during a fill it's that reading plus clicks since,
+    capped — so it can never show a physically impossible value.
+    """
+    import time as _t
+    from monitor.dosatron import (
+        FLOW_STATE_FILE as _FLOW_STATE_FILE,
+        FLOW_CYCLES_JSONL as _FLOW_CYCLES_JSONL,
+        GALLONS_PER_CLICK as _GPK,
+    )
+
+    now           = _t.time()
+    relay_status  = get_all_relay_status()
+    bypass_on     = relay_status.get('bypass') == 'ON'
+    float_calling = read_float_sensor() == FLOAT_STATE_CALLING
+
+    result: dict = {
+        'mode':                 'bypass' if bypass_on else 'dosatron',
+        'bypass_on':            bypass_on,
+        'float_calling':        float_calling,
+        'is_flowing':           False,
+        'gpm':                  None,
+        'last_click_age_s':     None,
+        'duty_cycle_pct':       None,
+        'duty_window_label':    None,
+        'tank_gallons':         None,
+        'tank_reading_age_min': None,
+        'tank_is_estimate':     False,
+    }
+
+    # Real sensor reading — authoritative, shown with its age so the delayed
+    # graph is never the only reference.
+    real_gal, real_ts = _last_tank_reading()
+    if real_gal is not None:
+        result['tank_gallons']         = round(real_gal)
+        result['tank_reading_age_min'] = round((now - real_ts) / 60)
+
+    win_start, win_end, label = _fill_window(float_calling, now)
+    result['duty_window_label'] = label
+
+    if not bypass_on:
+        # ── dosatron mode: everything from clicks ────────────────────────────
+        span_start = win_start if win_start else now - 3600
+        clicks = _click_times(span_start, now)
+
+        if clicks:
+            result['last_click_age_s'] = round(now - clicks[-1])
+
+        # Flowing = valve open AND a click within the last 20 s (real movement).
+        is_flowing = (float_calling and result['last_click_age_s'] is not None
+                      and result['last_click_age_s'] <= 20)
+        result['is_flowing'] = is_flowing
+
+        # GPM from clicks in the last 60 s (clicks/min × gal/click).
+        if is_flowing:
+            c60 = sum(1 for t in clicks if t >= now - 60)
+            result['gpm'] = round(c60 * _GPK, 2)
+
+        if win_start:
+            result['duty_cycle_pct'] = _click_duty_pct(clicks, win_start, win_end)
+
+        # Live tank level during a fill: real reading + clicks since it was taken.
+        # Computed here (not from dos_estimate.json, which double-counts when the
+        # pressure signal sticks HIGH). Capped so it can't exceed the tank.
+        if float_calling and real_gal is not None and real_ts:
+            since_gal = sum(1 for t in clicks if t >= real_ts) * _GPK
+            est = min(real_gal + since_gal, TANK_CAPACITY_GALLONS * 1.10)
+            result['tank_gallons']     = round(est)
+            result['tank_is_estimate'] = True
+
+    else:
+        # ── bypass mode: flow from FFT detection, no dosatron clicks ──────────
+        try:
+            with open(_FLOW_STATE_FILE) as f:
+                result['is_flowing'] = json.load(f).get('state') == 'flowing'
+        except Exception:
+            pass
+
+        if win_start:
+            flowing_secs = 0.0
+            try:
+                with open(_FLOW_CYCLES_JSONL) as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            rec = json.loads(line)
+                            s = datetime.fromisoformat(rec['start_ts']).timestamp()
+                            e = datetime.fromisoformat(rec['end_ts']).timestamp()
+                            if e < win_start:
+                                continue
+                            flowing_secs += min(e, win_end) - max(s, win_start)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            win_len = win_end - win_start
+            if win_len > 0:
+                result['duty_cycle_pct'] = round(min(flowing_secs, win_len) / win_len * 100, 1)
+
+    resp = jsonify(result)
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
 @app.route('/water2')
 def water2_status():
     """
