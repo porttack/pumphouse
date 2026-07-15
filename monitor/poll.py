@@ -383,7 +383,11 @@ class SimplifiedMonitor:
 
         # Override dosatron safety shutoff
         self.override_dosatron_shutoff_gallons = OVERRIDE_DOSATRON_SHUTOFF_GALLONS
-        self._dos_est_gallons = None  # running estimate: last real reading + dosatron since
+        # Running fill estimate = last successful sensor reading + dosatron clicks
+        # since that reading. _dos_est_base_time is the unix time of that reading,
+        # so we only ever count clicks the sensor doesn't yet reflect (no double-count).
+        self._dos_est_gallons = None
+        self._dos_est_base_time = None
 
         # Override auto-on control
         self.override_on_threshold = OVERRIDE_ON_THRESHOLD
@@ -669,6 +673,9 @@ class SimplifiedMonitor:
         self.fetch_tank_data()
         if OVERRIDE_DOSATRON_RUNNING_ESTIMATE and self.state.tank_gallons is not None:
             self._dos_est_gallons = self.state.tank_gallons
+            # Base = the reading's TRUE observation time (sensor lags several minutes),
+            # not wall-clock now, so we count every click the sensor doesn't yet reflect.
+            self._dos_est_base_time = self.tank_last_updated
         self.fetch_weather_data()
 
         # Log initial state
@@ -834,8 +841,9 @@ class SimplifiedMonitor:
                             estimated = estimate_gallons(duration)
                             dosatron_clicks = _count_dosatron_clicks(self.pressure_high_start, current_time)
                             _dosatron_gal = round(dosatron_clicks * _DOSATRON_GPK, 2)
-                            if OVERRIDE_DOSATRON_RUNNING_ESTIMATE and self._dos_est_gallons is not None:
-                                self._dos_est_gallons += _dosatron_gal
+                            # Note: running estimate is NOT accumulated here — it's derived
+                            # from the last sensor reading + clicks since (see mid-cycle block),
+                            # so adding per-cycle gallons would double-count.
                             self.log_pressure_event('PRESSURE_LOW', estimated,
                                                     f'Duration: {duration:.1f}s, Dosatron: {_dosatron_gal:.2f} gal ({dosatron_clicks} clicks)')
                             _write_pressure_prediction(self.events_file, current_time)
@@ -965,6 +973,11 @@ class SimplifiedMonitor:
                     if tank_fetch_success:
                         if OVERRIDE_DOSATRON_RUNNING_ESTIMATE and self.state.tank_gallons is not None:
                             self._dos_est_gallons = self.state.tank_gallons
+                            # Base = reading's TRUE observation time, not the fetch time.
+                            # Using fetch time reset the click window every 60s, so the
+                            # estimate never led the (laggy) sensor and never fired. See
+                            # 2026-07-15 overflow to 1483 gal.
+                            self._dos_est_base_time = self.tank_last_updated
                         # Track float-CALLING windows for TANK_LEVEL dosatron counting
                         if self.state.float_state == FLOAT_STATE_CALLING:
                             if self._float_calling_window_start_tl is None:
@@ -1611,27 +1624,29 @@ class SimplifiedMonitor:
 
                 # DOSATRON SAFETY SHUTOFF — checked every poll cycle (~10 seconds)
                 # Prevents overflow during high-flow events that the 5-min tank sensor can't catch in time.
-                # Running estimate mode: last real reading + dosatron gallons added at each PRESSURE_LOW,
-                # reset on every successful tank fetch. Mid-cycle gallons (since last PRESSURE_HIGH) are
-                # included so a long continuous pump run doesn't bypass the threshold check.
+                # Running estimate = last successful sensor reading + dosatron clicks *since that reading*
+                # (_dos_est_base_time). Because the base is the sensor value, which already reflects all
+                # water up to _dos_est_base_time, we only add clicks the sensor hasn't seen yet — no
+                # double-counting even when pressure stays HIGH across multiple fetches.
                 #
                 # The estimate is also written to DOS_ESTIMATE_FILE every cycle so the web server can
                 # display a live-updating tank level between sensor reads.
-                _mid_gal = 0.0
-                if self.pressure_high_start is not None:
-                    _mid_clicks = _count_dosatron_clicks(self.pressure_high_start, current_time)
-                    _mid_gal = round(_mid_clicks * _DOSATRON_GPK, 2)
+                _since_gal = 0.0
+                if self._dos_est_base_time is not None:
+                    _since_clicks = _count_dosatron_clicks(self._dos_est_base_time, current_time)
+                    _since_gal = round(_since_clicks * _DOSATRON_GPK, 2)
 
                 if self._dos_est_gallons is not None:
-                    _write_dos_estimate(self._dos_est_gallons + _mid_gal)
+                    _write_dos_estimate(self._dos_est_gallons + _since_gal)
 
                 if OVERRIDE_DOSATRON_SHUTOFF_ENABLED and self.relay_control_enabled:
                     _dos_relay = self.get_relay_status()
                     _dos_override_on = _dos_relay['supply_override'] == 'ON'
 
                     if _dos_override_on:
-                        if OVERRIDE_DOSATRON_RUNNING_ESTIMATE and self._dos_est_gallons is not None:
-                            _dos_est = self._dos_est_gallons + _mid_gal
+                        if (OVERRIDE_DOSATRON_RUNNING_ESTIMATE and self._dos_est_gallons is not None
+                                and self._dos_est_base_time is not None):
+                            _dos_est = self._dos_est_gallons + _since_gal
                         elif self.state.tank_gallons is not None and self.last_tank_check > 0:
                             _dos_clicks = _count_dosatron_clicks(self.last_tank_check, current_time)
                             _dos_est = self.state.tank_gallons + round(_dos_clicks * _DOSATRON_GPK, 2)
