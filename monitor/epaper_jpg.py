@@ -172,6 +172,7 @@ def render_epaper_jpg(
     scale: int = 4,
     snapshots_csv: str = DEFAULT_SNAPSHOTS_FILE,
     reservations_csv = None,
+    use_estimate: bool = False,  # show the live dosatron estimate as the current depth
 ) -> io.BytesIO:
     """
     Render a color JPEG of the e-paper display and return it as a BytesIO buffer.
@@ -252,6 +253,19 @@ def render_epaper_jpg(
         try:
             tank_gallons = float(rows[-1]['tank_gallons'])
             tank_pct     = (tank_gallons / TANK_FULL_GALLONS) * 100
+        except Exception:
+            pass
+
+    # Live dosatron estimate (last sensor fetch + clicks since) as the current
+    # depth — lets /water2 show the fill rising in real time between sensor reads.
+    if use_estimate:
+        try:
+            import json as _json
+            from monitor.config import DOS_ESTIMATE_FILE
+            _e = _json.loads(DOS_ESTIMATE_FILE.read_text())
+            if (datetime.now() - datetime.fromisoformat(_e['timestamp'])).total_seconds() < 300:
+                tank_gallons = float(_e['gallons'])
+                tank_pct     = (tank_gallons / TANK_FULL_GALLONS) * 100
         except Exception:
             pass
 
@@ -371,6 +385,14 @@ def render_epaper_jpg(
                 continue
     except Exception:
         pass
+
+    # Extend the line to the live estimate so the current depth shows on the
+    # graph, not just the last (up to 15-min-old) snapshot. Only under
+    # use_estimate, and only if it differs from the last plotted snapshot.
+    if use_estimate and tank_gallons is not None:
+        if not graph_gallons or abs(graph_gallons[-1] - tank_gallons) >= 1.0:
+            graph_gallons.append(tank_gallons)
+            graph_occupied.append(is_occupied_now)
 
     # ── Y-axis range ─────────────────────────────────────────────────────
     g_min_raw  = min(graph_gallons) if len(graph_gallons) >= 2 else 0.0

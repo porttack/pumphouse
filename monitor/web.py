@@ -1919,6 +1919,7 @@ def epaper_jpg():
         threshold_override=request.args.get('threshold', type=int),
         public_mode=(request.args.get('public') == 'yes'),
         scale=max(1, min(8, request.args.get('scale', 4, type=int))),
+        use_estimate=(request.args.get('est') == '1'),
     )
     from flask import Response as _Resp
     resp = _Resp(buf.read(), mimetype='image/jpeg')
