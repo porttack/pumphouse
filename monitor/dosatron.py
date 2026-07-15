@@ -107,6 +107,7 @@ CYCLE_LABELS      = os.path.join(DATA_DIR, "cycle_labels.json")
 FLOW_CYCLE_LABELS = os.path.join(DATA_DIR, "flow_cycle_labels.json")
 CONFIG_FILE       = os.path.join(DATA_DIR, "config.json")
 SIGNAL_FILE       = os.path.join(DATA_DIR, "pressure_signal.json")
+FLOW_STATE_FILE   = os.path.join(DATA_DIR, "flow_state.json")
 PID_FILE          = os.path.join(DATA_DIR, "listener.pid")
 BYPASS_VALVE_PIN  = 26   # BCM pin — active-low relay (0 = ON); mirrors relay.py
 
@@ -199,6 +200,20 @@ def _read_signal() -> tuple[str | None, float]:
         return sig.get("state"), float(sig.get("ts", 0))
     except Exception:
         return None, 0.0
+
+
+def _write_flow_state(state: str, start_ts: 'datetime | None' = None) -> None:
+    """Write bypass flow state to flow_state.json for web UI polling."""
+    try:
+        data: dict = {"state": state, "ts": time.time()}
+        if start_ts is not None:
+            data["start_ts"] = start_ts.isoformat()
+        tmp = FLOW_STATE_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, FLOW_STATE_FILE)
+    except Exception:
+        pass
 
 
 def _write_detection(ts: datetime, peak: int, rms: int, threshold: int, clip: str):
@@ -641,6 +656,7 @@ class FlowRecorder:
         self._wav.setnchannels(CHANNELS)
         self._wav.setsampwidth(BYTES_PER_SAMPLE)
         self._wav.setframerate(SAMPLE_RATE)
+        _write_flow_state("flowing", self.start_ts)
         log.info("FLOW recording started: %s", self._fname)
 
     def _finish(self, log, truncated: bool = False) -> None:
@@ -667,6 +683,7 @@ class FlowRecorder:
                 "duration_s": duration_s,
                 "audio_file": self._fname,
             }
+        _write_flow_state("idle")
         self.state    = self.IDLE
         self._above_n = 0
         self._below_n = 0
@@ -681,6 +698,7 @@ class FlowRecorder:
             if self._tmp and os.path.exists(self._tmp):
                 os.unlink(self._tmp)
             log.info("FLOW recording cancelled (bypass off)")
+        _write_flow_state("idle")
         self.state    = self.IDLE
         self._above_n = 0
         self._below_n = 0
@@ -782,6 +800,8 @@ def listen(cli_threshold: int):
     log.info("Ready")
 
     _cleanup_old_files(log)
+    _write_flow_state("idle")
+
     # read initial signal state so we don't falsely trigger on startup
     sig_state, sig_ts = _read_signal()
     last_signal_state = sig_state
