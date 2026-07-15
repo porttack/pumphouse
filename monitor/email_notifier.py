@@ -38,7 +38,7 @@ from monitor.config import (
     DASHBOARD_EMAIL_URL,
     DAILY_STATUS_EMAIL_CHART_HOURS,
     TANK_HEIGHT_INCHES,
-    TANK_CAPACITY_GALLONS,
+    TANK_FULL_GALLONS,
     TANK_URL,
     DASHBOARD_HIDE_EVENT_TYPES,
     DASHBOARD_MAX_EVENTS,
@@ -594,10 +594,10 @@ def fetch_system_status(debug=False):
         time_to_full = None
         try:
             _current_gal = tank_data.get('gallons') if tank_data and tank_data.get('status') == 'success' else None
-            if _current_gal is not None and _current_gal < TANK_CAPACITY_GALLONS:
+            if _current_gal is not None and _current_gal < TANK_FULL_GALLONS:
                 if stats and stats.get('tank_change_24hr') is not None and stats['tank_change_24hr'] > 0:
                     _rate_gph = stats['tank_change_24hr'] / 24.0
-                    _hrs = (TANK_CAPACITY_GALLONS - _current_gal) / _rate_gph
+                    _hrs = (TANK_FULL_GALLONS - _current_gal) / _rate_gph
                     if 0 < _hrs < 168:
                         time_to_full = datetime.now() + timedelta(hours=_hrs)
         except Exception:

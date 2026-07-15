@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import requests
 from bs4 import BeautifulSoup
 
-from monitor.config import TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS
+from monitor.config import TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS, TANK_FULL_GALLONS
 from monitor.gpio_helpers import read_float_sensor
 
 def calculate_gallons(depth_inches):
@@ -66,9 +66,11 @@ def get_tank_data(url, timeout=10):
         percentage = None
         gallons = None
         if depth_inches is not None:
-            percentage = (depth_inches / TANK_HEIGHT_INCHES) * 100
-            percentage = round(percentage, 1)
             gallons = calculate_gallons(depth_inches)
+            # Percentage is relative to operational full (TANK_FULL_GALLONS = 100%),
+            # not physical capacity, so 1450 gal reads as 100% and 1522 as ~105%.
+            percentage = (gallons / TANK_FULL_GALLONS) * 100
+            percentage = round(percentage, 1)
 
         # Read float sensor
         float_state = read_float_sensor()

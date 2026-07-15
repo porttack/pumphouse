@@ -15,8 +15,15 @@ SNAPSHOT_INTERVAL = 15  # Minutes between snapshots: 15 (production), 5 or 2 (de
 MAX_TANK_FETCH_FAILURES = 5  # Consecutive failures before safety shutoff (5 × 5min = 25min tolerance)
 
 # Tank Configuration
-TANK_HEIGHT_INCHES = 58
-TANK_CAPACITY_GALLONS = 1400
+# Calibrated 2026-07-15 after PTdevices depth-meter service + tank re-calibration.
+# Tank is a vertical cylinder, 7.2 ft internal diameter (43.2" radius).
+#   gal/inch = π·(43.2")² / 231 in³/gal ≈ 25.37
+# Overflow occurs at 60" = 1522 US gal; that pair anchors the linear conversion.
+TANK_HEIGHT_INCHES = 60
+TANK_CAPACITY_GALLONS = 1522  # True physical capacity at 60" (overflow). Used for accurate gallons.
+# Operational "full" — the level we normally stop at (override shutoff). Treated as
+# 100% for all displays/graphs/percentages. Real capacity (1522) reads as ~105%.
+TANK_FULL_GALLONS = 1450
 TANK_URL = ""  # Loaded from secrets file - your mypt.in tank monitoring URL
 
 # Ambient Weather Configuration
@@ -43,11 +50,11 @@ DAILY_PURGE_HOUR   = 3      # Hour (0-23) after which the daily purge becomes el
 
 # Override Shutoff Configuration
 ENABLE_OVERRIDE_SHUTOFF = True  # Enable automatic override shutoff to prevent tank overflow
-OVERRIDE_SHUTOFF_THRESHOLD = 1400  # Gallons at which to turn off override valve (tank sensor)
+OVERRIDE_SHUTOFF_THRESHOLD = 1450  # Gallons at which to turn off override valve (tank sensor); 60"/1522=overflow
 
 # Override Dosatron Safety Shutoff — catches high-flow events the tank sensor can't respond to fast enough
 OVERRIDE_DOSATRON_SHUTOFF_ENABLED = True   # Shut off override when estimated fill reaches threshold
-OVERRIDE_DOSATRON_SHUTOFF_GALLONS = 1425   # Est. gallons to trigger shutoff
+OVERRIDE_DOSATRON_SHUTOFF_GALLONS = 1475   # Est. gallons to trigger shutoff (stop before a real reading arrives)
 OVERRIDE_DOSATRON_RUNNING_ESTIMATE = True  # Use running estimate: last real reading + dosatron since (resets each tank fetch)
 
 # Override Auto-On Configuration
@@ -156,8 +163,8 @@ EPAPER_DEFAULT_HOURS_OTHER = 72  # Default graph hours for owner or unoccupied
 EPAPER_LOW_WATER_HOURS_THRESHOLD = 75  # Tank % at or below which switches to extended graph (None to disable)
 EPAPER_LOW_WATER_HOURS = 168  # Graph hours when tank is below threshold (168 = 7 days)
 EPAPER_FORECAST_DAYS = 7      # Days of forecast icons to show (0 = disabled)
-EPAPER_MIN_GRAPH_RANGE_PCT = 12  # Minimum Y-axis span as % of tank capacity (prevents compressed graphs)
-EPAPER_MAX_GRAPH_PCT = 102       # Hard cap for Y-axis maximum as % of tank capacity
+EPAPER_MIN_GRAPH_RANGE_PCT = 12  # Minimum Y-axis span as % of graph-full (prevents compressed graphs)
+EPAPER_MAX_GRAPH_PCT = 106       # Hard cap for Y-axis max as % of graph-full; >105% so the real 1522 peak still fits above 100%
 
 # Data directory (XDG Base Directory: ~/.local/share/pumphouse)
 DATA_DIR = Path.home() / '.local' / 'share' / 'pumphouse'

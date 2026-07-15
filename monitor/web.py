@@ -18,7 +18,7 @@ from monitor import __version__
 from monitor.config import (
     EVENTS_FILE, RESERVATIONS_FILE, WORK_ORDERS_FILE, STATEMENTS_FILE, DEFAULT_SNAPSHOTS_FILE, DAILY_CSV,
     NOTIFY_BACKFLUSH_TIME_START, NOTIFY_BACKFLUSH_TIME_END,
-    TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS,
+    TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS, TANK_FULL_GALLONS,
     EPAPER_CONSERVE_WATER_THRESHOLD, EPAPER_OWNER_STAY_TYPES,
     EPAPER_DEFAULT_HOURS_TENANT, EPAPER_DEFAULT_HOURS_OTHER,
     EPAPER_LOW_WATER_HOURS_THRESHOLD, EPAPER_LOW_WATER_HOURS,
@@ -1551,7 +1551,7 @@ def epaper_bmp():
         live = get_tank_data(TANK_URL, timeout=30)
         if live['status'] == 'success' and live['gallons'] is not None:
             tank_gallons = live['gallons']
-            tank_pct = (tank_gallons / TANK_CAPACITY_GALLONS) * 100
+            tank_pct = (tank_gallons / TANK_FULL_GALLONS) * 100
             live_reading_ts = live.get('last_updated')
     except Exception:
         pass
@@ -1559,14 +1559,14 @@ def epaper_bmp():
     # Prefer dosatron estimate when it's ahead of the sensor (mid-fill) or sensor failed
     if _dos_est_gal is not None and (tank_gallons is None or _dos_est_gal > tank_gallons):
         tank_gallons = _dos_est_gal
-        tank_pct = (tank_gallons / TANK_CAPACITY_GALLONS) * 100
+        tank_pct = (tank_gallons / TANK_FULL_GALLONS) * 100
         live_reading_ts = None
 
     if tank_gallons is None and rows:
         try:
             latest = rows[-1]
             tank_gallons = float(latest['tank_gallons'])
-            tank_pct = (tank_gallons / TANK_CAPACITY_GALLONS) * 100
+            tank_pct = (tank_gallons / TANK_FULL_GALLONS) * 100
         except Exception:
             pass
 
@@ -1713,8 +1713,8 @@ def epaper_bmp():
     g_range_raw = g_max_raw - g_min_raw
 
     # Enforce minimum range as % of tank capacity between top and bottom
-    min_range  = TANK_CAPACITY_GALLONS * (EPAPER_MIN_GRAPH_RANGE_PCT / 100)
-    max_gallon = TANK_CAPACITY_GALLONS * (EPAPER_MAX_GRAPH_PCT / 100)
+    min_range  = TANK_FULL_GALLONS * (EPAPER_MIN_GRAPH_RANGE_PCT / 100)
+    max_gallon = TANK_FULL_GALLONS * (EPAPER_MAX_GRAPH_PCT / 100)
     if g_range_raw < min_range:
         mid = (g_min_raw + g_max_raw) / 2
         g_min_raw = mid - min_range / 2
@@ -1728,8 +1728,8 @@ def epaper_bmp():
     g_range = g_max - g_min
 
     # Y-axis labels (percent)
-    y_max_label = f"{int(round(g_max_raw / TANK_CAPACITY_GALLONS * 100))}%"
-    y_min_label = f"{int(round(g_min_raw / TANK_CAPACITY_GALLONS * 100))}%"
+    y_max_label = f"{int(round(g_max_raw / TANK_FULL_GALLONS * 100))}%"
+    y_min_label = f"{int(round(g_min_raw / TANK_FULL_GALLONS * 100))}%"
 
     y_label_w = max(
         draw.textbbox((0, 0), y_max_label, font=font_small)[2],
@@ -2343,14 +2343,14 @@ def index():
     except Exception:
         pass
 
-    # Estimate time to reach full tank (1400 gal) based on 24h fill rate
+    # Estimate time to reach operational full (TANK_FULL_GALLONS) based on 24h fill rate
     time_to_full = None
     try:
         current_gallons = tank_data.get('gallons') if tank_data.get('status') == 'success' else None
-        if current_gallons is not None and current_gallons < TANK_CAPACITY_GALLONS:
+        if current_gallons is not None and current_gallons < TANK_FULL_GALLONS:
             if stats and stats.get('tank_change_24hr') is not None and stats['tank_change_24hr'] > 0:
                 fill_rate_gph = stats['tank_change_24hr'] / 24.0
-                hours_to_full = (TANK_CAPACITY_GALLONS - current_gallons) / fill_rate_gph
+                hours_to_full = (TANK_FULL_GALLONS - current_gallons) / fill_rate_gph
                 if 0 < hours_to_full < 168:  # Only show if within 1 week
                     time_to_full = datetime.now() + timedelta(hours=hours_to_full)
     except Exception:
@@ -2494,7 +2494,7 @@ def index():
                          tank_data=tank_data,
                          tank_age_minutes=tank_age_minutes,
                          tank_height=TANK_HEIGHT_INCHES,
-                         tank_capacity=TANK_CAPACITY_GALLONS,
+                         tank_capacity=TANK_FULL_GALLONS,  # graph/tooltip 100% reference (operational full)
                          tank_url=TANK_URL,
                          snapshot_headers=snapshot_headers,
                          snapshot_rows=snapshot_rows,

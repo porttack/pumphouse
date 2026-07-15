@@ -180,8 +180,8 @@ nano ~/.config/pumphouse/monitor.conf
 
 ```ini
 # Example overrides (all optional — defaults are in monitor/config.py)
-TANK_HEIGHT_INCHES=58
-TANK_CAPACITY_GALLONS=1400
+TANK_HEIGHT_INCHES=60
+TANK_CAPACITY_GALLONS=1522
 ENABLE_NOTIFICATIONS=True
 ```
 

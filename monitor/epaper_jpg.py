@@ -44,7 +44,7 @@ from monitor.config import (
     EPAPER_LOW_WATER_HOURS,
     EPAPER_LOW_WATER_HOURS_THRESHOLD,
     EPAPER_OWNER_STAY_TYPES,
-    TANK_CAPACITY_GALLONS,
+    TANK_FULL_GALLONS,
     TANK_URL,
 )
 from monitor.relay import get_all_relay_status
@@ -242,7 +242,7 @@ def render_epaper_jpg(
         live = get_tank_data(TANK_URL, timeout=30)
         if live['status'] == 'success' and live['gallons'] is not None:
             tank_gallons    = live['gallons']
-            tank_pct        = (tank_gallons / TANK_CAPACITY_GALLONS) * 100
+            tank_pct        = (tank_gallons / TANK_FULL_GALLONS) * 100
             live_reading_ts = live.get('last_updated')
         float_state = live.get('float_state')
     except Exception:
@@ -251,7 +251,7 @@ def render_epaper_jpg(
     if tank_gallons is None and rows:
         try:
             tank_gallons = float(rows[-1]['tank_gallons'])
-            tank_pct     = (tank_gallons / TANK_CAPACITY_GALLONS) * 100
+            tank_pct     = (tank_gallons / TANK_FULL_GALLONS) * 100
         except Exception:
             pass
 
@@ -375,8 +375,8 @@ def render_epaper_jpg(
     # ── Y-axis range ─────────────────────────────────────────────────────
     g_min_raw  = min(graph_gallons) if len(graph_gallons) >= 2 else 0.0
     g_max_raw  = max(graph_gallons) if len(graph_gallons) >= 2 else 0.0
-    min_range  = TANK_CAPACITY_GALLONS * (EPAPER_MIN_GRAPH_RANGE_PCT / 100)
-    max_gallon = TANK_CAPACITY_GALLONS * (EPAPER_MAX_GRAPH_PCT / 100)
+    min_range  = TANK_FULL_GALLONS * (EPAPER_MIN_GRAPH_RANGE_PCT / 100)
+    max_gallon = TANK_FULL_GALLONS * (EPAPER_MAX_GRAPH_PCT / 100)
     if g_max_raw - g_min_raw < min_range:
         mid       = (g_min_raw + g_max_raw) / 2
         g_min_raw = mid - min_range / 2
@@ -389,8 +389,8 @@ def render_epaper_jpg(
 
     # ── Y-axis labels ────────────────────────────────────────────────────
     AXIS_COLOR  = (25, 45, 95)
-    y_max_label = f'{int(round(g_max_raw / TANK_CAPACITY_GALLONS * 100))}%'
-    y_min_label = f'{int(round(g_min_raw / TANK_CAPACITY_GALLONS * 100))}%'
+    y_max_label = f'{int(round(g_max_raw / TANK_FULL_GALLONS * 100))}%'
+    y_min_label = f'{int(round(g_min_raw / TANK_FULL_GALLONS * 100))}%'
     draw.text((graph_left - y_label_w - s(3), graph_top    - s(1)),  y_max_label, font=font_small, fill=AXIS_COLOR)
     draw.text((graph_left - y_label_w - s(3), graph_bottom - s(11)), y_min_label, font=font_small, fill=AXIS_COLOR)
 

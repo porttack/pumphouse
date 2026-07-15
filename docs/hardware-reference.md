@@ -347,7 +347,7 @@ One 12V supply powers everything: the Pi (via DC-DC buck converter to 5V USB-C),
 
 ### Holding Tank
 
-- **Capacity**: ~1,400–1,500 gallons
+- **Capacity**: 1,522 gallons at 60" overflow (7.2 ft internal diameter, ~25.4 gal/in). See [tank-calibration.md](tank-calibration.md)
 - **Fill control**: Float switch (hardwired) with 80%/95% hysteresis
 - **Fill rate**: ~2–3 gallons per 15–20 minutes (well production rate)
 - **Override**: Pi relay (BCM 19) for opportunistic filling above 80%
