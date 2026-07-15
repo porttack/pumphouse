@@ -92,11 +92,11 @@ update consistently.
   reading (`OVERRIDE_DOSATRON_SHUTOFF_GALLONS`). This catches high-flow events
   the 5-min sensor poll can't react to fast enough. ~47 gal / ~1.9″ of headroom.
 
-### Not changed
+### Override auto-on
 
-- `OVERRIDE_ON_THRESHOLD = 1370` (auto-on level) was left as-is. With the larger
-  true capacity this now corresponds to ~90% full rather than ~98%; review if a
-  different fill band is wanted.
+- `OVERRIDE_ON_THRESHOLD = 1420` (2026-07-15, was 1370). Turns the supply
+  override on when the tank drops to this level. Keeps a 30-gal on/off band
+  below the 1450 shutoff, matching the old 1370→1400 spread.
 
 ## Chlorine / Dosatron dosing
 

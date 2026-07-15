@@ -58,7 +58,7 @@ OVERRIDE_DOSATRON_SHUTOFF_GALLONS = 1475   # Est. gallons to trigger shutoff (st
 OVERRIDE_DOSATRON_RUNNING_ESTIMATE = True  # Use running estimate: last real reading + dosatron since (resets each tank fetch)
 
 # Override Auto-On Configuration
-OVERRIDE_ON_THRESHOLD = 1370  # Gallons at which to turn on override valve (None = disabled, e.g., 1350)
+OVERRIDE_ON_THRESHOLD = 1420  # Gallons at which to turn on override valve (None = disabled, e.g., 1350)
 
 # Notification Configuration
 ENABLE_NOTIFICATIONS = True  # Master switch (default OFF for safety)
