@@ -15,7 +15,7 @@ from flask import Blueprint, jsonify, request, abort, render_template, Response
 try:
     from monitor.dosatron import GALLONS_PER_CLICK, DEFAULT_FLOW_THRESHOLD
 except Exception:
-    GALLONS_PER_CLICK = 0.07
+    GALLONS_PER_CLICK = 0.10
     DEFAULT_FLOW_THRESHOLD = 400
 
 dosatron_bp = Blueprint("dosatron", __name__)

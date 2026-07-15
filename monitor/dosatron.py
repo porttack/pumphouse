@@ -51,9 +51,15 @@ pcm.dosatron_in {
 """
 
 # ── dosatron calibration ──────────────────────────────────────────────────────
-# Each dosatron firing produces a click + clack (2 sounds). Together they
-# deliver 0.14 gal.  Our detector may count each sound separately, so:
-GALLONS_PER_CLICK = 0.07    # 0.14 gal ÷ 2 sounds per firing
+# Each dosatron firing produces a click + clack (2 sounds), delivering 0.14 gal.
+# In theory that's 0.07 gal per detected sound — but DEBOUNCE_SECS (1.0s) often
+# suppresses the second sound when click+clack land <1s apart, so in practice we
+# capture closer to one detection per firing. Recalibrated 2026-07-13 against the
+# tank sensor across three fills (93.4/75.8/52.6 real gal vs 880/703/584 clicks →
+# ~0.09–0.11 gal/click). 0.10 makes the running estimate track the sensor and, if
+# anything, trips the overflow shutoff slightly early (the safe direction).
+# Revisit as more fills accumulate.
+GALLONS_PER_CLICK = 0.10    # was 0.07; see recalibration note above
 
 # ── click detection defaults ───────────────────────────────────────────────────
 DEFAULT_THRESHOLD     = 2000
