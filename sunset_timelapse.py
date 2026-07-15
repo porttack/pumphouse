@@ -625,7 +625,14 @@ def main():
                 # Wake up a minute early to avoid drift
                 time.sleep(max(wait - 60, 60))
             else:
-                run_todays_timelapse()
+                # Run in a subprocess so all memory (CLIP, etc.) is freed on exit
+                venv_python = Path(__file__).parent / 'venv' / 'bin' / 'python3'
+                python = str(venv_python) if venv_python.exists() else sys.executable
+                cmd = [python, __file__, '--run-today']
+                log.info(f"Spawning worker: {' '.join(cmd)}")
+                result = subprocess.run(cmd)
+                if result.returncode != 0:
+                    log.error(f"Worker exited with code {result.returncode}")
                 # Short pause before recalculating
                 time.sleep(300)
 
@@ -639,6 +646,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Pumphouse timelapse daemon / one-shot capture')
     parser.add_argument('--once', action='store_true',
                         help='Run a single one-shot capture then exit (daemon mode otherwise)')
+    parser.add_argument('--run-today', action='store_true',
+                        help='Compute today\'s sunset window, run one capture with full '
+                             'post-processing (email, CLIP, scoring), then exit. '
+                             'Used by the scheduler to run each day in a fresh process.')
     parser.add_argument('--start', metavar='HH:MM',
                         help='Start time for --once mode in local time, e.g. 05:00')
     parser.add_argument('--end', metavar='HH:MM',
@@ -647,7 +658,10 @@ if __name__ == '__main__':
                         help='Write frames to disk instead of tmpfs (required for captures > ~4 hrs)')
     args = parser.parse_args()
 
-    if args.once:
+    if args.run_today:
+        TIMELAPSE_DIR.mkdir(parents=True, exist_ok=True)
+        run_todays_timelapse()
+    elif args.once:
         if not args.start or not args.end:
             parser.error('--once requires --start and --end')
         tz = ZoneInfo(LOCATION_TZ)
