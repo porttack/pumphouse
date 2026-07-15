@@ -71,20 +71,43 @@ def _write_labels(path: str, labels: dict):
     _atomic_write(path, labels)
 
 
-def _serve_audio(path: str) -> Response:
-    """Serve a WAV file with proper byte-range support for browser audio players.
+_AUDIO_MIME = {".wav": "audio/wav", ".ogg": "audio/ogg", ".mp3": "audio/mpeg"}
 
-    HTML5 <audio> elements require Range request support to seek within a file
-    and to progressively buffer.  Flask's send_file may not handle all Range
-    edge cases with gunicorn, so we implement it explicitly here.
+
+def _resolve_audio(directory: str, filename: str) -> tuple[str | None, str | None]:
+    """Find an audio file, trying the alternate extension if needed.
+
+    Returns (full_path, resolved_filename) or (None, None).
     """
+    path = os.path.join(directory, filename)
+    if os.path.exists(path):
+        return path, filename
+    base, ext = os.path.splitext(filename)
+    alt_ext = ".ogg" if ext == ".wav" else ".wav" if ext == ".ogg" else None
+    if alt_ext:
+        alt_name = base + alt_ext
+        alt_path = os.path.join(directory, alt_name)
+        if os.path.exists(alt_path):
+            return alt_path, alt_name
+    return None, None
+
+
+def _audio_exists(directory: str, filename: str) -> str | None:
+    """Return the resolved filename if the audio file exists, else None."""
+    _, resolved = _resolve_audio(directory, filename)
+    return resolved
+
+
+def _serve_audio(path: str) -> Response:
+    """Serve an audio file with proper byte-range support for browser audio players."""
     if not os.path.exists(path):
         abort(404)
     file_size = os.path.getsize(path)
+    ext = os.path.splitext(path)[1].lower()
+    mimetype = _AUDIO_MIME.get(ext, "application/octet-stream")
     range_header = request.headers.get("Range")
 
     if range_header:
-        # Parse "bytes=start-end" (end is optional)
         try:
             byte_spec = range_header.strip().replace("bytes=", "")
             raw_start, raw_end = byte_spec.split("-")
@@ -109,7 +132,7 @@ def _serve_audio(path: str) -> Response:
                     remaining -= len(chunk)
                     yield chunk
 
-        resp = Response(_stream(), status=206, mimetype="audio/wav")
+        resp = Response(_stream(), status=206, mimetype=mimetype)
         resp.headers["Content-Range"]  = f"bytes {start}-{end}/{file_size}"
         resp.headers["Content-Length"] = str(length)
     else:
@@ -121,7 +144,7 @@ def _serve_audio(path: str) -> Response:
                         break
                     yield chunk
 
-        resp = Response(_stream_full(), status=200, mimetype="audio/wav")
+        resp = Response(_stream_full(), status=200, mimetype=mimetype)
         resp.headers["Content-Length"] = str(file_size)
 
     resp.headers["Accept-Ranges"] = "bytes"
@@ -277,7 +300,7 @@ def api_cycles():
             pass
 
         fn     = rec.get("audio_file", "")
-        exists = bool(fn) and os.path.exists(os.path.join(CYCLES_DIR, fn))
+        resolved_fn = _audio_exists(CYCLES_DIR, fn) if fn else None
         clicks = rec.get("click_count", 0)
 
         # High duration = low_ts - high_ts (not counting post-roll)
@@ -308,9 +331,9 @@ def api_cycles():
             "duty_pct":      duty_pct,
             "click_count":   clicks,
             "gallons":       round(clicks * GALLONS_PER_CLICK, 2),
-            "audio_file":    fn if exists else None,
+            "audio_file":    resolved_fn,
             "truncated":     rec.get("truncated", False),
-            "manual_count":  cycle_labels.get(fn),
+            "manual_count":  cycle_labels.get(fn) or cycle_labels.get(resolved_fn),
         })
 
     result.reverse()   # newest first
@@ -321,7 +344,10 @@ def api_cycles():
 def api_serve_cycle(filename):
     if "/" in filename or ".." in filename:
         abort(400)
-    return _serve_audio(os.path.join(CYCLES_DIR, filename))
+    path, _ = _resolve_audio(CYCLES_DIR, filename)
+    if not path:
+        abort(404)
+    return _serve_audio(path)
 
 
 @dosatron_bp.route("/api/dosatron/cycles/<path:filename>/manual_count", methods=["POST"])
@@ -331,6 +357,9 @@ def api_cycle_manual_count(filename):
     data  = request.get_json(force=True)
     count = data.get("count")
     labels = _read_labels(CYCLE_LABELS)
+    base, ext = os.path.splitext(filename)
+    alt = base + (".ogg" if ext == ".wav" else ".wav")
+    labels.pop(alt, None)
     if count is None:
         labels.pop(filename, None)
     else:
@@ -349,14 +378,14 @@ def api_detections():
     result = []
     for rec in reversed(rows):
         clip = rec.get("clip", "")
-        exists = bool(clip) and os.path.exists(os.path.join(CLIPS_DIR, clip))
+        resolved_clip = _audio_exists(CLIPS_DIR, clip) if clip else None
         result.append({
             "ts":        rec.get("ts"),
             "peak":      rec.get("peak"),
             "rms":       rec.get("rms"),
             "threshold": rec.get("threshold"),
-            "clip":      clip if exists else None,
-            "label":     labels.get(clip) if clip else None,
+            "clip":      resolved_clip,
+            "label":     (labels.get(clip) or labels.get(resolved_clip)) if clip else None,
         })
     total   = len(result)
     labeled = sum(1 for r in result if r["label"] is not None)
@@ -372,7 +401,10 @@ def api_detections():
 def api_serve_clip(filename):
     if "/" in filename or ".." in filename:
         abort(400)
-    return _serve_audio(os.path.join(CLIPS_DIR, filename))
+    path, _ = _resolve_audio(CLIPS_DIR, filename)
+    if not path:
+        abort(404)
+    return _serve_audio(path)
 
 
 @dosatron_bp.route("/api/dosatron/label/<path:filename>", methods=["POST"])
@@ -384,6 +416,9 @@ def api_label(filename):
     if label not in ("click", "noise", None):
         abort(400, "label must be 'click', 'noise', or null")
     labels = _read_labels(LABELS_FILE)
+    base, ext = os.path.splitext(filename)
+    alt = base + (".ogg" if ext == ".wav" else ".wav")
+    labels.pop(alt, None)
     if label is None:
         labels.pop(filename, None)
     else:
@@ -486,14 +521,14 @@ def api_flow_cycles():
     result = []
     for rec in reversed(rows):
         fn     = rec.get("audio_file", "")
-        exists = bool(fn) and os.path.exists(os.path.join(FLOW_CYCLES_DIR, fn))
+        resolved_fn = _audio_exists(FLOW_CYCLES_DIR, fn) if fn else None
         result.append({
             "start_ts":   rec.get("start_ts"),
             "end_ts":     rec.get("end_ts"),
             "duration_s": rec.get("duration_s"),
-            "audio_file": fn if exists else None,
+            "audio_file": resolved_fn,
             "truncated":  rec.get("truncated", False),
-            "verified":   labels.get(fn),   # True=real, False=false-positive, None=unlabeled
+            "verified":   labels.get(fn) or labels.get(resolved_fn),
         })
     return jsonify({"flow_cycles": result})
 
@@ -502,7 +537,10 @@ def api_flow_cycles():
 def api_serve_flow_cycle(filename):
     if "/" in filename or ".." in filename:
         abort(400)
-    return _serve_audio(os.path.join(FLOW_CYCLES_DIR, filename))
+    path, _ = _resolve_audio(FLOW_CYCLES_DIR, filename)
+    if not path:
+        abort(404)
+    return _serve_audio(path)
 
 
 @dosatron_bp.route("/api/dosatron/flow_cycles/<path:filename>/verify", methods=["POST"])
@@ -514,6 +552,9 @@ def api_flow_verify(filename):
     if verified is not None:
         verified = bool(verified)
     labels = _read_labels(FLOW_CYCLE_LABELS)
+    base, ext = os.path.splitext(filename)
+    alt = base + (".ogg" if ext == ".wav" else ".wav")
+    labels.pop(alt, None)
     if verified is None:
         labels.pop(filename, None)
     else:

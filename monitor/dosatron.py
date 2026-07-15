@@ -72,6 +72,8 @@ MAX_CYCLE_SECS    = 3600    # hard cap: 60 minutes
 POST_LOW_SECS     = 30      # keep recording after PRESSURE_LOW
 CYCLE_RETAIN_DAYS = 14
 CLIP_RETAIN_DAYS  = 14
+OPUS_BITRATE      = "24k"
+CONVERT_MIN_AGE   = 300        # don't convert WAVs younger than 5 min
 
 # ── bypass / flow detection ────────────────────────────────────────────────────
 # FFT-based detection: the bypass water makes a hollow 190–210 Hz resonance.
@@ -372,6 +374,31 @@ def _read_flow_config(default_min_rms: int, default_ratio: float) -> tuple[int, 
         return default_min_rms, default_ratio
 
 
+def _convert_wav(wav_path, log) -> str | None:
+    """Convert a WAV file to Opus OGG.  Returns the .ogg path on success."""
+    ogg_path = wav_path.rsplit(".", 1)[0] + ".ogg"
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", wav_path,
+             "-c:a", "libopus", "-b:a", OPUS_BITRATE, ogg_path],
+            capture_output=True, timeout=600,
+        )
+        if result.returncode == 0 and os.path.exists(ogg_path):
+            os.unlink(wav_path)
+            return ogg_path
+        else:
+            log.warning("ffmpeg failed for %s: %s",
+                        os.path.basename(wav_path), result.stderr[-200:])
+            if os.path.exists(ogg_path):
+                os.unlink(ogg_path)
+            return None
+    except Exception as exc:
+        log.warning("Convert failed for %s: %s", os.path.basename(wav_path), exc)
+        if os.path.exists(ogg_path):
+            os.unlink(ogg_path)
+        return None
+
+
 def _cleanup_old_files(log):
     now = time.time()
     for directory, retain_days in [(CLIPS_DIR, CLIP_RETAIN_DAYS),
@@ -381,15 +408,31 @@ def _cleanup_old_files(log):
         removed = 0
         for fn in os.listdir(directory):
             path = os.path.join(directory, fn)
-            if os.path.getmtime(path) < cutoff:
-                try:
+            try:
+                if os.path.getmtime(path) < cutoff:
                     os.unlink(path)
                     removed += 1
-                except OSError:
-                    pass
+            except OSError:
+                pass
         if removed:
             log.info("Cleaned up %d file(s) from %s (>%d days)",
                      removed, os.path.basename(directory), retain_days)
+
+        converted = 0
+        convert_cutoff = now - CONVERT_MIN_AGE
+        for fn in os.listdir(directory):
+            if not fn.endswith(".wav") or fn.endswith(".tmp"):
+                continue
+            path = os.path.join(directory, fn)
+            try:
+                if os.path.getmtime(path) < convert_cutoff:
+                    if _convert_wav(path, log):
+                        converted += 1
+            except OSError:
+                pass
+        if converted:
+            log.info("Converted %d WAV→Opus in %s",
+                     converted, os.path.basename(directory))
 
 
 def _open_arecord():
@@ -738,6 +781,7 @@ def listen(cli_threshold: int):
         proc.stdout.read(CHUNK_BYTES)
     log.info("Ready")
 
+    _cleanup_old_files(log)
     # read initial signal state so we don't falsely trigger on startup
     sig_state, sig_ts = _read_signal()
     last_signal_state = sig_state

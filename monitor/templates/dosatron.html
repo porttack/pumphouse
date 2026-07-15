@@ -343,7 +343,7 @@ function flowCard(c) {
   const fn = c.audio_file || '';
   const audioHtml = fn
     ? `<audio controls preload="metadata">
-         <source src="/api/dosatron/flow_cycles/${encodeURIComponent(fn)}" type="audio/wav">
+         <source src="/api/dosatron/flow_cycles/${encodeURIComponent(fn)}">
        </audio>`
     : '<div class="no-audio">no audio file</div>';
   const verTag = verified === true
@@ -399,7 +399,7 @@ function cycleCard(c) {
   const truncBadge = c.truncated ? ' <span style="color:#f44336;font-size:11px">[truncated at 60 min]</span>' : '';
   const audioHtml = c.audio_file
     ? `<audio controls preload="metadata">
-         <source src="/api/dosatron/cycles/${encodeURIComponent(c.audio_file)}" type="audio/wav">
+         <source src="/api/dosatron/cycles/${encodeURIComponent(c.audio_file)}">
        </audio>`
     : '<div class="no-audio">no audio file</div>';
 
@@ -508,7 +508,7 @@ function detCard(d) {
   const na = d.label === 'noise' ? 'active' : '';
   const fn = d.clip || '';
   const audio = fn
-    ? `<audio controls preload="none" style="margin:4px 0 6px"><source src="/api/dosatron/clips/${encodeURIComponent(fn)}" type="audio/wav"></audio>`
+    ? `<audio controls preload="none" style="margin:4px 0 6px"><source src="/api/dosatron/clips/${encodeURIComponent(fn)}"></audio>`
     : '<span class="no-clip">no clip</span>';
   return `
   <div class="det-card ${lc}">
