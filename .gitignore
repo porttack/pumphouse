@@ -58,3 +58,14 @@ test_*.py
 test_*.csv
 *.bak
 snapshots.csv.backup
+
+# ML model weights (yolov4/yolov8) — ~100MB of binaries, don't belong in git.
+# TODO: relocate to an XDG dir (~/.local/share/pumphouse/models or ~/.cache)
+# and load from there; ignoring in place for now. See TODO.md.
+models/
+
+# Runtime render caches and logs
+epaper_cache*.bmp
+epaper_jpg_cache*.jpg
+logs/
+gph_log.txt

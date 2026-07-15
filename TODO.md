@@ -18,6 +18,17 @@
 - To fix: review `send_tank_outage_notification()` and `log_tank_outage_recovery()`
   in poll.py; clarify what triggers "outage" vs normal tank poll gaps
 
+## Housekeeping
+
+### Relocate ML model weights out of the repo tree (added 2026-07-15)
+- `models/` holds ~106MB of yolov4/yolov8 weights currently living in the
+  working tree (now gitignored, not committed)
+- Should live in an XDG location (e.g. `~/.local/share/pumphouse/models`
+  or `~/.cache/pumphouse/models`) and be loaded from there
+- Update whatever loads the models (ring_camera / detection code) to read
+  from the new path, add a download/bootstrap step, then drop the gitignore
+  entry once nothing references `models/` in-tree
+
 ## Fixed
 
 ### Bypass timer cancel left bypass ON (fixed 2026-04-10)
