@@ -2280,11 +2280,28 @@ def water2_status():
     days_arg  = request.args.get('days',  type=int)
     if hours_arg is None and days_arg is not None:
         hours_arg = days_arg * 24
+    if hours_arg is None:
+        hours_arg = 6   # default to a 6-hour view; 3-day toggle below
 
     import time as _time
     _ts = int(_time.time())
-    img_param = f'tenant=no&hours={hours_arg}&_t={_ts}' if hours_arg is not None else f'tenant=no&_t={_ts}'
-    img_tag   = f'<img src="/api/epaper.jpg?{img_param}" alt="Water tank level graph">'
+    img_param   = f'tenant=no&hours={hours_arg}&_t={_ts}'
+    img_base    = f'/api/epaper.jpg?tenant=no&hours={hours_arg}'
+    img_tag     = f'<img id="tank-img" src="/api/epaper.jpg?{img_param}" alt="Water tank level graph">'
+
+    # Range toggle: 6 hours (default) vs 3 days
+    is_long_view = hours_arg >= 72
+    def _range_link(text, qs, active):
+        style = ('color:#cdd8f0;font-weight:600;' if active else 'color:#7aa4d8;')
+        return f'<a href="/water2?{qs}" style="text-decoration:none;{style}">{text}</a>'
+    range_html = (
+        '<div style="font-size:0.82rem;color:#6a82b0;display:flex;gap:14px;'
+        'justify-content:center;margin-top:-8px;">'
+        + _range_link('6 hours', 'hours=6', not is_long_view)
+        + '<span>&bull;</span>'
+        + _range_link('3 days', 'days=3', is_long_view)
+        + '</div>'
+    )
     if via_cloudflare:
         img_html    = img_tag
         extra_links = ''
@@ -2333,7 +2350,6 @@ def water2_status():
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="600">
   <title>Water Status &mdash; onblackberryhill.com</title>
   <link rel="icon" type="image/svg+xml" href='data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M16 2C16 2 6 14 6 21a10 10 0 0 0 20 0C26 14 16 2 16 2z" fill="%231e90ff"/><path d="M11 20c0-3 2-5 4-7" stroke="white" stroke-width="1.5" fill="none" stroke-linecap="round" opacity="0.5"/></svg>'>
   <style>
@@ -2370,6 +2386,33 @@ def water2_status():
       border-radius: 6px;
       display: block;
     }}
+    .flow-card {{
+      background: #1e2d54;
+      border-radius: 12px;
+      padding: 14px 18px;
+      max-width: 640px;
+      width: 100%;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+      font-size: 0.9rem;
+    }}
+    .flow-row {{
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+    }}
+    .flow-row:last-child {{ margin-bottom: 0; }}
+    .flow-dot {{
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: #444;
+    }}
+    .flow-dot.on  {{ background: #1e90ff; box-shadow: 0 0 6px #1e90ff; }}
+    .flow-dot.off {{ background: #4a5568; }}
+    .flow-label {{ color: #8fb3e8; min-width: 120px; }}
+    .flow-value {{ color: #cdd8f0; font-weight: 500; }}
+    .flow-ts {{ font-size: 0.75rem; color: #4a6080; margin-top: 8px; }}
     .links {{
       font-size: 0.82rem;
       color: #6a82b0;
@@ -2388,16 +2431,136 @@ def water2_status():
   <div class="card">
     {img_html}
   </div>
+  {range_html}
+  <div class="flow-card" id="flow-card">
+    <div class="flow-row">
+      <div class="flow-dot" id="flow-dot"></div>
+      <span class="flow-label">Flow:</span>
+      <span class="flow-value" id="flow-status-text">&mdash;</span>
+    </div>
+    <div class="flow-row" id="flow-gpm-row" style="display:none">
+      <div style="width:10px"></div>
+      <span class="flow-label">Est. GPM (60s):</span>
+      <span class="flow-value" id="flow-gpm-text">&mdash;</span>
+    </div>
+    <div class="flow-row" id="flow-duty-row" style="display:none">
+      <div style="width:10px"></div>
+      <span class="flow-label" id="flow-duty-label">Duty:</span>
+      <span class="flow-value" id="flow-duty-text">&mdash;</span>
+    </div>
+    <div class="flow-row" id="flow-tank-row" style="display:none">
+      <div style="width:10px"></div>
+      <span class="flow-label">Tank level:</span>
+      <span class="flow-value" id="flow-tank-text">&mdash;</span>
+    </div>
+    <div class="flow-ts" id="flow-updated"></div>
+  </div>
   {controls_html}
   <div class="links">
-    <span>Updates every 10&ndash;30 minutes</span>
-    <span>&bull;</span>
     <a href="/timelapse">Timelapse</a>
     <span>&bull;</span>
     <a href="/water">Public view</a>
     <span>&bull;</span>
     <a href="{AMBIENT_WEATHER_DASHBOARD_URL}" target="_blank">Weather</a>{extra_links}
   </div>
+  <script>
+    const IMG_BASE = {json.dumps(img_base)};
+    let _lastFlowing = false;
+    let _imgTimer = null;
+
+    function refreshImage() {{
+      const img = document.getElementById('tank-img');
+      if (!img) return;
+      img.src = IMG_BASE + '&_t=' + Math.floor(Date.now() / 1000);
+    }}
+
+    function scheduleImg(flowing) {{
+      if (_imgTimer) clearTimeout(_imgTimer);
+      const delay = flowing ? 30000 : 120000;
+      _imgTimer = setTimeout(() => {{ refreshImage(); scheduleImg(_lastFlowing); }}, delay);
+    }}
+
+    function updateFlow() {{
+      fetch('/api/flow_status')
+        .then(r => r.json())
+        .then(d => {{
+          const flowing   = !!d.is_flowing;
+          const dot       = document.getElementById('flow-dot');
+          const statusEl  = document.getElementById('flow-status-text');
+          const gpmRow    = document.getElementById('flow-gpm-row');
+          const dutyRow   = document.getElementById('flow-duty-row');
+          const dutyLabel = document.getElementById('flow-duty-label');
+          const gpmEl     = document.getElementById('flow-gpm-text');
+          const dutyEl    = document.getElementById('flow-duty-text');
+          const tankRow   = document.getElementById('flow-tank-row');
+          const tankEl    = document.getElementById('flow-tank-text');
+          const updEl     = document.getElementById('flow-updated');
+
+          dot.className = 'flow-dot ' + (flowing ? 'on' : 'off');
+
+          if (flowing) {{
+            const mode = d.mode === 'bypass' ? ' (bypass)' : '';
+            statusEl.textContent = 'Flowing' + mode;
+          }} else if (!d.float_calling) {{
+            statusEl.textContent = 'Not filling (tank full)';
+          }} else if (d.last_click_age_s !== null && d.last_click_age_s !== undefined) {{
+            const ago = d.last_click_age_s < 120
+              ? d.last_click_age_s + 's ago'
+              : Math.round(d.last_click_age_s / 60) + 'm ago';
+            statusEl.textContent = 'Filling, between pump cycles (last flow ' + ago + ')';
+          }} else {{
+            statusEl.textContent = 'Calling for water (no flow detected yet)';
+          }}
+
+          // GPM: only while actually flowing
+          if (d.gpm !== null && d.gpm !== undefined) {{
+            gpmRow.style.display = '';
+            gpmEl.textContent = d.gpm.toFixed(2) + ' gal/min';
+          }} else {{
+            gpmRow.style.display = 'none';
+          }}
+
+          // Duty cycle (% of time receiving water) with dynamic window label
+          if (d.duty_cycle_pct !== null && d.duty_cycle_pct !== undefined) {{
+            dutyRow.style.display = '';
+            dutyLabel.textContent = 'Receiving water (' + (d.duty_window_label || '?') + '):';
+            dutyEl.textContent = d.duty_cycle_pct.toFixed(0) + '%';
+          }} else {{
+            dutyRow.style.display = 'none';
+          }}
+
+          // Tank level: live estimate while filling, else real sensor + age
+          if (d.tank_gallons !== null && d.tank_gallons !== undefined) {{
+            tankRow.style.display = '';
+            if (d.tank_is_estimate) {{
+              tankEl.textContent = '~' + d.tank_gallons + ' gal (filling)';
+            }} else {{
+              const age = d.tank_reading_age_min;
+              const suffix = (age !== null && age !== undefined)
+                ? ' (sensor, ' + (age < 1 ? 'just now' : age + 'm ago') + ')'
+                : '';
+              tankEl.textContent = d.tank_gallons + ' gal' + suffix;
+            }}
+          }} else {{
+            tankRow.style.display = 'none';
+          }}
+
+          updEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
+
+          if (flowing !== _lastFlowing) {{
+            _lastFlowing = flowing;
+            scheduleImg(flowing);
+          }}
+        }})
+        .catch(() => {{
+          document.getElementById('flow-updated').textContent = 'Flow status unavailable';
+        }});
+    }}
+
+    updateFlow();
+    setInterval(updateFlow, 10000);
+    scheduleImg(false);
+  </script>
 </body>
 </html>"""
 
