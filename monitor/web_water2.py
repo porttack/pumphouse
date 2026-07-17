@@ -224,6 +224,7 @@ def api_flow_status():
         'last_click_age_s':     None,
         'duty_cycle_pct':       None,
         'duty_window_label':    None,
+        'duty_window_gallons':  None,
         'puff_count':           None,
         'puff_on_avg_s':        None,
         'puff_gap_avg_s':       None,
@@ -303,6 +304,8 @@ def api_flow_status():
             # the "last fill" rate when we're not currently flowing. Active time is
             # counted from 30s buckets that contain a click (matches the duty calc).
             win_clicks = [t for t in clicks if win_start <= t <= win_end]
+            # Total gallons received over the window (since calling / last fill).
+            result['duty_window_gallons'] = round(len(win_clicks) * _GPK, 1)
             if win_clicks:
                 active_buckets = len({int((t - win_start) // 30) for t in win_clicks})
                 active_min = active_buckets * 30 / 60
@@ -735,11 +738,15 @@ def water2_status():
             etaRow.style.display = 'none';
           }}
 
-          // Duty cycle (% of time receiving water) with dynamic window label
+          // Duty cycle (% of time receiving water) + gallons over the window
           if (d.duty_cycle_pct !== null && d.duty_cycle_pct !== undefined) {{
             dutyRow.style.display = '';
             dutyLabel.textContent = 'Receiving water (' + (d.duty_window_label || '?') + '):';
-            dutyEl.textContent = d.duty_cycle_pct.toFixed(0) + '%';
+            let v = d.duty_cycle_pct.toFixed(0) + '%';
+            if (d.duty_window_gallons !== null && d.duty_window_gallons !== undefined) {{
+              v += ' · ' + d.duty_window_gallons + ' gal';
+            }}
+            dutyEl.textContent = v;
           }} else {{
             dutyRow.style.display = 'none';
           }}
