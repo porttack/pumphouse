@@ -25,7 +25,8 @@ from monitor.config import (
     TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS, TANK_FULL_GALLONS,
     SECRET_BYPASS_ON_TOKEN, SECRET_BYPASS_OFF_TOKEN,
     SECRET_OVERRIDE_ON_TOKEN, SECRET_OVERRIDE_OFF_TOKEN,
-    SECRET_PURGE_TOKEN, SECRET_TEST_FILTER_TOKEN,
+    SECRET_PURGE_TOKEN, SECRET_PURGE_NEXT_TOKEN, SECRET_PURGE_CANCEL_NEXT_TOKEN,
+    SECRET_TEST_FILTER_TOKEN, PURGE_PENDING_FILE,
 )
 from monitor.gpio_helpers import read_float_sensor, FLOAT_STATE_CALLING
 from monitor.relay import get_all_relay_status
@@ -458,7 +459,13 @@ def water2_status():
         else:
             override_btn = f'<a href="/control/{SECRET_OVERRIDE_ON_TOKEN}?back={back}" style="{btn_base}">&#9675; Force Fill Tank Valve Open: OFF</a>'
 
-        purge_btn       = f'<a href="/control/{SECRET_PURGE_TOKEN}?back={back}" style="{btn_base}" onclick="return confirm(\'Trigger a purge cycle?\')">&#9881; Purge</a>'
+        purge_btn       = f'<a href="/control/{SECRET_PURGE_TOKEN}?back={back}" style="{btn_base}" onclick="return confirm(\'Trigger a purge cycle?\')">&#9881; Purge now</a>'
+        # Purge with pressure: schedule for the next pump cycle (+15s); toggles to
+        # a cancel button while one is pending — same as the dashboard.
+        if PURGE_PENDING_FILE.exists():
+            purge_next_btn = f'<a href="/control/{SECRET_PURGE_CANCEL_NEXT_TOKEN}?back={back}" style="{btn_base}{btn_warning}">&#9881; Purge pending &mdash; cancel?</a>'
+        else:
+            purge_next_btn = f'<a href="/control/{SECRET_PURGE_NEXT_TOKEN}?back={back}" style="{btn_base}" onclick="return confirm(\'Schedule purge for next pump cycle (+15s)?\')">&#9881; Purge w/ pressure</a>'
         test_filter_btn = f'<a href="/control/{SECRET_TEST_FILTER_TOKEN}?back={back}" style="{btn_base}" onclick="return confirm(\'Start test filter mode? This turns Override ON and Bypass OFF.\')">&#128308; Test Filter</a>'
 
         float_state = read_float_sensor()
@@ -467,7 +474,7 @@ def water2_status():
         else:
             tank_valve_html = '<div style="color:#ff9800;font-size:0.9rem;text-align:center;">&#9679; Fill Tank Valve: CLOSED (tank full)</div>'
 
-        controls_html = f'{tank_valve_html}<div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:8px;">{bypass_btn}{override_btn}{purge_btn}{test_filter_btn}</div>'
+        controls_html = f'{tank_valve_html}<div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:8px;">{bypass_btn}{override_btn}{purge_btn}{purge_next_btn}{test_filter_btn}</div>'
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
