@@ -388,8 +388,8 @@ def water2_status():
 
     import time as _time
     _ts = int(_time.time())
-    img_param   = f'tenant=no&hours={hours_arg}&est=1&_t={_ts}'
-    img_base    = f'/api/epaper.jpg?tenant=no&hours={hours_arg}&est=1'
+    img_param   = f'tenant=no&hours={hours_arg}&est=1&minrange=4&_t={_ts}'
+    img_base    = f'/api/epaper.jpg?tenant=no&hours={hours_arg}&est=1&minrange=4'
     img_tag     = f'<img id="tank-img" src="/api/epaper.jpg?{img_param}" alt="Water tank level graph">'
 
     # Range toggle: 6 hours (default) vs 3 days

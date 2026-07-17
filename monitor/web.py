@@ -1920,12 +1920,94 @@ def epaper_jpg():
         public_mode=(request.args.get('public') == 'yes'),
         scale=max(1, min(8, request.args.get('scale', 4, type=int))),
         use_estimate=(request.args.get('est') == '1'),
+        min_range_pct=request.args.get('minrange', type=float),
     )
     from flask import Response as _Resp
     resp = _Resp(buf.read(), mimetype='image/jpeg')
     resp.headers['Content-Disposition'] = 'inline; filename="epaper.jpg"'
     resp.headers['Cache-Control'] = 'public, max-age=600, stale-if-error=172800'
     return resp
+
+
+@app.route('/scriptable')
+@requires_auth
+def scriptable_widget():
+    """
+    Private page: render the Scriptable widget script with this server's real
+    host substituted in, plus a one-tap "Copy" button. Open it on the phone,
+    tap Copy, then paste into a new Scriptable script. Same substitution as
+    pistat/gen_widget.py, but served live so there's nothing to regenerate.
+    """
+    import re as _re
+    import pathlib as _pathlib
+
+    template_path = (_pathlib.Path(__file__).resolve().parent.parent
+                     / 'pistat' / 'scriptable-widget.js')
+    try:
+        template = template_path.read_text()
+    except OSError:
+        return Response(f'Widget template not found: {template_path}', 500)
+
+    base = (DASHBOARD_URL or request.host_url).rstrip('/')
+    code, n = _re.subn(r'^const BASE = ".*";$',
+                       f'const BASE = "{base}";', template, flags=_re.MULTILINE)
+    if n != 1:
+        return Response('Could not substitute BASE in widget template '
+                        f'(matched {n} lines)', 500)
+
+    page = """<!doctype html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scriptable Widget</title>
+<style>
+  :root { color-scheme: dark light; }
+  body { margin:0; padding:16px; font:15px -apple-system,system-ui,sans-serif;
+         background:#0f1720; color:#e6edf3; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  p  { margin:4px 0 12px; color:#9fb0c0; font-size:13px; }
+  .base { font-family:ui-monospace,Menlo,monospace; color:#7ec8ff; word-break:break-all; }
+  button { width:100%; padding:14px; font-size:17px; font-weight:600;
+           border:0; border-radius:12px; background:#2563eb; color:#fff; }
+  button:active { background:#1d4ed8; }
+  #status { text-align:center; min-height:20px; margin:8px 0 12px; color:#4ade80; font-size:14px; }
+  textarea { width:100%; height:52vh; box-sizing:border-box; margin-top:8px;
+             font-family:ui-monospace,Menlo,monospace; font-size:11px; line-height:1.4;
+             color:#e6edf3; background:#0b1119; border:1px solid #24303c; border-radius:10px;
+             padding:10px; -webkit-text-size-adjust:100%; }
+  ol { color:#9fb0c0; font-size:13px; padding-left:20px; }
+</style>
+</head><body>
+  <h1>Pumphouse Widget</h1>
+  <p>Host: <span class="base">{{ base }}</span></p>
+  <button onclick="copyCode()">Copy script</button>
+  <div id="status"></div>
+  <ol>
+    <li>Tap <b>Copy script</b> above.</li>
+    <li>Open <b>Scriptable</b> &rarr; <b>+</b> (new script).</li>
+    <li>Paste, then rename the script (long-press the title).</li>
+    <li>Add a Medium Scriptable widget to your home screen and pick it.</li>
+  </ol>
+  <textarea id="code" readonly spellcheck="false" autocapitalize="off"
+            autocorrect="off">{{ code }}</textarea>
+<script>
+async function copyCode() {
+  const ta = document.getElementById('code');
+  const s  = document.getElementById('status');
+  try {
+    await navigator.clipboard.writeText(ta.value);
+    s.textContent = 'Copied! Now paste it into Scriptable.';
+  } catch (e) {
+    ta.focus(); ta.select(); ta.setSelectionRange(0, ta.value.length);
+    const ok = document.execCommand('copy');
+    s.textContent = ok ? 'Copied!' :
+      'Copy failed — long-press the text below, Select All, Copy.';
+  }
+}
+</script>
+</body></html>"""
+    from flask import render_template_string
+    return render_template_string(page, base=base, code=code)
 
 
 @app.route('/water')

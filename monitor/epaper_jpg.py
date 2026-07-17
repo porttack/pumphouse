@@ -173,6 +173,7 @@ def render_epaper_jpg(
     snapshots_csv: str = DEFAULT_SNAPSHOTS_FILE,
     reservations_csv = None,
     use_estimate: bool = False,  # show the live dosatron estimate as the current depth
+    min_range_pct: float | None = None,  # override the min Y-axis span (default from config)
 ) -> io.BytesIO:
     """
     Render a color JPEG of the e-paper display and return it as a BytesIO buffer.
@@ -397,7 +398,8 @@ def render_epaper_jpg(
     # ── Y-axis range ─────────────────────────────────────────────────────
     g_min_raw  = min(graph_gallons) if len(graph_gallons) >= 2 else 0.0
     g_max_raw  = max(graph_gallons) if len(graph_gallons) >= 2 else 0.0
-    min_range  = TANK_FULL_GALLONS * (EPAPER_MIN_GRAPH_RANGE_PCT / 100)
+    _mrp       = min_range_pct if min_range_pct is not None else EPAPER_MIN_GRAPH_RANGE_PCT
+    min_range  = TANK_FULL_GALLONS * (_mrp / 100)
     max_gallon = TANK_FULL_GALLONS * (EPAPER_MAX_GRAPH_PCT / 100)
     if g_max_raw - g_min_raw < min_range:
         mid       = (g_min_raw + g_max_raw) / 2
