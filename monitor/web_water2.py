@@ -159,17 +159,19 @@ def _last_tank_reading() -> 'tuple[float | None, float]':
     return gal, ts
 
 
-def _fill_window(float_calling: bool, now: float) -> 'tuple[float | None, float, str | None]':
-    """Return (win_start, win_end, label) for duty-cycle scoping, from float events.
+def _fill_window(float_calling: bool, now: float) -> 'tuple[float | None, float, str | None, float | None]':
+    """Return (win_start, win_end, label, start_gallons) for scoping, from float events.
 
     Calling  → this fill: last FLOAT_CALLING … now.
     Full     → last completed fill: last FLOAT_CALLING … following FLOAT_FULL.
+    start_gallons is the tank sensor reading recorded on that FLOAT_CALLING event
+    (the level when the fill window began), or None.
     """
     raw = _read_events_tail_raw(262144)
-    calling_ts = None
+    calling_ts = calling_gal = None
     full_ts    = None
     for line in raw.splitlines():
-        parts = line.split(',', 2)
+        parts = line.split(',')
         if len(parts) < 2:
             continue
         et = parts[1].strip()
@@ -181,15 +183,19 @@ def _fill_window(float_calling: bool, now: float) -> 'tuple[float | None, float,
             continue
         if et == 'FLOAT_CALLING':
             calling_ts, full_ts = ts, None
+            try:
+                calling_gal = float(parts[4])
+            except Exception:
+                calling_gal = None
         else:
             full_ts = ts
 
     if calling_ts is None:
-        return None, now, None
+        return None, now, None, None
     if float_calling:
-        return calling_ts, now, f'since calling ({round((now - calling_ts) / 60)}m)'
+        return calling_ts, now, f'since calling ({round((now - calling_ts) / 60)}m)', calling_gal
     win_end = full_ts if full_ts else now
-    return calling_ts, win_end, f'last fill ({round((win_end - calling_ts) / 60)}m)'
+    return calling_ts, win_end, f'last fill ({round((win_end - calling_ts) / 60)}m)', calling_gal
 
 
 @water2_bp.route('/api/flow_status')
@@ -225,6 +231,7 @@ def api_flow_status():
         'duty_cycle_pct':       None,
         'duty_window_label':    None,
         'duty_window_gallons':  None,
+        'house_used_gallons':   None,
         'puff_count':           None,
         'puff_on_avg_s':        None,
         'puff_gap_avg_s':       None,
@@ -273,7 +280,7 @@ def api_flow_status():
             result['tank_inches']          = _depth_inches(real_gal)
             result['tank_reading_age_min'] = round((now - real_ts) / 60)
 
-    win_start, win_end, label = _fill_window(float_calling, now)
+    win_start, win_end, label, win_start_gal = _fill_window(float_calling, now)
     result['duty_window_label'] = label
 
     if not bypass_on:
@@ -305,12 +312,22 @@ def api_flow_status():
             # counted from 30s buckets that contain a click (matches the duty calc).
             win_clicks = [t for t in clicks if win_start <= t <= win_end]
             # Total gallons received over the window (since calling / last fill).
-            result['duty_window_gallons'] = round(len(win_clicks) * _GPK, 1)
+            received = round(len(win_clicks) * _GPK, 1)
+            result['duty_window_gallons'] = received
             if win_clicks:
                 active_buckets = len({int((t - win_start) // 30) for t in win_clicks})
                 active_min = active_buckets * 30 / 60
                 if active_min > 0:
                     result['last_gpm'] = round(len(win_clicks) * _GPK / active_min, 2)
+
+            # House usage over the window by water balance: in − tank level change.
+            # Uses sensor readings for the level change (start = FLOAT_CALLING event,
+            # end = last sensor fetch / base of the estimate) so dosatron clicks
+            # aren't double-counted on both sides.
+            tank_now_sensor = base_gal if base_gal is not None else result.get('tank_gallons')
+            if win_start_gal is not None and tank_now_sensor is not None:
+                used = received - (tank_now_sensor - win_start_gal)
+                result['house_used_gallons'] = round(max(0.0, used), 1)
 
         # ── Puff (well-recovery) cadence over the last 6 h ───────────────────
         recent = [t for t in clicks if t >= now - puff_window]
@@ -586,6 +603,11 @@ def water2_status():
       <span class="flow-label" id="flow-duty-label">Duty:</span>
       <span class="flow-value" id="flow-duty-text">&mdash;</span>
     </div>
+    <div class="flow-row" id="flow-used-row" style="display:none">
+      <div style="width:10px"></div>
+      <span class="flow-label">House used:</span>
+      <span class="flow-value" id="flow-used-text">&mdash;</span>
+    </div>
     <div class="flow-row" id="flow-eta-row" style="display:none">
       <div style="width:10px"></div>
       <span class="flow-label">Full (1450):</span>
@@ -749,6 +771,22 @@ def water2_status():
             dutyEl.textContent = v;
           }} else {{
             dutyRow.style.display = 'none';
+          }}
+
+          // House usage over the window (received − tank level change)
+          const usedRow = document.getElementById('flow-used-row');
+          const usedEl  = document.getElementById('flow-used-text');
+          if (d.house_used_gallons !== null && d.house_used_gallons !== undefined) {{
+            usedRow.style.display = '';
+            let uv = '~' + d.house_used_gallons + ' gal';
+            // Flag when usage is outrunning what the well delivered
+            if (d.duty_window_gallons !== null && d.duty_window_gallons !== undefined
+                && d.house_used_gallons > d.duty_window_gallons + 2) {{
+              uv += ' (> ' + d.duty_window_gallons + ' received)';
+            }}
+            usedEl.textContent = uv;
+          }} else {{
+            usedRow.style.display = 'none';
           }}
 
           // Tank level: while filling show the live estimate AND the sensor base it
