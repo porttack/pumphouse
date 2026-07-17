@@ -470,7 +470,7 @@ def water2_status():
             purge_next_btn = f'<a id="btn-purgenext" href="/control/{SECRET_PURGE_CANCEL_NEXT_TOKEN}?back={back}" style="{btn_base}{btn_warning}">&#9881; Purge pending &mdash; cancel?</a>'
         else:
             purge_next_btn = f'<a id="btn-purgenext" href="/control/{SECRET_PURGE_NEXT_TOKEN}?back={back}" style="{btn_base}" onclick="return confirm(\'Schedule purge for next pump cycle (+15s)?\')">&#9881; Purge w/ pressure</a>'
-        test_filter_btn = f'<a href="/control/{SECRET_TEST_FILTER_TOKEN}?back={back}" style="{btn_base}" onclick="return confirm(\'Start test filter mode? This turns Override ON and Bypass OFF.\')">&#128308; Test Filter</a>'
+        test_filter_btn = f'<a href="/control/{SECRET_TEST_FILTER_TOKEN}?back={back}" style="{btn_base}" title="Runs water through the filters + dosatron on demand (Override ON so the pump pushes water, Bypass OFF so it flows through the filter). For inspecting the filter/dosatron — turn Override off when done." onclick="return confirm(\'Start test filter mode? This turns Override ON and Bypass OFF.\')">&#128308; Test Filter</a>'
 
         float_state = read_float_sensor()
         if float_state == FLOAT_STATE_CALLING:
