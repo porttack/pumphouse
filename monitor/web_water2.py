@@ -218,11 +218,14 @@ def api_flow_status():
     now           = _t.time()
     relay_status  = get_all_relay_status()
     bypass_on     = relay_status.get('bypass') == 'ON'
+    override_on   = relay_status.get('supply_override') == 'ON'
     float_calling = read_float_sensor() == FLOAT_STATE_CALLING
 
     result: dict = {
         'mode':                 'bypass' if bypass_on else 'dosatron',
         'bypass_on':            bypass_on,
+        'override_on':          override_on,
+        'purge_pending':        PURGE_PENDING_FILE.exists(),
         'float_calling':        float_calling,
         'is_flowing':           False,
         'gpm':                  None,
@@ -440,6 +443,7 @@ def water2_status():
     back = '/water2'
 
     controls_html = ''
+    ctrl_cfg = None
     if SECRET_BYPASS_ON_TOKEN:
         relay_status = get_all_relay_status()
         bypass_on    = relay_status.get('bypass') == 'ON'
@@ -450,31 +454,45 @@ def water2_status():
         btn_base    = 'display:inline-block;padding:8px 16px;border:1px solid #7aa4d8;border-radius:6px;color:#7aa4d8;text-decoration:none;font-size:0.9rem;'
 
         if bypass_on:
-            bypass_btn = f'<a href="/control/{SECRET_BYPASS_OFF_TOKEN}?back={back}" style="{btn_base}{btn_active}">&#9679; Bypass Filters/Dosatron: ON</a>'
+            bypass_btn = f'<a id="btn-bypass" href="/control/{SECRET_BYPASS_OFF_TOKEN}?back={back}" style="{btn_base}{btn_active}">&#9679; Bypass Filters/Dosatron: ON</a>'
         else:
-            bypass_btn = f'<a href="/control/{SECRET_BYPASS_ON_TOKEN}?back={back}" style="{btn_base}">&#9675; Bypass Filters/Dosatron: OFF</a>'
+            bypass_btn = f'<a id="btn-bypass" href="/control/{SECRET_BYPASS_ON_TOKEN}?back={back}" style="{btn_base}">&#9675; Bypass Filters/Dosatron: OFF</a>'
 
         if override_on:
-            override_btn = f'<a href="/control/{SECRET_OVERRIDE_OFF_TOKEN}?back={back}" style="{btn_base}{btn_warning}">&#9679; Force Fill Tank Valve Open: ON</a>'
+            override_btn = f'<a id="btn-override" href="/control/{SECRET_OVERRIDE_OFF_TOKEN}?back={back}" style="{btn_base}{btn_warning}">&#9679; Force Fill Tank Valve Open: ON</a>'
         else:
-            override_btn = f'<a href="/control/{SECRET_OVERRIDE_ON_TOKEN}?back={back}" style="{btn_base}">&#9675; Force Fill Tank Valve Open: OFF</a>'
+            override_btn = f'<a id="btn-override" href="/control/{SECRET_OVERRIDE_ON_TOKEN}?back={back}" style="{btn_base}">&#9675; Force Fill Tank Valve Open: OFF</a>'
 
         purge_btn       = f'<a href="/control/{SECRET_PURGE_TOKEN}?back={back}" style="{btn_base}" onclick="return confirm(\'Trigger a purge cycle?\')">&#9881; Purge now</a>'
         # Purge with pressure: schedule for the next pump cycle (+15s); toggles to
         # a cancel button while one is pending — same as the dashboard.
         if PURGE_PENDING_FILE.exists():
-            purge_next_btn = f'<a href="/control/{SECRET_PURGE_CANCEL_NEXT_TOKEN}?back={back}" style="{btn_base}{btn_warning}">&#9881; Purge pending &mdash; cancel?</a>'
+            purge_next_btn = f'<a id="btn-purgenext" href="/control/{SECRET_PURGE_CANCEL_NEXT_TOKEN}?back={back}" style="{btn_base}{btn_warning}">&#9881; Purge pending &mdash; cancel?</a>'
         else:
-            purge_next_btn = f'<a href="/control/{SECRET_PURGE_NEXT_TOKEN}?back={back}" style="{btn_base}" onclick="return confirm(\'Schedule purge for next pump cycle (+15s)?\')">&#9881; Purge w/ pressure</a>'
+            purge_next_btn = f'<a id="btn-purgenext" href="/control/{SECRET_PURGE_NEXT_TOKEN}?back={back}" style="{btn_base}" onclick="return confirm(\'Schedule purge for next pump cycle (+15s)?\')">&#9881; Purge w/ pressure</a>'
         test_filter_btn = f'<a href="/control/{SECRET_TEST_FILTER_TOKEN}?back={back}" style="{btn_base}" onclick="return confirm(\'Start test filter mode? This turns Override ON and Bypass OFF.\')">&#128308; Test Filter</a>'
 
         float_state = read_float_sensor()
         if float_state == FLOAT_STATE_CALLING:
-            tank_valve_html = '<div style="color:#ff9800;font-size:0.9rem;text-align:center;">&#9654; Fill Tank Valve: OPEN (tank calling for water)</div>'
+            tank_valve_html = '<div id="tank-valve" style="color:#ff9800;font-size:0.9rem;text-align:center;">&#9654; Fill Tank Valve: OPEN (tank calling for water)</div>'
         else:
-            tank_valve_html = '<div style="color:#ff9800;font-size:0.9rem;text-align:center;">&#9679; Fill Tank Valve: CLOSED (tank full)</div>'
+            tank_valve_html = '<div id="tank-valve" style="color:#ff9800;font-size:0.9rem;text-align:center;">&#9679; Fill Tank Valve: CLOSED (tank full)</div>'
 
         controls_html = f'{tank_valve_html}<div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:8px;">{bypass_btn}{override_btn}{purge_btn}{purge_next_btn}{test_filter_btn}</div>'
+
+        # Config for the client to re-sync button state on each poll (so a change
+        # made from another device shows here within the poll interval).
+        ctrl_cfg = {
+            'base':       btn_base,
+            'active':     btn_base + btn_active,
+            'warning':    btn_base + btn_warning,
+            'bypassOn':   f'/control/{SECRET_BYPASS_ON_TOKEN}?back={back}',
+            'bypassOff':  f'/control/{SECRET_BYPASS_OFF_TOKEN}?back={back}',
+            'ovrOn':      f'/control/{SECRET_OVERRIDE_ON_TOKEN}?back={back}',
+            'ovrOff':     f'/control/{SECRET_OVERRIDE_OFF_TOKEN}?back={back}',
+            'purgeNext':  f'/control/{SECRET_PURGE_NEXT_TOKEN}?back={back}',
+            'purgeCancel': f'/control/{SECRET_PURGE_CANCEL_NEXT_TOKEN}?back={back}',
+        }
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -642,8 +660,48 @@ def water2_status():
   </div>
   <script>
     const IMG_BASE = {json.dumps(img_base)};
+    const CTRL = {json.dumps(ctrl_cfg)};
     let _lastFlowing = false;
     let _imgTimer = null;
+
+    // Re-sync the control buttons from live state each poll, so a change made
+    // from another device (or the pump itself) shows here within the interval.
+    function applyControlState(d) {{
+      if (!CTRL) return;
+      const setToggle = (id, on, onUrl, offUrl, onLabel, offLabel, onStyle) => {{
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.setAttribute('href', on ? onUrl : offUrl);
+        el.setAttribute('style', on ? onStyle : CTRL.base);
+        el.innerHTML = on ? onLabel : offLabel;
+      }};
+      setToggle('btn-bypass', d.bypass_on, CTRL.bypassOff, CTRL.bypassOn,
+        '&#9679; Bypass Filters/Dosatron: ON', '&#9675; Bypass Filters/Dosatron: OFF', CTRL.active);
+      setToggle('btn-override', d.override_on, CTRL.ovrOff, CTRL.ovrOn,
+        '&#9679; Force Fill Tank Valve Open: ON', '&#9675; Force Fill Tank Valve Open: OFF', CTRL.warning);
+
+      const pn = document.getElementById('btn-purgenext');
+      if (pn) {{
+        if (d.purge_pending) {{
+          pn.setAttribute('href', CTRL.purgeCancel);
+          pn.setAttribute('style', CTRL.warning);
+          pn.onclick = null;
+          pn.innerHTML = '&#9881; Purge pending &mdash; cancel?';
+        }} else {{
+          pn.setAttribute('href', CTRL.purgeNext);
+          pn.setAttribute('style', CTRL.base);
+          pn.onclick = (e) => {{ if (!confirm('Schedule purge for next pump cycle (+15s)?')) e.preventDefault(); }};
+          pn.innerHTML = '&#9881; Purge w/ pressure';
+        }}
+      }}
+
+      const tv = document.getElementById('tank-valve');
+      if (tv) {{
+        tv.innerHTML = d.float_calling
+          ? '&#9654; Fill Tank Valve: OPEN (tank calling for water)'
+          : '&#9679; Fill Tank Valve: CLOSED (tank full)';
+      }}
+    }}
 
     function showSpinner(on) {{
       const sp = document.getElementById('tank-spinner');
@@ -676,6 +734,7 @@ def water2_status():
       fetch('/api/flow_status')
         .then(r => r.json())
         .then(d => {{
+          applyControlState(d);
           const flowing   = !!d.is_flowing;
           const dot       = document.getElementById('flow-dot');
           const statusEl  = document.getElementById('flow-status-text');
