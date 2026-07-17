@@ -31,6 +31,7 @@ from monitor.config import (
     SECRET_BYPASS_TIMED_TOKEN, SECRET_BYPASS_CANCEL_TIMER_TOKEN,
     SECRET_BYPASS_CYCLE_TOKEN, SECRET_TEST_FILTER_TOKEN,
     SECRET_PURGE_TOKEN, SECRET_PURGE_NEXT_TOKEN, SECRET_PURGE_CANCEL_NEXT_TOKEN,
+    SECRET_FILL_EXTRA_TOKEN, OVERRIDE_FILL_TARGET_FILE, OVERRIDE_FILL_EXTRA_GALLONS,
     MANAGEMENT_FEE_PERCENT,
     AMBIENT_WEATHER_DASHBOARD_URL,
     CAMERA_USER, CAMERA_PASS,
@@ -2486,6 +2487,9 @@ def index():
                          token_purge_next=SECRET_PURGE_NEXT_TOKEN,
                          token_purge_cancel_next=SECRET_PURGE_CANCEL_NEXT_TOKEN,
                          purge_pending=get_purge_pending(),
+                         token_fill_extra=SECRET_FILL_EXTRA_TOKEN,
+                         fill_extra_gallons=OVERRIDE_FILL_EXTRA_GALLONS,
+                         fill_extra_active=OVERRIDE_FILL_TARGET_FILE.exists(),
                          calendar_months=build_calendar_months(all_reservations),
                          prior_calendar_months=_build_prior_calendar(all_reservations, statements_by_month=statements_by_month),
                          past_reservation_list=_build_past_reservations(all_reservations, MANAGEMENT_FEE_PERCENT, guest_counts, statements_by_month),
@@ -2644,11 +2648,21 @@ def control(token):
     # Check which action to perform based on token
     if token == SECRET_OVERRIDE_ON_TOKEN and SECRET_OVERRIDE_ON_TOKEN:
         OVERRIDE_MANUAL_OFF_FILE.unlink(missing_ok=True)
+        OVERRIDE_FILL_TARGET_FILE.unlink(missing_ok=True)  # normal fill (to default threshold)
         success = set_supply_override('ON', debug=False)
         action_taken = "Supply Override turned ON"
+    elif token == SECRET_FILL_EXTRA_TOKEN and SECRET_FILL_EXTRA_TOKEN:
+        # One-shot fill to a higher target (exceptional). Override ON and write the
+        # target so poll.py raises its shutoff thresholds until the tank reaches it.
+        OVERRIDE_MANUAL_OFF_FILE.unlink(missing_ok=True)
+        OVERRIDE_FILL_TARGET_FILE.parent.mkdir(parents=True, exist_ok=True)
+        OVERRIDE_FILL_TARGET_FILE.write_text(str(OVERRIDE_FILL_EXTRA_GALLONS))
+        success = set_supply_override('ON', debug=False)
+        action_taken = f"Fill to {OVERRIDE_FILL_EXTRA_GALLONS} gal: Override ON"
     elif token == SECRET_OVERRIDE_OFF_TOKEN and SECRET_OVERRIDE_OFF_TOKEN:
         OVERRIDE_MANUAL_OFF_FILE.parent.mkdir(parents=True, exist_ok=True)
         OVERRIDE_MANUAL_OFF_FILE.touch()
+        OVERRIDE_FILL_TARGET_FILE.unlink(missing_ok=True)  # cancel any pending fill-to-target
         success = set_supply_override('OFF', debug=False)
         action_taken = "Supply Override turned OFF"
         try:

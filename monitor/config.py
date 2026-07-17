@@ -199,6 +199,13 @@ BYPASS_FLOW_WATCH_FILE   = Path.home() / '.config' / 'pumphouse' / 'watch_bypass
 # the dashboard. Cleared when override is manually turned ON or auto-shutoff fires.
 OVERRIDE_MANUAL_OFF_FILE = Path.home() / '.config' / 'pumphouse' / 'override_manual_off'
 
+# One-shot "fill to a higher target" override: when this file exists it contains
+# the target gallons (e.g. 1500). While set, the override shutoff (sensor AND
+# dosatron-estimate) uses this target instead of the normal thresholds, and the
+# file is cleared when the target is reached. Exceptional/manual use only.
+OVERRIDE_FILL_TARGET_FILE = Path.home() / '.config' / 'pumphouse' / 'override_fill_target'
+OVERRIDE_FILL_EXTRA_GALLONS = 1500  # target for the dashboard "Fill to 1500" button
+
 # Timed bypass: when this file exists, it contains an epoch-timestamp float
 # indicating when bypass should automatically be turned off.
 BYPASS_TIMER_FILE  = Path.home() / '.config' / 'pumphouse' / 'bypass_timer'
@@ -352,3 +359,4 @@ SECRET_BYPASS_CYCLE_TOKEN        = (SECRET_BYPASS_ON_TOKEN + '-cycle')       if 
 SECRET_TEST_FILTER_TOKEN         = (SECRET_BYPASS_ON_TOKEN + '-test-filter') if SECRET_BYPASS_ON_TOKEN else ''
 SECRET_PURGE_NEXT_TOKEN          = (SECRET_PURGE_TOKEN + '-next')            if SECRET_PURGE_TOKEN else ''
 SECRET_PURGE_CANCEL_NEXT_TOKEN   = (SECRET_PURGE_TOKEN + '-cancel')          if SECRET_PURGE_TOKEN else ''
+SECRET_FILL_EXTRA_TOKEN          = (SECRET_OVERRIDE_ON_TOKEN + '-fill1500')  if SECRET_OVERRIDE_ON_TOKEN else ''

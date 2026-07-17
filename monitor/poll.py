@@ -24,7 +24,7 @@ from monitor.config import (
     NOTIFY_WELL_RECOVERY_STAGNATION_HOURS,
     NOTIFY_HIGH_PRESSURE_ENABLED, NOTIFY_HIGH_PRESSURE_USE_EMAIL,
     NOTIFY_PRESSURE_LOW_ENABLED, NOTIFY_PRESSURE_LOW_REQUIRES_FLOAT_CALLING, PRESSURE_LOW_WATCH_FILE,
-    OVERRIDE_MANUAL_OFF_FILE,
+    OVERRIDE_MANUAL_OFF_FILE, OVERRIDE_FILL_TARGET_FILE,
     NOTIFY_TANK_OUTAGE_ENABLED, NOTIFY_TANK_OUTAGE_THRESHOLD_MINUTES,
     NOTIFY_TANK_LEVEL_MIN_INCREASE,
     DASHBOARD_URL,
@@ -80,6 +80,20 @@ def _write_dos_estimate(gallons: float, base_gallons=None, base_time=None) -> No
         DOS_ESTIMATE_FILE.write_text(json.dumps(data))
     except Exception:
         pass
+
+
+def _read_fill_target():
+    """Return the one-shot override fill target in gallons, or None.
+
+    Set by the dashboard "Fill to 1500" button; while present it raises BOTH the
+    sensor and dosatron-estimate override shutoff thresholds to this value.
+    """
+    try:
+        if OVERRIDE_FILL_TARGET_FILE.exists():
+            return float(OVERRIDE_FILL_TARGET_FILE.read_text().strip())
+    except Exception:
+        pass
+    return None
 
 
 def _write_pressure_signal(state: str, ts: float) -> None:
@@ -1151,6 +1165,11 @@ class SimplifiedMonitor:
                             importlib.reload(config)
                             self.override_shutoff_threshold = config.OVERRIDE_SHUTOFF_THRESHOLD
                             self.override_dosatron_shutoff_gallons = config.OVERRIDE_DOSATRON_SHUTOFF_GALLONS
+                            # One-shot "fill to higher target" raises both thresholds.
+                            _fill_target = _read_fill_target()
+                            if _fill_target is not None:
+                                self.override_shutoff_threshold = _fill_target
+                                self.override_dosatron_shutoff_gallons = _fill_target
 
                             relay_status = self.get_relay_status()
                             if (relay_status['supply_override'] == 'ON' and
@@ -1165,6 +1184,7 @@ class SimplifiedMonitor:
                                     # Natural fill cycle completed — clear manual-off flag so
                                     # auto-on resumes normally next time tank drops
                                     OVERRIDE_MANUAL_OFF_FILE.unlink(missing_ok=True)
+                                    OVERRIDE_FILL_TARGET_FILE.unlink(missing_ok=True)  # one-shot target reached
                                     _sd_msg = f'Auto-shutoff: tank at {self.state.tank_gallons:.0f} gal (threshold: {self.override_shutoff_threshold})'
                                     _sd_fill = _fill_summary_note(self.state.tank_gallons)
                                     if _sd_fill:
@@ -1670,13 +1690,19 @@ class SimplifiedMonitor:
                         else:
                             _dos_est = None
 
-                        if _dos_est is not None and _dos_est >= self.override_dosatron_shutoff_gallons:
+                        # Read the one-shot fill target every poll (not just on tank
+                        # fetch) so a higher target set mid-cycle takes effect at once.
+                        _ft = _read_fill_target()
+                        _dos_thr = _ft if _ft is not None else self.override_dosatron_shutoff_gallons
+
+                        if _dos_est is not None and _dos_est >= _dos_thr:
                             from monitor.relay import set_supply_override
                             if set_supply_override('OFF', debug=self.debug):
                                 OVERRIDE_MANUAL_OFF_FILE.unlink(missing_ok=True)
+                                OVERRIDE_FILL_TARGET_FILE.unlink(missing_ok=True)  # one-shot target reached
                                 _dos_msg = (
                                     f'Dosatron safety shutoff: est. {_dos_est:.0f} gal '
-                                    f'>= {self.override_dosatron_shutoff_gallons}'
+                                    f'>= {_dos_thr:.0f}'
                                 )
                                 _dos_fill = _fill_summary_note(self.state.tank_gallons)
                                 if _dos_fill:
