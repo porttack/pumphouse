@@ -164,6 +164,49 @@ def count_clicks(start_unix: float, end_unix: float) -> int:
         return 0
 
 
+def fill_summary_note(current_gallons=None, max_age_hours=12) -> str:
+    """Summarize the current fill (since the last FLOAT_CALLING) for event logs.
+
+    Returns e.g. "Fill: 1374→1454 gal over 34m, +42 gal received, ~18 gal used
+    by house", or a shorter form if the starting tank level isn't known, or ''
+    if there's no recent FLOAT_CALLING (older than max_age_hours) or on error.
+
+    Meant to be appended to OVERRIDE_SHUTOFF / manual override-off events so each
+    fill is accounted for (water in via dosatron vs. tank level change = usage).
+    """
+    if not _EVENTS_FILE:
+        return ''
+    try:
+        calling_ts = calling_gal = None
+        with open(_EVENTS_FILE, 'rb') as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 262144))
+            raw = f.read().decode('utf-8', errors='replace')
+        for line in raw.splitlines():
+            parts = line.split(',')
+            if len(parts) < 2 or parts[1].strip() != 'FLOAT_CALLING':
+                continue
+            try:
+                calling_ts = datetime.fromisoformat(parts[0].strip()).timestamp()
+                calling_gal = float(parts[4]) if len(parts) > 4 and parts[4] else None
+            except Exception:
+                pass
+        if calling_ts is None:
+            return ''
+        now = time.time()
+        if now - calling_ts > max_age_hours * 3600:
+            return ''
+        dur_min  = round((now - calling_ts) / 60)
+        received = count_clicks(calling_ts, now) * GALLONS_PER_CLICK
+        if calling_gal is not None and current_gallons is not None:
+            used = max(0.0, received - (current_gallons - calling_gal))
+            return (f'Fill: {calling_gal:.0f}→{current_gallons:.0f} gal over {dur_min}m, '
+                    f'+{received:.0f} received, ~{used:.0f} used by house')
+        return f'Fill: since calling {dur_min}m, +{received:.0f} gal received'
+    except Exception:
+        return ''
+
+
 # ── internal helpers ───────────────────────────────────────────────────────────
 
 def _ensure_dirs():

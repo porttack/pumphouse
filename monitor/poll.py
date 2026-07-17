@@ -44,7 +44,7 @@ from monitor.tank import get_tank_data
 from monitor.ambient_weather import get_weather_data
 from monitor.logger import log_event, log_snapshot
 try:
-    from monitor.dosatron import count_clicks as _count_dosatron_clicks, GALLONS_PER_CLICK as _DOSATRON_GPK
+    from monitor.dosatron import count_clicks as _count_dosatron_clicks, GALLONS_PER_CLICK as _DOSATRON_GPK, fill_summary_note as _fill_summary_note
     _DOSATRON_SIGNAL_FILE = os.path.join(
         os.path.expanduser("~/.local/share/pumphouse/dosatron"), "pressure_signal.json"
     )
@@ -54,6 +54,8 @@ try:
 except Exception:
     def _count_dosatron_clicks(start, end):  # type: ignore[misc]
         return 0
+    def _fill_summary_note(current_gallons=None, max_age_hours=12):  # type: ignore[misc]
+        return ''
     _DOSATRON_GPK = 0.14
     _DOSATRON_SIGNAL_FILE = None
     _DOSATRON_PREDICTION_FILE = None
@@ -1163,8 +1165,11 @@ class SimplifiedMonitor:
                                     # Natural fill cycle completed — clear manual-off flag so
                                     # auto-on resumes normally next time tank drops
                                     OVERRIDE_MANUAL_OFF_FILE.unlink(missing_ok=True)
-                                    self.log_state_event('OVERRIDE_SHUTOFF',
-                                        f'Auto-shutoff: tank at {self.state.tank_gallons:.0f} gal (threshold: {self.override_shutoff_threshold})')
+                                    _sd_msg = f'Auto-shutoff: tank at {self.state.tank_gallons:.0f} gal (threshold: {self.override_shutoff_threshold})'
+                                    _sd_fill = _fill_summary_note(self.state.tank_gallons)
+                                    if _sd_fill:
+                                        _sd_msg += ' | ' + _sd_fill
+                                    self.log_state_event('OVERRIDE_SHUTOFF', _sd_msg)
 
                                     # Send consolidated tank full notification (primary method)
                                     # Only alert if not suppressed (tank must drop below 90% to re-alert)
@@ -1673,6 +1678,9 @@ class SimplifiedMonitor:
                                     f'Dosatron safety shutoff: est. {_dos_est:.0f} gal '
                                     f'>= {self.override_dosatron_shutoff_gallons}'
                                 )
+                                _dos_fill = _fill_summary_note(self.state.tank_gallons)
+                                if _dos_fill:
+                                    _dos_msg += ' | ' + _dos_fill
                                 self.log_state_event('OVERRIDE_SHUTOFF', _dos_msg)
                                 if self.debug:
                                     print(f"  → {_dos_msg}")

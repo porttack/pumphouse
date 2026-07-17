@@ -2651,6 +2651,18 @@ def control(token):
         OVERRIDE_MANUAL_OFF_FILE.touch()
         success = set_supply_override('OFF', debug=False)
         action_taken = "Supply Override turned OFF"
+        try:
+            from monitor.dosatron import fill_summary_note as _fsn
+            _cur = None
+            try:
+                _cur = float(json.loads(DOS_ESTIMATE_FILE.read_text()).get('base_gallons'))
+            except Exception:
+                pass
+            _fill = _fsn(_cur)
+            if _fill:
+                action_taken += ' | ' + _fill
+        except Exception:
+            pass
     elif token == SECRET_BYPASS_ON_TOKEN and SECRET_BYPASS_ON_TOKEN:
         _cancel_all_bypass_modes()
         success = set_bypass('ON', debug=False)
