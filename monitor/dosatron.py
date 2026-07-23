@@ -59,7 +59,7 @@ pcm.dosatron_in {
 # ~0.09–0.11 gal/click). 0.10 makes the running estimate track the sensor and, if
 # anything, trips the overflow shutoff slightly early (the safe direction).
 # Revisit as more fills accumulate.
-GALLONS_PER_CLICK = 0.10    # was 0.07; see recalibration note above
+GALLONS_PER_CLICK = 0.11    # was 0.10 (and 0.07); +~10% 2026-07-23, see recalibration note above
 
 # ── click detection defaults ───────────────────────────────────────────────────
 DEFAULT_THRESHOLD     = 2000

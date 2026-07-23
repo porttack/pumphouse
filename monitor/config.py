@@ -23,7 +23,7 @@ TANK_HEIGHT_INCHES = 60
 TANK_CAPACITY_GALLONS = 1522  # True physical capacity at 60" (overflow). Used for accurate gallons.
 # Operational "full" — the level we normally stop at (override shutoff). Treated as
 # 100% for all displays/graphs/percentages. Real capacity (1522) reads as ~105%.
-TANK_FULL_GALLONS = 1450
+TANK_FULL_GALLONS = 1425
 TANK_URL = ""  # Loaded from secrets file - your mypt.in tank monitoring URL
 
 # Ambient Weather Configuration
@@ -54,11 +54,11 @@ OVERRIDE_SHUTOFF_THRESHOLD = 1450  # Gallons at which to turn off override valve
 
 # Override Dosatron Safety Shutoff — catches high-flow events the tank sensor can't respond to fast enough
 OVERRIDE_DOSATRON_SHUTOFF_ENABLED = True   # Shut off override when estimated fill reaches threshold
-OVERRIDE_DOSATRON_SHUTOFF_GALLONS = 1475   # Est. gallons to trigger shutoff (stop before a real reading arrives)
+OVERRIDE_DOSATRON_SHUTOFF_GALLONS = 1450   # Est. gallons to trigger shutoff (stop before a real reading arrives)
 OVERRIDE_DOSATRON_RUNNING_ESTIMATE = True  # Use running estimate: last real reading + dosatron since (resets each tank fetch)
 
 # Override Auto-On Configuration
-OVERRIDE_ON_THRESHOLD = 1420  # Gallons at which to turn on override valve (None = disabled, e.g., 1350)
+OVERRIDE_ON_THRESHOLD = 1390  # Gallons at which to turn on override valve (None = disabled, e.g., 1350)
 
 # Notification Configuration
 ENABLE_NOTIFICATIONS = True  # Master switch (default OFF for safety)
