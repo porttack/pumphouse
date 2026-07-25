@@ -69,3 +69,6 @@ epaper_cache*.bmp
 epaper_jpg_cache*.jpg
 logs/
 gph_log.txt
+
+# Generated Scriptable widget (contains real hostname)
+pistat/scriptable-widget.generated.js
