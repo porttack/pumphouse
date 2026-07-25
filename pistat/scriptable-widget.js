@@ -39,7 +39,7 @@ const BASE = "https://YOUR-HOST:6443";
 // Page routes for the tap zones
 const URL_WATER2  = `${BASE}/water2`;
 const URL_WEATHER = `${BASE}/weather`;
-const URL_OWNER   = `${BASE}/?totals=income`;
+const URL_OWNER   = `${BASE}/?owner`;
 
 // ── Timeframe state (cycled by tapping the "3d ago" label) ──────────────────
 const HOURS_3D = 72;   // "3d ago"
