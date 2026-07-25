@@ -1191,9 +1191,21 @@ class SimplifiedMonitor:
                                         _sd_msg += ' | ' + _sd_fill
                                     self.log_state_event('OVERRIDE_SHUTOFF', _sd_msg)
 
+                                    if _fill_target is not None:
+                                        # Exceptional owner-initiated fill target reached — always
+                                        # notify (not subject to the 4h tank-full suppression).
+                                        if NOTIFY_OVERRIDE_SHUTOFF and self.notification_manager.can_notify('fill_target_reached'):
+                                            self.send_alert(
+                                                'NOTIFY_TANK_FULL',
+                                                f"{self.state.tank_gallons:.0f} gal - Fill to {_fill_target:.0f} done",
+                                                (f"Reached the {_fill_target:.0f} gal fill target, override turned off."
+                                                 + (f" {_sd_fill}" if _sd_fill else '')),
+                                                priority='high'
+                                            )
+                                            self.notification_manager.record_tank_full_alert(self.state.tank_gallons)
                                     # Send consolidated tank full notification (primary method)
                                     # Only alert if not suppressed (tank must drop below 90% to re-alert)
-                                    if (NOTIFY_OVERRIDE_SHUTOFF and 
+                                    elif (NOTIFY_OVERRIDE_SHUTOFF and
                                         self.notification_manager.can_notify('tank_full') and
                                         not self.notification_manager.should_suppress_tank_full(self.state.tank_gallons)):
                                         self.send_alert(
@@ -1712,9 +1724,12 @@ class SimplifiedMonitor:
                                     print(f"  → {_dos_msg}")
                                 if (NOTIFY_OVERRIDE_SHUTOFF and
                                         self.notification_manager.can_notify('override_shutoff_safety')):
+                                    _dos_title = (f"Est. {_dos_est:.0f} gal - Fill to {_ft:.0f} done"
+                                                  if _ft is not None
+                                                  else f"Est. {_dos_est:.0f} gal - Dosatron Safety Shutoff")
                                     self.send_alert(
                                         'NOTIFY_TANK_FULL',
-                                        f"Est. {_dos_est:.0f} gal - Dosatron Safety Shutoff",
+                                        _dos_title,
                                         _dos_msg,
                                         priority='high'
                                     )
