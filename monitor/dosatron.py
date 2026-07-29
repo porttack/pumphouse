@@ -108,6 +108,7 @@ FLOW_CYCLE_LABELS = os.path.join(DATA_DIR, "flow_cycle_labels.json")
 CONFIG_FILE       = os.path.join(DATA_DIR, "config.json")
 SIGNAL_FILE       = os.path.join(DATA_DIR, "pressure_signal.json")
 FLOW_STATE_FILE   = os.path.join(DATA_DIR, "flow_state.json")
+BYPASS_PPM_SESSION_FILE = os.path.join(DATA_DIR, "bypass_ppm_session.json")
 PID_FILE          = os.path.join(DATA_DIR, "listener.pid")
 BYPASS_VALVE_PIN  = 26   # BCM pin — active-low relay (0 = ON); mirrors relay.py
 
@@ -370,6 +371,20 @@ def _write_flow_state(state: str, start_ts: 'datetime | None' = None) -> None:
         with open(tmp, "w") as f:
             json.dump(data, f)
         os.replace(tmp, FLOW_STATE_FILE)
+    except Exception:
+        pass
+
+
+def _start_bypass_ppm_session() -> None:
+    """Mark the start of a new bypass-on stretch, for the chlorine ppm-dilution
+    estimate (web_water2.api_flow_status). Tank is assumed to be at
+    CHLORINE_STEADY_STATE_PPM at this instant; ppm decays from here based on
+    elapsed bypass-on time × BYPASS_GPM."""
+    try:
+        tmp = BYPASS_PPM_SESSION_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"start_ts": datetime.now().isoformat()}, f)
+        os.replace(tmp, BYPASS_PPM_SESSION_FILE)
     except Exception:
         pass
 
@@ -1001,6 +1016,7 @@ def listen(cli_threshold: int):
                     bypass_active = new_bypass
                     if bypass_active:
                         log.info("Bypass ON — switching to flow detection mode")
+                        _start_bypass_ppm_session()
                     else:
                         log.info("Bypass OFF — returning to click detection mode")
                         flow_rec.cancel(log)

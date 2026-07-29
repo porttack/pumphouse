@@ -89,6 +89,30 @@ NATIONAL_WEATHER_URL = "https://forecast.weather.gov/MapClick.php?lat=44.64196&l
 RESIDUAL_PRESSURE_SECONDS = 30  # Last N seconds are residual pressure (not pumping)
 SECONDS_PER_GALLON = 10 / 0.14   # 10 seconds = 0.14 gallons
 
+# Chlorine ppm estimate while bypassing the dosatron/filter (untreated well water
+# feeds the tank directly, tank stays roughly constant-volume via the float valve
+# + continuous house draw). Modeled as well-mixed dilution:
+#   ppm = CHLORINE_STEADY_STATE_PPM * exp(-bypass_gallons_delivered / tank_gallons)
+# bypass_gallons_delivered is elapsed bypass-on time × BYPASS_GPM (see
+# monitor/dosatron.py::BYPASS_PPM_SESSION_FILE, written when bypass turns ON).
+#
+# UNVALIDATED as of 2026-07-29 — owner pushback: incoming well water isn't
+# necessarily "0 ppm inert diluent," it likely carries its own chlorine demand
+# (the dosatron's theoretical dose implies ~100ppm but steady-state measures
+# only 10ppm, meaning most injected chlorine is being consumed reacting with
+# something in the raw water, not just diluted into tank volume) — so real
+# decline during bypass could be faster than this pure-dilution curve predicts.
+# Owner also reports ppm holds ~10 even after sitting closed/unbypassed for
+# 1-2 weeks, which doesn't obviously fit either model, though test strips are
+# only accurate to roughly ±5-10ppm so this is hard to pin down either way.
+# Owner's call (2026-07-29): leave this formula as a rough placeholder rather
+# than have Claude guess-correct it further — same pattern as the dosing tank
+# estimate below. Recalibrate once there's a real data point: a controlled
+# bypass run of known gallons with a trustworthy before/after ppm reading
+# (titration test kit ideally, not strips, given the ±5-10ppm noise floor).
+CHLORINE_STEADY_STATE_PPM = 10.0  # measured steady-state ppm when dosatron is in use (stable for months as of 2026-07)
+BYPASS_GPM = 4.0  # owner's rough field estimate of bypass delivery rate (2026-07-29); NOT derived from SECONDS_PER_GALLON above (that constant is known-wrong for this purpose, see docs/tank-calibration.md)
+
 # Purge Configuration
 ENABLE_PURGE = False  # Enable automatic filter purging after every water delivery
 MIN_PURGE_INTERVAL = 3600  # Minimum seconds between purges (default: 3600 = 1 hour)

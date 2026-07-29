@@ -15,6 +15,7 @@ both of which are served by monitor.web.
 """
 
 import json
+import math
 from datetime import datetime, timedelta
 
 from flask import Blueprint, Response, request, jsonify
@@ -27,6 +28,7 @@ from monitor.config import (
     SECRET_OVERRIDE_ON_TOKEN, SECRET_OVERRIDE_OFF_TOKEN,
     SECRET_PURGE_TOKEN, SECRET_PURGE_NEXT_TOKEN, SECRET_PURGE_CANCEL_NEXT_TOKEN,
     SECRET_TEST_FILTER_TOKEN, PURGE_PENDING_FILE,
+    CHLORINE_STEADY_STATE_PPM, BYPASS_GPM,
 )
 from monitor.gpio_helpers import read_float_sensor, FLOAT_STATE_CALLING
 from monitor.relay import get_all_relay_status
@@ -249,6 +251,8 @@ def api_flow_status():
         'tank_base_gallons':    None,
         'tank_base_inches':     None,
         'tank_base_age_min':    None,
+        'bypass_ppm_est':       None,
+        'bypass_gallons_delivered': None,
     }
 
     # Current tank level — same live source the graph uses. dos_estimate.json is
@@ -361,6 +365,26 @@ def api_flow_status():
         try:
             with open(_FLOW_STATE_FILE) as f:
                 result['is_flowing'] = json.load(f).get('state') == 'flowing'
+        except Exception:
+            pass
+
+        # Chlorine ppm dilution estimate: untreated bypass water dilutes the tank
+        # (well-mixed, constant volume) — ppm decays exponentially with gallons
+        # delivered since bypass turned on. Session start is written by
+        # monitor.dosatron on the OFF→ON transition; elapsed time × BYPASS_GPM
+        # is the delivered-gallons estimate (owner's rough field rate, ~4 gpm).
+        # UNVALIDATED model (see config.py note) — rounded to whole ppm since
+        # test strips can't resolve better than that anyway; don't over-trust it.
+        try:
+            from monitor.dosatron import BYPASS_PPM_SESSION_FILE as _BYPASS_PPM_SESSION_FILE
+            with open(_BYPASS_PPM_SESSION_FILE) as f:
+                start_ts = datetime.fromisoformat(json.load(f)['start_ts']).timestamp()
+            tank_gal = result.get('tank_gallons')
+            if tank_gal:
+                gallons_delivered = max(0.0, now - start_ts) / 3600.0 * BYPASS_GPM
+                result['bypass_gallons_delivered'] = round(gallons_delivered, 1)
+                result['bypass_ppm_est'] = round(
+                    CHLORINE_STEADY_STATE_PPM * math.exp(-gallons_delivered / tank_gal))
         except Exception:
             pass
 
@@ -633,6 +657,11 @@ def water2_status():
       <span class="flow-label">House used:</span>
       <span class="flow-value" id="flow-used-text">&mdash;</span>
     </div>
+    <div class="flow-row" id="flow-ppm-row" style="display:none">
+      <div style="width:10px"></div>
+      <span class="flow-label" title="Rough, unvalidated model — treat as an order-of-magnitude guide, not a precise reading">Est. chlorine (rough):</span>
+      <span class="flow-value" id="flow-ppm-text">&mdash;</span>
+    </div>
     <div class="flow-row" id="flow-eta-row" style="display:none">
       <div style="width:10px"></div>
       <span class="flow-label">Full (1450):</span>
@@ -853,6 +882,20 @@ def water2_status():
             usedEl.textContent = uv;
           }} else {{
             usedRow.style.display = 'none';
+          }}
+
+          // Est. chlorine ppm during bypass (dilution from untreated water)
+          const ppmRow = document.getElementById('flow-ppm-row');
+          const ppmEl  = document.getElementById('flow-ppm-text');
+          if (d.bypass_ppm_est !== null && d.bypass_ppm_est !== undefined) {{
+            ppmRow.style.display = '';
+            let pv = '~' + d.bypass_ppm_est + ' ppm?';
+            if (d.bypass_gallons_delivered !== null && d.bypass_gallons_delivered !== undefined) {{
+              pv += ' (' + d.bypass_gallons_delivered + ' gal bypass delivered)';
+            }}
+            ppmEl.textContent = pv;
+          }} else {{
+            ppmRow.style.display = 'none';
           }}
 
           // Tank level: while filling show the live estimate AND the sensor base it
