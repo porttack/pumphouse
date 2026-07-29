@@ -611,6 +611,14 @@ def fetch_system_status(debug=False):
         except Exception:
             pass
 
+        # Estimated dosing (chlorine) tank depth — see docs/dosing-tank-calibration.md
+        dosing_tank_depth_in = None
+        try:
+            from monitor.dosatron import estimate_dosing_tank_depth
+            dosing_tank_depth_in = estimate_dosing_tank_depth(conservative=True)
+        except Exception:
+            pass
+
         return {
             'tank': tank_data,
             'pressure': pressure,
@@ -627,6 +635,7 @@ def fetch_system_status(debug=False):
             'next_backflush': next_backflush,
             'time_to_full': time_to_full,
             'wind_forecast': wind_forecast,
+            'dosing_tank_depth_in': dosing_tank_depth_in,
         }
     except Exception as e:
         if debug:
@@ -732,6 +741,7 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
     occupancy_status = status_data.get('occupancy') if status_data else None
     reservation_list = status_data.get('reservations') if status_data else None
     ecobee_temp = status_data.get('ecobee_temp') if status_data else None
+    dosing_tank_depth_in = status_data.get('dosing_tank_depth_in') if status_data else None
 
     # Get the dashboard link to use in the email
     # Add totals parameter if secret token is configured
@@ -1067,6 +1077,18 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
                     <div class="status-item">
                         <div class="status-label">Depth</div>
                         <div class="status-value">{depth:.2f}" / {TANK_HEIGHT_INCHES}" ({percentage:.1f}%)</div>
+                    </div>
+"""
+        # Dosing tank (estimated, from dosatron clicks — see docs/dosing-tank-calibration.md)
+        if dosing_tank_depth_in is not None:
+            from monitor.config import DOSING_TANK_CAPACITY_GALLONS, DOSING_TANK_GAL_PER_INCH
+            _dos_full_in = DOSING_TANK_CAPACITY_GALLONS / DOSING_TANK_GAL_PER_INCH
+            dos_color = '#f44336' if dosing_tank_depth_in <= 6 else ('#ff9800' if dosing_tank_depth_in <= 12 else '#4CAF50')
+            html += f"""
+                    <div class="status-item" style="border-left-color: {dos_color};">
+                        <div class="status-label">Dosing Tank (est.)</div>
+                        <div class="status-value">{dosing_tank_depth_in:.1f}" / {_dos_full_in:.0f}"</div>
+                        <div style="margin-top:2px;font-size:11px;color:#555;">from click count, not a sensor — see docs</div>
                     </div>
 """
         # Float switch

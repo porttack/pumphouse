@@ -22,6 +22,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 DATA_DIR          = Path.home() / '.local' / 'share' / 'pumphouse'
 DAILY_CSV         = DATA_DIR / 'daily.csv'
 SNAPSHOTS         = DATA_DIR / 'snapshots.csv'
@@ -56,6 +58,7 @@ FIELDNAMES = [
     'gallons_used',             # gallons_in - net tank change (water consumed)
     'gallons_end',              # tank level at end of day
     'gallons_net_change',
+    'dosing_tank_depth_est_in', # estimated chlorine dosing tank depth, end of day (see docs/dosing-tank-calibration.md)
     'tank_rolling_gph_avg',     # avg fill rate during calling windows
     'pressure_high_pct_overall',
     'filter_health_ratio',      # avg(gph/pct_high) for bypass-off, unoccupied, non-checkout windows (5–50% band)
@@ -231,10 +234,24 @@ def summarize_day(date, rows, checkout_net_income=0.0, is_checkout=False):
     dur_all  = sum(flt(r, 'duration_seconds') for r in rows)
     ov_wins  = sum(1 for r in rows if r.get('relay_supply_override', '').upper() == 'ON')
 
+    # Estimated dosing tank depth as of the last snapshot of the day (see
+    # docs/dosing-tank-calibration.md). None for days before the calibration
+    # anchor, or if the estimator's config isn't available.
+    dosing_tank_depth_est_in = None
+    try:
+        from datetime import datetime as _dt2
+        from monitor.dosatron import estimate_dosing_tank_depth
+        _day_end_unix = _dt2.fromisoformat(rows[-1]['timestamp']).timestamp()
+        dosing_tank_depth_est_in = estimate_dosing_tank_depth(
+            conservative=True, as_of_unix=_day_end_unix)
+    except Exception:
+        pass
+
     return {
         'date':                      date,
         'gallons_in':                gallons_in_total,
         'gallons_used':              gallons_used_total,
+        'dosing_tank_depth_est_in':  dosing_tank_depth_est_in,
         'n_snapshots':               n,
         'hours_covered':             round(dur_all / 3600, 1),
         'gallons_start':             int(gallons[0]),

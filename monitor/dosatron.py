@@ -164,6 +164,121 @@ def count_clicks(start_unix: float, end_unix: float) -> int:
         return 0
 
 
+def _pressure_high_windows(start_unix: float, end_unix: float):
+    """Return sorted (start, end) unix-timestamp pairs for pressure-HIGH windows
+    (from events.csv PRESSURE_HIGH/PRESSURE_LOW pairs) clipped to the given range.
+    Includes an in-progress window (pump currently running, no PRESSURE_LOW yet).
+    """
+    try:
+        import csv
+        with open(_EVENTS_FILE) as f:
+            rows = list(csv.DictReader(f))
+    except Exception:
+        return []
+
+    windows = []
+    pending_start = None
+    for row in rows:
+        et = row.get('event_type', '')
+        ts_raw = row.get('timestamp', '')
+        if not ts_raw:
+            continue
+        try:
+            ts = datetime.fromisoformat(ts_raw).timestamp()
+        except Exception:
+            continue
+        if et == 'PRESSURE_HIGH':
+            pending_start = ts
+        elif et == 'PRESSURE_LOW' and pending_start is not None:
+            windows.append((pending_start, ts))
+            pending_start = None
+    if pending_start is not None:
+        windows.append((pending_start, end_unix))
+
+    clipped = []
+    for s, e in windows:
+        cs, ce = max(s, start_unix), min(e, end_unix)
+        if cs < ce:
+            clipped.append((cs, ce))
+    clipped.sort()
+    return clipped
+
+
+def _sum_pressure_high_clicks(start_unix: float, end_unix: float) -> int:
+    """Sum dosatron clicks within pressure-HIGH windows between two timestamps.
+
+    Mirrors how poll.py scopes dosatron_gallons per snapshot: idle-noise
+    detections outside pump-running windows are excluded by only counting
+    inside each PRESSURE_HIGH..PRESSURE_LOW pair from events.csv. A single
+    pass over detections.jsonl (not one open+scan per window — that's O(windows
+    × detections) and can take minutes over a multi-week range).
+    Returns 0 on any error.
+    """
+    windows = _pressure_high_windows(start_unix, end_unix)
+    if not windows:
+        return 0
+
+    count = 0
+    idx, n = 0, len(windows)
+    try:
+        with open(JSONL_FILE) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                    ts = datetime.fromisoformat(rec.get('ts', '')).timestamp()
+                except Exception:
+                    continue
+                if ts < start_unix or ts > end_unix:
+                    continue
+                while idx < n and windows[idx][1] < ts:
+                    idx += 1
+                if idx < n and windows[idx][0] <= ts <= windows[idx][1]:
+                    count += 1
+    except FileNotFoundError:
+        return 0
+    except Exception:
+        return 0
+    return count
+
+
+def estimate_dosing_tank_depth(conservative: bool = True, as_of_unix: float | None = None):
+    """Estimate dosing-tank depth (inches) from clicks since the anchor reading.
+
+    depth = anchor_depth - (clicks_since_anchor × DOSING_TANK_CHEM_GAL_PER_CLICK) / gal_per_inch
+
+    `as_of_unix` defaults to now; pass an explicit timestamp to get a historical
+    estimate as of that point (e.g. end-of-day for daily.csv).
+
+    See DOSING_TANK_* constants in config.py and docs/dosing-tank-calibration.md
+    for how the fudge factor was derived. Returns None if the anchor/rate
+    config isn't available, if as_of is before the anchor, or on any error
+    (callers should treat None as "unknown", not zero).
+    """
+    if not _MONITOR_OK:
+        return None
+    try:
+        from monitor.config import (
+            DOSING_TANK_ANCHOR_DEPTH_IN, DOSING_TANK_ANCHOR_TS,
+            DOSING_TANK_GAL_PER_INCH, DOSING_TANK_CHEM_GAL_PER_CLICK,
+            DOSING_TANK_CONSERVATIVE_MARGIN,
+        )
+        anchor_unix = datetime.fromisoformat(DOSING_TANK_ANCHOR_TS).timestamp()
+        end_unix = as_of_unix if as_of_unix is not None else time.time()
+        if end_unix < anchor_unix:
+            return None
+        clicks = _sum_pressure_high_clicks(anchor_unix, end_unix)
+        chem_gal = clicks * DOSING_TANK_CHEM_GAL_PER_CLICK
+        if conservative:
+            chem_gal *= DOSING_TANK_CONSERVATIVE_MARGIN
+        inches_used = chem_gal / DOSING_TANK_GAL_PER_INCH
+        return round(DOSING_TANK_ANCHOR_DEPTH_IN - inches_used, 1)
+    except Exception:
+        return None
+
+
 def fill_summary_note(current_gallons=None, max_age_hours=12) -> str:
     """Summarize the current fill (since the last FLOAT_CALLING) for event logs.
 

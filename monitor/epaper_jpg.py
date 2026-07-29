@@ -555,6 +555,7 @@ def render_epaper_jpg(
     draw.text((graph_right - nl_w - s(1), _label_y),
               now_label, font=font_small, fill=AXIS_COLOR)
 
+
     # Re-center flow label in the gap between the two x-axis labels
     try:
         _gap_left  = graph_left + s(1) + hl_w + s(2)
@@ -721,6 +722,23 @@ def render_epaper_jpg(
             (graph_left + (graph_w - ow) // 2 - ob[0],
              graph_bottom - oh - s(4) - ob[1]),
             occ_text, font=font_small, fill=WHITE,
+        )
+
+    # ── Estimated dosing (chlorine) tank depth — small corner readout, bottom-right
+    # of the graph. Internal display only; intentionally not on the guest-facing
+    # /api/epaper.bmp. See docs/dosing-tank-calibration.md.
+    try:
+        from monitor.dosatron import estimate_dosing_tank_depth
+        _dos_depth = estimate_dosing_tank_depth(conservative=True)
+    except Exception:
+        _dos_depth = None
+    if _dos_depth is not None:
+        _dos_text = f'{_dos_depth:.1f}'
+        _db = draw.textbbox((0, 0), _dos_text, font=font_tiny)
+        _dw, _dh = _db[2] - _db[0], _db[3] - _db[1]
+        draw.text(
+            (graph_right - _dw - s(3) - _db[0], graph_bottom - _dh - s(3) - _db[1]),
+            _dos_text, font=font_tiny, fill=WHITE,
         )
 
     # ── "Save Water" overlay (white text; shown to owner, non-tenant, and public) ────
