@@ -922,6 +922,28 @@
             </div>
         </div>
 
+        <!-- Links & Tools (owner only — not gated behind auth, same as the rest of owner_mode) -->
+        {% if owner_mode %}
+        <div class="section" id="links-tools">
+            <h2>LINKS &amp; TOOLS</h2>
+            <div>
+                <a class="time-btn" href="/water2">Water (detail)</a>
+                <a class="time-btn" href="/weather">Weather</a>
+                <a class="time-btn" href="/ring-snapshot">Ring Snapshot</a>
+                <a class="time-btn" href="/sunset">Sunset</a>
+                <a class="time-btn" href="/timelapse">Timelapse</a>
+                <a class="time-btn" href="/scriptable">iPhone Widget Setup</a>
+                <a class="time-btn" href="/control/{{ token_override_on }}" onclick="return confirm('Turn Supply Override ON?')">Turn Override ON</a>
+                <a class="time-btn" href="/control/{{ token_override_off }}" onclick="return confirm('Turn Supply Override OFF?')">Turn Override OFF</a>
+                {% if token_fill_extra %}
+                <a class="time-btn" href="/control/{{ token_fill_extra }}" onclick="return confirm('Fill to {{ fill_extra_gallons }} gal? Override stays on past the normal shutoff until the tank reaches {{ fill_extra_gallons }} (close to overflow).')">Fill to {{ fill_extra_gallons }}</a>
+                {% endif %}
+                <a class="time-btn" href="https://www.mypt.in/s/oyd95OEj/qbbBE9Loxo" target="_blank" rel="noopener">Tank Depth (vendor)</a>
+                <a class="time-btn" href="https://onblackberryhill.com/internet" target="_blank" rel="noopener">Internet/Outage Status</a>
+            </div>
+        </div>
+        {% endif %}
+
         <!-- Footer with startup time -->
         <div style="text-align: center; padding: 20px 0 10px 0; color: #666; font-size: 12px; border-top: 1px solid #333; margin-top: 20px;">
             Web server started: {{ startup_time.strftime('%Y-%m-%d %H:%M:%S') }}
