@@ -15,7 +15,6 @@ both of which are served by monitor.web.
 """
 
 import json
-import math
 from datetime import datetime, timedelta
 
 from flask import Blueprint, Response, request, jsonify
@@ -28,10 +27,11 @@ from monitor.config import (
     SECRET_OVERRIDE_ON_TOKEN, SECRET_OVERRIDE_OFF_TOKEN,
     SECRET_PURGE_TOKEN, SECRET_PURGE_NEXT_TOKEN, SECRET_PURGE_CANCEL_NEXT_TOKEN,
     SECRET_TEST_FILTER_TOKEN, PURGE_PENDING_FILE,
-    CHLORINE_STEADY_STATE_PPM, BYPASS_GPM,
+    BYPASS_GPM,
 )
 from monitor.gpio_helpers import read_float_sensor, FLOAT_STATE_CALLING
 from monitor.relay import get_all_relay_status
+from monitor.chlorine import read_chlorine_ppm_state, blend_ppm
 
 water2_bp = Blueprint('water2', __name__)
 
@@ -146,6 +146,39 @@ def _click_duty_pct(click_ts: 'list[float]', win_start: float, win_end: float,
     return round(len(filled) / n_buckets * 100, 1)
 
 
+def _bypass_flow_records(start_unix: float, end_unix: float,
+                          chunk: int = 262144) -> 'list[dict]':
+    """Return bypass flow-cycle records (start, end, duration_s) overlapping
+    [start_unix, end_unix], read from flow_cycles.jsonl via tail read (mirrors
+    _click_times). Each record is one continuous FFT-detected flow episode —
+    the bypass-mode analog of a dosatron click burst."""
+    from monitor.dosatron import FLOW_CYCLES_JSONL as _FCJ
+    out = []
+    try:
+        with open(_FCJ, 'rb') as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - chunk))
+            data = f.read()
+        for line in data.split(b'\n'):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+                s = datetime.fromisoformat(rec['start_ts']).timestamp()
+                e = datetime.fromisoformat(rec['end_ts']).timestamp()
+                if e < start_unix or s > end_unix:
+                    continue
+                out.append({'start': s, 'end': e,
+                            'duration_s': rec.get('duration_s', e - s)})
+            except Exception:
+                pass
+    except Exception:
+        pass
+    out.sort(key=lambda r: r['start'])
+    return out
+
+
 def _last_tank_reading() -> 'tuple[float | None, float]':
     """Return (gallons, unix_ts) of the most recent real TANK_LEVEL sensor event."""
     raw = _read_events_tail_raw(262144)
@@ -213,7 +246,6 @@ def api_flow_status():
     import time as _t
     from monitor.dosatron import (
         FLOW_STATE_FILE as _FLOW_STATE_FILE,
-        FLOW_CYCLES_JSONL as _FLOW_CYCLES_JSONL,
         GALLONS_PER_CLICK as _GPK,
     )
 
@@ -251,7 +283,8 @@ def api_flow_status():
         'tank_base_gallons':    None,
         'tank_base_inches':     None,
         'tank_base_age_min':    None,
-        'bypass_ppm_est':       None,
+        'chlorine_ppm_est':     None,
+        'chlorine_est_age_min': None,
         'bypass_gallons_delivered': None,
     }
 
@@ -287,6 +320,32 @@ def api_flow_status():
             result['tank_gallons']         = round(real_gal)
             result['tank_inches']          = _depth_inches(real_gal)
             result['tank_reading_age_min'] = round((now - real_ts) / 60)
+
+    # Chlorine ppm estimate — always shown, regardless of mode. Baseline is the
+    # persisted estimate (monitor.chlorine), updated once per ~15-min snapshot
+    # by monitor/poll.py from ground-truth dosatron/bypass gallons; it declines
+    # toward 0ppm while bypassing and recovers toward CHLORINE_STEADY_STATE_PPM
+    # once the dosatron resumes (same mixing math both directions). While bypass
+    # is actively on, project the baseline forward with elapsed real-time bypass
+    # delivery since the bypass session started (BYPASS_PPM_SESSION_FILE) so the
+    # number keeps moving live between snapshot updates, not just every 15 min.
+    # UNVALIDATED model — see config.py note; treat as a rough guide only.
+    baseline_ppm, baseline_ts = read_chlorine_ppm_state()
+    display_ppm = baseline_ppm
+    tank_gal = result.get('tank_gallons')
+    if bypass_on and tank_gal:
+        try:
+            from monitor.dosatron import BYPASS_PPM_SESSION_FILE as _BYPASS_PPM_SESSION_FILE
+            with open(_BYPASS_PPM_SESSION_FILE) as f:
+                session_start_ts = datetime.fromisoformat(json.load(f)['start_ts']).timestamp()
+            live_start = max(session_start_ts, baseline_ts)
+            gallons_delivered = max(0.0, now - live_start) / 3600.0 * BYPASS_GPM
+            result['bypass_gallons_delivered'] = round(gallons_delivered, 1)
+            display_ppm = blend_ppm(baseline_ppm, gallons_delivered, tank_gal, 0.0)
+        except Exception:
+            pass
+    result['chlorine_ppm_est'] = round(display_ppm)
+    result['chlorine_est_age_min'] = round((now - baseline_ts) / 60)
 
     win_start, win_end, label, win_start_gal = _fill_window(float_calling, now)
     result['duty_window_label'] = label
@@ -361,55 +420,69 @@ def api_flow_status():
                         result['eta_full_gph'] = round(gph, 1)
 
     else:
-        # ── bypass mode: flow from FFT detection, no dosatron clicks ──────────
+        # ── bypass mode: flow from FFT detection (audio), no dosatron clicks ──
+        # GPM isn't acoustically measurable (no volumetric metering) — BYPASS_GPM
+        # is an assumed constant (owner's rough field estimate), not a computed
+        # rate the way dosatron GPM is. Everything gallons-based below is that
+        # constant applied to real, audio-detected flow *duration* — the timing
+        # is measured, the rate is assumed.
         try:
             with open(_FLOW_STATE_FILE) as f:
                 result['is_flowing'] = json.load(f).get('state') == 'flowing'
         except Exception:
             pass
+        if result['is_flowing']:
+            result['gpm'] = BYPASS_GPM
 
-        # Chlorine ppm dilution estimate: untreated bypass water dilutes the tank
-        # (well-mixed, constant volume) — ppm decays exponentially with gallons
-        # delivered since bypass turned on. Session start is written by
-        # monitor.dosatron on the OFF→ON transition; elapsed time × BYPASS_GPM
-        # is the delivered-gallons estimate (owner's rough field rate, ~4 gpm).
-        # UNVALIDATED model (see config.py note) — rounded to whole ppm since
-        # test strips can't resolve better than that anyway; don't over-trust it.
-        try:
-            from monitor.dosatron import BYPASS_PPM_SESSION_FILE as _BYPASS_PPM_SESSION_FILE
-            with open(_BYPASS_PPM_SESSION_FILE) as f:
-                start_ts = datetime.fromisoformat(json.load(f)['start_ts']).timestamp()
-            tank_gal = result.get('tank_gallons')
-            if tank_gal:
-                gallons_delivered = max(0.0, now - start_ts) / 3600.0 * BYPASS_GPM
-                result['bypass_gallons_delivered'] = round(gallons_delivered, 1)
-                result['bypass_ppm_est'] = round(
-                    CHLORINE_STEADY_STATE_PPM * math.exp(-gallons_delivered / tank_gal))
-        except Exception:
-            pass
+        puff_window = 6 * 3600
+        span_start  = min(win_start if win_start else now, now - puff_window)
+        records = _bypass_flow_records(span_start, now)
+
+        if records:
+            last = records[-1]
+            result['last_click_age_s']  = round(now - last['end'])
+            result['last_flow_gallons'] = round(last['duration_s'] / 3600.0 * BYPASS_GPM, 1)
 
         if win_start:
-            flowing_secs = 0.0
-            try:
-                with open(_FLOW_CYCLES_JSONL) as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            rec = json.loads(line)
-                            s = datetime.fromisoformat(rec['start_ts']).timestamp()
-                            e = datetime.fromisoformat(rec['end_ts']).timestamp()
-                            if e < win_start:
-                                continue
-                            flowing_secs += min(e, win_end) - max(s, win_start)
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+            win_records  = [r for r in records if r['end'] >= win_start]
+            flowing_secs = sum(min(r['end'], win_end) - max(r['start'], win_start)
+                               for r in win_records)
             win_len = win_end - win_start
             if win_len > 0:
                 result['duty_cycle_pct'] = round(min(flowing_secs, win_len) / win_len * 100, 1)
+
+            received = round(flowing_secs / 3600.0 * BYPASS_GPM, 1)
+            result['duty_window_gallons'] = received
+
+            # House usage over the window by water balance (same as dosatron mode).
+            tank_now_sensor = base_gal if base_gal is not None else result.get('tank_gallons')
+            if win_start_gal is not None and tank_now_sensor is not None:
+                used = received - (tank_now_sensor - win_start_gal)
+                result['house_used_gallons'] = round(max(0.0, used), 1)
+
+        # ── Flow-cycle cadence over the last 6 h (well recovery limits bypass
+        # delivery the same way it limits dosatron delivery — same well) ──────
+        recent = [r for r in records if r['start'] >= now - puff_window]
+        if len(recent) >= 2:
+            durations = [r['duration_s'] for r in recent]
+            gaps = [recent[i + 1]['start'] - recent[i]['end'] for i in range(len(recent) - 1)]
+            result['puff_count']     = len(recent)
+            result['puff_on_avg_s']  = round(sum(durations) / len(durations))
+            result['puff_gap_avg_s'] = round(sum(gaps) / len(gaps)) if gaps else None
+            result['puff_gpm']       = BYPASS_GPM
+
+        # ── ETA to full (1450 gal) from the recent delivered rate ────────────
+        cur = result.get('tank_gallons')
+        if cur is not None and cur < TANK_FULL_GALLONS and recent:
+            span_h = (now - recent[0]['start']) / 3600.0
+            if span_h >= 0.5:
+                recent_flowing_secs = sum(r['duration_s'] for r in recent)
+                gph = (recent_flowing_secs / 3600.0 * BYPASS_GPM) / span_h
+                if gph > 0:
+                    eta_h = (TANK_FULL_GALLONS - cur) / gph
+                    if 0 < eta_h < 168:
+                        result['eta_full_ts']  = (datetime.now() + timedelta(hours=eta_h)).isoformat()
+                        result['eta_full_gph'] = round(gph, 1)
 
     resp = jsonify(result)
     resp.headers['Cache-Control'] = 'no-store'
@@ -805,15 +878,18 @@ def water2_status():
             return mm ? (h + 'h ' + mm + 'm') : (h + 'h');
           }};
 
-          // GPM: live rate while flowing; else puff-flow rate; else last fill avg
+          // GPM: live rate while flowing; else puff-flow rate; else last fill avg.
+          // Bypass mode: flow *timing* is measured (audio), but the rate itself
+          // is an assumed constant (BYPASS_GPM), not computed — label honestly.
+          const isBypass = d.mode === 'bypass';
           const gpmLabel = document.getElementById('flow-gpm-label');
           if (d.gpm !== null && d.gpm !== undefined) {{
             gpmRow.style.display = '';
-            gpmLabel.textContent = 'Est. GPM (60s):';
+            gpmLabel.textContent = isBypass ? 'Bypass GPM (assumed):' : 'Est. GPM (60s):';
             gpmEl.textContent = d.gpm.toFixed(2) + ' gal/min';
           }} else if (d.puff_gpm !== null && d.puff_gpm !== undefined) {{
             gpmRow.style.display = '';
-            gpmLabel.textContent = 'Puff GPM:';
+            gpmLabel.textContent = isBypass ? 'Bypass GPM (assumed):' : 'Puff GPM:';
             gpmEl.textContent = d.puff_gpm.toFixed(2) + ' gal/min';
           }} else if (d.last_gpm !== null && d.last_gpm !== undefined) {{
             gpmRow.style.display = '';
@@ -823,14 +899,16 @@ def water2_status():
             gpmRow.style.display = 'none';
           }}
 
-          // Puff cadence (well-recovery cycling): avg on-time and gap between
+          // Puff cadence (well-recovery cycling): avg on-time and gap between.
+          // In bypass mode these are FFT-detected flow cycles, not dosatron clicks.
           const puffRow = document.getElementById('flow-puff-row');
           const puffEl  = document.getElementById('flow-puff-text');
           if (d.puff_count) {{
             puffRow.style.display = '';
+            const unit = isBypass ? 'cycles' : 'puffs';
             puffEl.textContent = 'on ~' + fmtDur(d.puff_on_avg_s)
               + ', every ~' + fmtDur(d.puff_gap_avg_s)
-              + ' (' + d.puff_count + ' puffs/6h)';
+              + ' (' + d.puff_count + ' ' + unit + '/6h)';
           }} else {{
             puffRow.style.display = 'none';
           }}
@@ -884,14 +962,17 @@ def water2_status():
             usedRow.style.display = 'none';
           }}
 
-          // Est. chlorine ppm during bypass (dilution from untreated water)
+          // Est. chlorine ppm — always shown; declines during bypass, recovers
+          // once the dosatron resumes (whole-tank estimate, not per-session).
           const ppmRow = document.getElementById('flow-ppm-row');
           const ppmEl  = document.getElementById('flow-ppm-text');
-          if (d.bypass_ppm_est !== null && d.bypass_ppm_est !== undefined) {{
+          if (d.chlorine_ppm_est !== null && d.chlorine_ppm_est !== undefined) {{
             ppmRow.style.display = '';
-            let pv = '~' + d.bypass_ppm_est + ' ppm?';
-            if (d.bypass_gallons_delivered !== null && d.bypass_gallons_delivered !== undefined) {{
+            let pv = '~' + d.chlorine_ppm_est + ' ppm?';
+            if (d.bypass_on && d.bypass_gallons_delivered !== null && d.bypass_gallons_delivered !== undefined) {{
               pv += ' (' + d.bypass_gallons_delivered + ' gal bypass delivered)';
+            }} else if (d.chlorine_est_age_min !== null && d.chlorine_est_age_min !== undefined) {{
+              pv += ' (updated ' + (d.chlorine_est_age_min < 1 ? 'just now' : d.chlorine_est_age_min + 'm ago') + ')';
             }}
             ppmEl.textContent = pv;
           }} else {{

@@ -122,11 +122,13 @@ try:
         EVENTS_FILE          as _EVENTS_FILE,
         BYPASS_FLOW_WATCH_FILE as _BYPASS_FLOW_WATCH_FILE,
         DASHBOARD_URL        as _DASHBOARD_URL,
+        BYPASS_GPM           as _BYPASS_GPM,
     )
     _MONITOR_OK = True
 except Exception:
     _MONITOR_OK = False
     _EVENTS_FILE = _BYPASS_FLOW_WATCH_FILE = _DASHBOARD_URL = None  # type: ignore
+    _BYPASS_GPM = 4.0  # fallback matching config.py default, for standalone/test use
 
 
 # ── public utility ─────────────────────────────────────────────────────────────
@@ -460,7 +462,7 @@ def _on_bypass_flow_complete(start_ts: datetime, end_ts: datetime,
             str(_EVENTS_FILE), "BYPASS_FLOW",
             pressure_state=None, float_state=None,
             tank_gallons=None,   tank_depth=None,   tank_percentage=None,
-            estimated_gallons=None,  # TODO: gallons from bypass GPM
+            estimated_gallons=round(duration_s / 3600.0 * _BYPASS_GPM, 1),
             relay_status={"bypass": "ON", "supply_override": ""},
             notes=notes,
         )

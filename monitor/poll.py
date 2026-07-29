@@ -43,6 +43,7 @@ from monitor.gpio_helpers import (
 from monitor.tank import get_tank_data
 from monitor.ambient_weather import get_weather_data
 from monitor.logger import log_event, log_snapshot
+from monitor.chlorine import update_chlorine_ppm_estimate
 try:
     from monitor.dosatron import count_clicks as _count_dosatron_clicks, GALLONS_PER_CLICK as _DOSATRON_GPK, fill_summary_note as _fill_summary_note
     _DOSATRON_SIGNAL_FILE = os.path.join(
@@ -298,6 +299,10 @@ class SnapshotTracker:
         if self._bypass_on_since is not None:
             bypass_secs += time.time() - self._bypass_on_since
         bypass_gallons = bypass_secs / SECONDS_PER_GALLON if bypass_secs > 0 else 0.0
+        # NOTE: bypass_gallons above uses SECONDS_PER_GALLON, which is known-wrong
+        # (see config.py). bypass_seconds is exposed raw below so callers that want
+        # the owner's separately-calibrated BYPASS_GPM (chlorine ppm estimate) can
+        # do their own conversion instead of relying on this figure.
 
         # Pressure-HIGH windows (split at snapshot boundary via reset())
         pressure_windows = list(self.pressure_windows)
@@ -325,6 +330,7 @@ class SnapshotTracker:
             'purge_count': self.purge_count,
             'relay_status': relay_status,
             'bypass_gallons': round(bypass_gallons, 2),
+            'bypass_seconds': round(bypass_secs, 1),
             'dosatron_windows': dosatron_windows,
         }
 
@@ -1525,6 +1531,14 @@ class SimplifiedMonitor:
                             print(f"  Purges: {snapshot_data['purge_count']}")
                         print()
                     
+                    # Chlorine ppm estimate: blend this window's dosatron/bypass
+                    # delivery into the persisted estimate before the tracker resets.
+                    update_chlorine_ppm_estimate(
+                        _dosatron_gal,
+                        snapshot_data['bypass_seconds'],
+                        snapshot_data['tank_gallons'],
+                    )
+
                     # Reset for next interval
                     self.snapshot_tracker.reset()
                     self.next_snapshot_time = get_next_snapshot_time(
