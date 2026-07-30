@@ -462,7 +462,7 @@ def _on_bypass_flow_complete(start_ts: datetime, end_ts: datetime,
             str(_EVENTS_FILE), "BYPASS_FLOW",
             pressure_state=None, float_state=None,
             tank_gallons=None,   tank_depth=None,   tank_percentage=None,
-            estimated_gallons=round(duration_s / 3600.0 * _BYPASS_GPM, 1),
+            estimated_gallons=round(duration_s / 60.0 * _BYPASS_GPM, 1),
             relay_status={"bypass": "ON", "supply_override": ""},
             notes=notes,
         )

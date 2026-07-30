@@ -60,7 +60,7 @@ def update_chlorine_ppm_estimate(dosatron_gallons: float, bypass_seconds: float,
         return
     ppm, _ = read_chlorine_ppm_state()
     ppm = blend_ppm(ppm, dosatron_gallons, tank_gallons, CHLORINE_STEADY_STATE_PPM)
-    bypass_gallons = bypass_seconds / 3600.0 * BYPASS_GPM if bypass_seconds else 0.0
+    bypass_gallons = bypass_seconds / 60.0 * BYPASS_GPM if bypass_seconds else 0.0
     ppm = blend_ppm(ppm, bypass_gallons, tank_gallons, 0.0)
     _write_state(ppm)
 

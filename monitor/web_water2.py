@@ -339,7 +339,7 @@ def api_flow_status():
             with open(_BYPASS_PPM_SESSION_FILE) as f:
                 session_start_ts = datetime.fromisoformat(json.load(f)['start_ts']).timestamp()
             live_start = max(session_start_ts, baseline_ts)
-            gallons_delivered = max(0.0, now - live_start) / 3600.0 * BYPASS_GPM
+            gallons_delivered = max(0.0, now - live_start) / 60.0 * BYPASS_GPM
             result['bypass_gallons_delivered'] = round(gallons_delivered, 1)
             display_ppm = blend_ppm(baseline_ppm, gallons_delivered, tank_gal, 0.0)
         except Exception:
@@ -441,7 +441,7 @@ def api_flow_status():
         if records:
             last = records[-1]
             result['last_click_age_s']  = round(now - last['end'])
-            result['last_flow_gallons'] = round(last['duration_s'] / 3600.0 * BYPASS_GPM, 1)
+            result['last_flow_gallons'] = round(last['duration_s'] / 60.0 * BYPASS_GPM, 1)
 
         if win_start:
             win_records  = [r for r in records if r['end'] >= win_start]
@@ -451,7 +451,7 @@ def api_flow_status():
             if win_len > 0:
                 result['duty_cycle_pct'] = round(min(flowing_secs, win_len) / win_len * 100, 1)
 
-            received = round(flowing_secs / 3600.0 * BYPASS_GPM, 1)
+            received = round(flowing_secs / 60.0 * BYPASS_GPM, 1)
             result['duty_window_gallons'] = received
 
             # House usage over the window by water balance (same as dosatron mode).
@@ -477,7 +477,7 @@ def api_flow_status():
             span_h = (now - recent[0]['start']) / 3600.0
             if span_h >= 0.5:
                 recent_flowing_secs = sum(r['duration_s'] for r in recent)
-                gph = (recent_flowing_secs / 3600.0 * BYPASS_GPM) / span_h
+                gph = (recent_flowing_secs / 60.0 * BYPASS_GPM) / span_h
                 if gph > 0:
                     eta_h = (TANK_FULL_GALLONS - cur) / gph
                     if 0 < eta_h < 168:
