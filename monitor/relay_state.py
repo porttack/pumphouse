@@ -46,6 +46,10 @@ class RelayStateManager:
     def set_supply_override(self, state):
         """Save supply override state"""
         if state in ['ON', 'OFF']:
+            # Re-read from disk first so a stale in-memory copy of the OTHER
+            # field (bypass) — held by a long-running process — doesn't get
+            # written back over a newer value some other process just saved.
+            self.state = self._load_state()
             self.state['supply_override'] = state
             self._save_state()
 
@@ -56,5 +60,6 @@ class RelayStateManager:
     def set_bypass(self, state):
         """Save bypass state"""
         if state in ['ON', 'OFF']:
+            self.state = self._load_state()
             self.state['bypass'] = state
             self._save_state()
