@@ -45,7 +45,12 @@ from monitor.ambient_weather import get_weather_data
 from monitor.logger import log_event, log_snapshot
 from monitor.chlorine import update_chlorine_ppm_estimate
 try:
-    from monitor.dosatron import count_clicks as _count_dosatron_clicks, GALLONS_PER_CLICK as _DOSATRON_GPK, fill_summary_note as _fill_summary_note
+    from monitor.dosatron import (
+        count_clicks as _count_dosatron_clicks,
+        GALLONS_PER_CLICK as _DOSATRON_GPK,
+        fill_summary_note as _fill_summary_note,
+        sum_flow_seconds as _sum_bypass_flow_seconds,
+    )
     _DOSATRON_SIGNAL_FILE = os.path.join(
         os.path.expanduser("~/.local/share/pumphouse/dosatron"), "pressure_signal.json"
     )
@@ -57,6 +62,8 @@ except Exception:
         return 0
     def _fill_summary_note(current_gallons=None, max_age_hours=12):  # type: ignore[misc]
         return ''
+    def _sum_bypass_flow_seconds(start, end):  # type: ignore[misc]
+        return 0.0
     _DOSATRON_GPK = 0.14
     _DOSATRON_SIGNAL_FILE = None
     _DOSATRON_PREDICTION_FILE = None
@@ -1533,9 +1540,16 @@ class SimplifiedMonitor:
                     
                     # Chlorine ppm estimate: blend this window's dosatron/bypass
                     # delivery into the persisted estimate before the tracker resets.
+                    # Uses real FFT-detected flow seconds, NOT bypass_seconds (relay-
+                    # open time) — the valve can sit open with no float-calling demand
+                    # for long stretches while no water actually moves; using relay
+                    # time there overstated delivered gallons by ~15x on 2026-07-29.
+                    _bypass_flow_secs = _sum_bypass_flow_seconds(
+                        self.snapshot_tracker.start_time, current_time
+                    )
                     update_chlorine_ppm_estimate(
                         _dosatron_gal,
-                        snapshot_data['bypass_seconds'],
+                        _bypass_flow_secs,
                         snapshot_data['tank_gallons'],
                     )
 

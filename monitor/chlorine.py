@@ -49,18 +49,25 @@ def blend_ppm(ppm: float, gallons: float, tank_gallons: float, c_in: float) -> f
     return c_in + (ppm - c_in) * math.exp(-gallons / tank_gallons)
 
 
-def update_chlorine_ppm_estimate(dosatron_gallons: float, bypass_seconds: float,
+def update_chlorine_ppm_estimate(dosatron_gallons: float, bypass_flowing_seconds: float,
                                   tank_gallons: 'float | None') -> None:
     """Advance and persist the ppm estimate by one snapshot's worth of
     dosatron + bypass delivery. Called once per ~15-min snapshot from
     monitor/poll.py, using that window's ground-truth dosatron gallons
-    (click-based) and raw bypass-on seconds (converted here via BYPASS_GPM,
-    the owner's rough bypass-rate estimate)."""
+    (click-based) and real FFT-detected bypass flow seconds (converted here
+    via BYPASS_GPM, the owner's rough bypass-rate estimate).
+
+    bypass_flowing_seconds must be actual detected flow time (monitor.dosatron
+    .sum_flow_seconds), NOT how long the bypass relay was open — the valve can
+    sit open for a long stretch with no float-calling demand while no water
+    actually moves, which overstated delivered gallons by ~15x when this used
+    relay-on time instead (caught 2026-07-29 comparing against real tank-level
+    change during a day with zero house usage)."""
     if not tank_gallons:
         return
     ppm, _ = read_chlorine_ppm_state()
     ppm = blend_ppm(ppm, dosatron_gallons, tank_gallons, CHLORINE_STEADY_STATE_PPM)
-    bypass_gallons = bypass_seconds / 60.0 * BYPASS_GPM if bypass_seconds else 0.0
+    bypass_gallons = bypass_flowing_seconds / 60.0 * BYPASS_GPM if bypass_flowing_seconds else 0.0
     ppm = blend_ppm(ppm, bypass_gallons, tank_gallons, 0.0)
     _write_state(ppm)
 

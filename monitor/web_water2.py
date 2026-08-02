@@ -326,25 +326,24 @@ def api_flow_status():
     # by monitor/poll.py from ground-truth dosatron/bypass gallons; it declines
     # toward 0ppm while bypassing and recovers toward CHLORINE_STEADY_STATE_PPM
     # once the dosatron resumes (same mixing math both directions). While bypass
-    # is actively on, project the baseline forward with elapsed real-time bypass
-    # delivery since the bypass session started (BYPASS_PPM_SESSION_FILE) so the
-    # number keeps moving live between snapshot updates, not just every 15 min.
-    # UNVALIDATED model — see config.py note; treat as a rough guide only.
+    # is actively on, project the baseline forward using real FFT-detected flow
+    # since the baseline was last updated (NOT elapsed wall-clock/relay-on time —
+    # the valve can sit open with no water moving for long stretches; using raw
+    # elapsed time there overstated delivered gallons by ~15x, caught 2026-07-29)
+    # so the number keeps moving live between snapshot updates, not just every
+    # 15 min. UNVALIDATED model overall — see config.py note; rough guide only.
     baseline_ppm, baseline_ts = read_chlorine_ppm_state()
     display_ppm = baseline_ppm
     tank_gal = result.get('tank_gallons')
     if bypass_on and tank_gal:
-        try:
-            from monitor.dosatron import BYPASS_PPM_SESSION_FILE as _BYPASS_PPM_SESSION_FILE
-            with open(_BYPASS_PPM_SESSION_FILE) as f:
-                session_start_ts = datetime.fromisoformat(json.load(f)['start_ts']).timestamp()
-            live_start = max(session_start_ts, baseline_ts)
-            gallons_delivered = max(0.0, now - live_start) / 60.0 * BYPASS_GPM
-            result['bypass_gallons_delivered'] = round(gallons_delivered, 1)
-            display_ppm = blend_ppm(baseline_ppm, gallons_delivered, tank_gal, 0.0)
-        except Exception:
-            pass
-    result['chlorine_ppm_est'] = round(display_ppm)
+        live_records = _bypass_flow_records(baseline_ts, now)
+        flowing_secs_since_baseline = sum(
+            min(r['end'], now) - max(r['start'], baseline_ts) for r in live_records
+        )
+        gallons_delivered = flowing_secs_since_baseline / 60.0 * BYPASS_GPM
+        result['bypass_gallons_delivered'] = round(gallons_delivered, 1)
+        display_ppm = blend_ppm(baseline_ppm, gallons_delivered, tank_gal, 0.0)
+    result['chlorine_ppm_est'] = round(display_ppm, 1)
     result['chlorine_est_age_min'] = round((now - baseline_ts) / 60)
 
     win_start, win_end, label, win_start_gal = _fill_window(float_calling, now)
@@ -968,7 +967,7 @@ def water2_status():
           const ppmEl  = document.getElementById('flow-ppm-text');
           if (d.chlorine_ppm_est !== null && d.chlorine_ppm_est !== undefined) {{
             ppmRow.style.display = '';
-            let pv = '~' + d.chlorine_ppm_est + ' ppm?';
+            let pv = '~' + d.chlorine_ppm_est.toFixed(1) + ' ppm?';
             if (d.bypass_on && d.bypass_gallons_delivered !== null && d.bypass_gallons_delivered !== undefined) {{
               pv += ' (' + d.bypass_gallons_delivered + ' gal bypass delivered)';
             }} else if (d.chlorine_est_age_min !== null && d.chlorine_est_age_min !== undefined) {{

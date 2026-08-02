@@ -108,7 +108,6 @@ FLOW_CYCLE_LABELS = os.path.join(DATA_DIR, "flow_cycle_labels.json")
 CONFIG_FILE       = os.path.join(DATA_DIR, "config.json")
 SIGNAL_FILE       = os.path.join(DATA_DIR, "pressure_signal.json")
 FLOW_STATE_FILE   = os.path.join(DATA_DIR, "flow_state.json")
-BYPASS_PPM_SESSION_FILE = os.path.join(DATA_DIR, "bypass_ppm_session.json")
 PID_FILE          = os.path.join(DATA_DIR, "listener.pid")
 BYPASS_VALVE_PIN  = 26   # BCM pin — active-low relay (0 = ON); mirrors relay.py
 
@@ -165,6 +164,37 @@ def count_clicks(start_unix: float, end_unix: float) -> int:
         return 0
     except Exception:
         return 0
+
+
+def sum_flow_seconds(start_unix: float, end_unix: float) -> float:
+    """Sum actual FFT-detected bypass flow duration (seconds) overlapping
+    [start_unix, end_unix], clipped to that window.
+
+    This is real detected water movement, NOT how long the bypass relay was
+    open — the valve can sit open for a long stretch with the tank not
+    calling (or between well-recovery puffs) while no water actually flows.
+    Each entry in flow_cycles.jsonl is one continuous flow episode. Returns
+    0.0 on any error/missing file so callers can treat 0 as "no flow".
+    """
+    total = 0.0
+    try:
+        with open(FLOW_CYCLES_JSONL) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                    s = datetime.fromisoformat(rec['start_ts']).timestamp()
+                    e = datetime.fromisoformat(rec['end_ts']).timestamp()
+                    if e < start_unix or s > end_unix:
+                        continue
+                    total += min(e, end_unix) - max(s, start_unix)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return total
 
 
 def _pressure_high_windows(start_unix: float, end_unix: float):
@@ -373,20 +403,6 @@ def _write_flow_state(state: str, start_ts: 'datetime | None' = None) -> None:
         with open(tmp, "w") as f:
             json.dump(data, f)
         os.replace(tmp, FLOW_STATE_FILE)
-    except Exception:
-        pass
-
-
-def _start_bypass_ppm_session() -> None:
-    """Mark the start of a new bypass-on stretch, for the chlorine ppm-dilution
-    estimate (web_water2.api_flow_status). Tank is assumed to be at
-    CHLORINE_STEADY_STATE_PPM at this instant; ppm decays from here based on
-    elapsed bypass-on time × BYPASS_GPM."""
-    try:
-        tmp = BYPASS_PPM_SESSION_FILE + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump({"start_ts": datetime.now().isoformat()}, f)
-        os.replace(tmp, BYPASS_PPM_SESSION_FILE)
     except Exception:
         pass
 
@@ -1018,7 +1034,6 @@ def listen(cli_threshold: int):
                     bypass_active = new_bypass
                     if bypass_active:
                         log.info("Bypass ON — switching to flow detection mode")
-                        _start_bypass_ppm_session()
                     else:
                         log.info("Bypass OFF — returning to click detection mode")
                         flow_rec.cancel(log)

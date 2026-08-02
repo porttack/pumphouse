@@ -93,8 +93,8 @@ SECONDS_PER_GALLON = 10 / 0.14   # 10 seconds = 0.14 gallons
 # feeds the tank directly, tank stays roughly constant-volume via the float valve
 # + continuous house draw). Modeled as well-mixed dilution:
 #   ppm = CHLORINE_STEADY_STATE_PPM * exp(-bypass_gallons_delivered / tank_gallons)
-# bypass_gallons_delivered is elapsed bypass-on time × BYPASS_GPM (see
-# monitor/dosatron.py::BYPASS_PPM_SESSION_FILE, written when bypass turns ON).
+# bypass_gallons_delivered is real FFT-detected bypass flow time (NOT elapsed
+# relay-on/wall-clock time — see monitor/dosatron.py::sum_flow_seconds) × BYPASS_GPM.
 #
 # UNVALIDATED as of 2026-07-29 — owner pushback: incoming well water isn't
 # necessarily "0 ppm inert diluent," it likely carries its own chlorine demand
