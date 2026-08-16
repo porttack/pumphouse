@@ -117,7 +117,7 @@ BYPASS_GPM = 4.0  # owner's rough field estimate of bypass delivery rate (2026-0
 ENABLE_PURGE = False  # Enable automatic filter purging after every water delivery
 MIN_PURGE_INTERVAL = 3600  # Minimum seconds between purges (default: 3600 = 1 hour)
 PURGE_DURATION = 10  # Duration of purge in seconds
-ENABLE_DAILY_PURGE = True   # Purge once per day: 15s after first pressure-HIGH after 3am
+ENABLE_DAILY_PURGE = False   # Purge once per day: 15s after first pressure-HIGH after 3am
 DAILY_PURGE_HOUR   = 3      # Hour (0-23) after which the daily purge becomes eligible
 
 # Override Shutoff Configuration
