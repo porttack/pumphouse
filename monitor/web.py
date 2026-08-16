@@ -877,13 +877,14 @@ def build_calendar_months(all_reservations, num_months=19, start_year=None, star
     today = _date.today()
 
     # Per-type background and foreground colors (must match CSS classes)
-    _BG = {'airbnb': '#4a1422', 'vrbo': '#00312e', 'guest': '#1e3a5f', 'owner': '#4a2e00'}
-    _FG = {'airbnb': '#e87090', 'vrbo': '#40c8a8', 'guest': '#7ab0e8', 'owner': '#e8a030'}
+    _BG = {'airbnb': '#4a1422', 'vrbo': '#00312e', 'guest': '#1e3a5f', 'owner': '#4a2e00', 'maintenance': '#4a4000'}
+    _FG = {'airbnb': '#e87090', 'vrbo': '#40c8a8', 'guest': '#7ab0e8', 'owner': '#e8a030', 'maintenance': '#e8d030'}
     _FREE = '#1a1a1a'
-    _cls_map = {'owner': 'cal-owner', 'airbnb': 'cal-airbnb', 'vrbo': 'cal-vrbo', 'guest': 'cal-guest'}
+    _cls_map = {'owner': 'cal-owner', 'airbnb': 'cal-airbnb', 'vrbo': 'cal-vrbo', 'guest': 'cal-guest', 'maintenance': 'cal-maintenance'}
 
     def _res_type(res):
         t = res.get('Type', '')
+        if 'Maintenance' in t: return 'maintenance'
         if 'Owner' in t:      return 'owner'
         if t.lower() == 'airbnb': return 'airbnb'
         if t.lower() == 'vrbo':   return 'vrbo'
