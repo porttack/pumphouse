@@ -44,6 +44,7 @@ from monitor.tank import get_tank_data
 from monitor.ambient_weather import get_weather_data
 from monitor.logger import log_event, log_snapshot
 from monitor.chlorine import update_chlorine_ppm_estimate
+from monitor.bypass_calibration import record_snapshot as _record_bypass_calibration
 try:
     from monitor.dosatron import (
         count_clicks as _count_dosatron_clicks,
@@ -1539,6 +1540,16 @@ class SimplifiedMonitor:
                         _dosatron_gal,
                         _bypass_flow_secs,
                         snapshot_data['tank_gallons'],
+                    )
+
+                    _record_bypass_calibration(
+                        occupied_status=occupied_status,
+                        bypass_on=(snapshot_data['relay_status'].get('bypass') == 'ON'),
+                        dosatron_gallons=_dosatron_gal,
+                        pressure_high_seconds=snapshot_data['pressure_high_seconds'],
+                        tank_gallons_delta=tank_gallons_delta,
+                        window_start_ts=self.snapshot_tracker.start_time,
+                        window_end_ts=current_time,
                     )
 
                     # Reset for next interval

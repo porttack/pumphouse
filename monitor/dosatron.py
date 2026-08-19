@@ -472,13 +472,19 @@ def _on_bypass_flow_complete(start_ts: datetime, end_ts: datetime,
 
     notes = f"Duration: {dur_str}{duty_str}, Audio: {audio_file}"
 
+    try:
+        from monitor.bypass_calibration import get_calibrated_bypass_gpm
+        bypass_gpm = get_calibrated_bypass_gpm()
+    except Exception:
+        bypass_gpm = _BYPASS_GPM
+
     # Log to events.csv — pressure_state/tank data N/A in bypass mode
     try:
         _log_event(
             str(_EVENTS_FILE), "BYPASS_FLOW",
             pressure_state=None, float_state=None,
             tank_gallons=None,   tank_depth=None,   tank_percentage=None,
-            estimated_gallons=round(duration_s / 60.0 * _BYPASS_GPM, 1),
+            estimated_gallons=round(duration_s / 60.0 * bypass_gpm, 1),
             relay_status={"bypass": "ON", "supply_override": ""},
             notes=notes,
         )

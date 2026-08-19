@@ -25,7 +25,8 @@ import math
 import os
 from datetime import datetime
 
-from monitor.config import CHLORINE_STEADY_STATE_PPM, BYPASS_GPM, DATA_DIR
+from monitor.config import CHLORINE_STEADY_STATE_PPM, DATA_DIR
+from monitor.bypass_calibration import get_calibrated_bypass_gpm
 
 CHLORINE_PPM_STATE_FILE = DATA_DIR / 'chlorine_ppm_state.json'
 
@@ -55,7 +56,7 @@ def update_chlorine_ppm_estimate(dosatron_gallons: float, bypass_flowing_seconds
     dosatron + bypass delivery. Called once per ~15-min snapshot from
     monitor/poll.py, using that window's ground-truth dosatron gallons
     (click-based) and real FFT-detected bypass flow seconds (converted here
-    via BYPASS_GPM, the owner's rough bypass-rate estimate).
+    via get_calibrated_bypass_gpm(), see monitor.bypass_calibration).
 
     bypass_flowing_seconds must be actual detected flow time (monitor.dosatron
     .sum_flow_seconds), NOT how long the bypass relay was open — the valve can
@@ -67,7 +68,7 @@ def update_chlorine_ppm_estimate(dosatron_gallons: float, bypass_flowing_seconds
         return
     ppm, _ = read_chlorine_ppm_state()
     ppm = blend_ppm(ppm, dosatron_gallons, tank_gallons, CHLORINE_STEADY_STATE_PPM)
-    bypass_gallons = bypass_flowing_seconds / 60.0 * BYPASS_GPM if bypass_flowing_seconds else 0.0
+    bypass_gallons = bypass_flowing_seconds / 60.0 * get_calibrated_bypass_gpm() if bypass_flowing_seconds else 0.0
     ppm = blend_ppm(ppm, bypass_gallons, tank_gallons, 0.0)
     _write_state(ppm)
 

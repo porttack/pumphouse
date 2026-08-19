@@ -112,6 +112,11 @@ SECONDS_PER_GALLON = 10 / 0.14   # 10 seconds = 0.14 gallons
 # (titration test kit ideally, not strips, given the ±5-10ppm noise floor).
 CHLORINE_STEADY_STATE_PPM = 10.0  # measured steady-state ppm when dosatron is in use (stable for months as of 2026-07)
 BYPASS_GPM = 4.0  # owner's rough field estimate of bypass delivery rate (2026-07-29); NOT derived from SECONDS_PER_GALLON above (that constant is known-wrong for this purpose, see docs/tank-calibration.md)
+# Fallback only — monitor/bypass_calibration.py derives a real BYPASS_GPM from actual
+# tank readings during zero-usage bypass sessions once enough clean data has
+# accumulated (see BYPASS_GPM_MIN_CALIBRATION_MINUTES below); this constant is what's
+# used until then, and if the calibration file is ever missing/corrupt.
+BYPASS_GPM_MIN_CALIBRATION_MINUTES = 60  # min accumulated real flow before trusting the calibrated value over BYPASS_GPM above
 
 # Purge Configuration
 ENABLE_PURGE = False  # Enable automatic filter purging after every water delivery

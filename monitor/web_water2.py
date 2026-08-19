@@ -27,11 +27,11 @@ from monitor.config import (
     SECRET_OVERRIDE_ON_TOKEN, SECRET_OVERRIDE_OFF_TOKEN,
     SECRET_PURGE_TOKEN, SECRET_PURGE_NEXT_TOKEN, SECRET_PURGE_CANCEL_NEXT_TOKEN,
     SECRET_TEST_FILTER_TOKEN, PURGE_PENDING_FILE,
-    BYPASS_GPM,
 )
 from monitor.gpio_helpers import read_float_sensor, FLOAT_STATE_CALLING
 from monitor.relay import get_all_relay_status
 from monitor.chlorine import read_chlorine_ppm_state, blend_ppm
+from monitor.bypass_calibration import get_calibrated_bypass_gpm, get_calibration_status
 
 water2_bp = Blueprint('water2', __name__)
 
@@ -254,6 +254,7 @@ def api_flow_status():
     bypass_on     = relay_status.get('bypass') == 'ON'
     override_on   = relay_status.get('supply_override') == 'ON'
     float_calling = read_float_sensor() == FLOAT_STATE_CALLING
+    bypass_gpm    = get_calibrated_bypass_gpm()
 
     result: dict = {
         'mode':                 'bypass' if bypass_on else 'dosatron',
@@ -286,6 +287,7 @@ def api_flow_status():
         'chlorine_ppm_est':     None,
         'chlorine_est_age_min': None,
         'bypass_gallons_delivered': None,
+        'bypass_gpm_calibrated': get_calibration_status()['calibrated'],
     }
 
     # Current tank level — same live source the graph uses. dos_estimate.json is
@@ -340,7 +342,7 @@ def api_flow_status():
         flowing_secs_since_baseline = sum(
             min(r['end'], now) - max(r['start'], baseline_ts) for r in live_records
         )
-        gallons_delivered = flowing_secs_since_baseline / 60.0 * BYPASS_GPM
+        gallons_delivered = flowing_secs_since_baseline / 60.0 * bypass_gpm
         result['bypass_gallons_delivered'] = round(gallons_delivered, 1)
         display_ppm = blend_ppm(baseline_ppm, gallons_delivered, tank_gal, 0.0)
     result['chlorine_ppm_est'] = round(display_ppm, 1)
@@ -420,18 +422,19 @@ def api_flow_status():
 
     else:
         # ── bypass mode: flow from FFT detection (audio), no dosatron clicks ──
-        # GPM isn't acoustically measurable (no volumetric metering) — BYPASS_GPM
-        # is an assumed constant (owner's rough field estimate), not a computed
-        # rate the way dosatron GPM is. Everything gallons-based below is that
-        # constant applied to real, audio-detected flow *duration* — the timing
-        # is measured, the rate is assumed.
+        # GPM isn't acoustically measurable (no volumetric metering) — bypass_gpm
+        # is either the owner's original field guess or, once enough clean-session
+        # data has accumulated, an empirical rate derived from real tank readings
+        # (see monitor.bypass_calibration). Everything gallons-based below is that
+        # rate applied to real, audio-detected flow *duration* — the timing is
+        # measured, the rate is calibrated (or assumed, before enough data exists).
         try:
             with open(_FLOW_STATE_FILE) as f:
                 result['is_flowing'] = json.load(f).get('state') == 'flowing'
         except Exception:
             pass
         if result['is_flowing']:
-            result['gpm'] = BYPASS_GPM
+            result['gpm'] = bypass_gpm
 
         puff_window = 6 * 3600
         span_start  = min(win_start if win_start else now, now - puff_window)
@@ -440,7 +443,7 @@ def api_flow_status():
         if records:
             last = records[-1]
             result['last_click_age_s']  = round(now - last['end'])
-            result['last_flow_gallons'] = round(last['duration_s'] / 60.0 * BYPASS_GPM, 1)
+            result['last_flow_gallons'] = round(last['duration_s'] / 60.0 * bypass_gpm, 1)
 
         if win_start:
             win_records  = [r for r in records if r['end'] >= win_start]
@@ -450,7 +453,7 @@ def api_flow_status():
             if win_len > 0:
                 result['duty_cycle_pct'] = round(min(flowing_secs, win_len) / win_len * 100, 1)
 
-            received = round(flowing_secs / 60.0 * BYPASS_GPM, 1)
+            received = round(flowing_secs / 60.0 * bypass_gpm, 1)
             result['duty_window_gallons'] = received
 
             # House usage over the window by water balance (same as dosatron mode).
@@ -468,7 +471,7 @@ def api_flow_status():
             result['puff_count']     = len(recent)
             result['puff_on_avg_s']  = round(sum(durations) / len(durations))
             result['puff_gap_avg_s'] = round(sum(gaps) / len(gaps)) if gaps else None
-            result['puff_gpm']       = BYPASS_GPM
+            result['puff_gpm']       = bypass_gpm
 
         # ── ETA to full (1450 gal) from the recent delivered rate ────────────
         cur = result.get('tank_gallons')
@@ -476,7 +479,7 @@ def api_flow_status():
             span_h = (now - recent[0]['start']) / 3600.0
             if span_h >= 0.5:
                 recent_flowing_secs = sum(r['duration_s'] for r in recent)
-                gph = (recent_flowing_secs / 60.0 * BYPASS_GPM) / span_h
+                gph = (recent_flowing_secs / 60.0 * bypass_gpm) / span_h
                 if gph > 0:
                     eta_h = (TANK_FULL_GALLONS - cur) / gph
                     if 0 < eta_h < 168:
@@ -878,17 +881,20 @@ def water2_status():
           }};
 
           // GPM: live rate while flowing; else puff-flow rate; else last fill avg.
-          // Bypass mode: flow *timing* is measured (audio), but the rate itself
-          // is an assumed constant (BYPASS_GPM), not computed — label honestly.
+          // Bypass mode: flow *timing* is measured (audio); the rate is either
+          // still the owner's assumed constant or, once enough clean-session
+          // data has accumulated, a calibrated rate from real tank readings
+          // (monitor.bypass_calibration) — label whichever it currently is.
           const isBypass = d.mode === 'bypass';
+          const bypassGpmTag = d.bypass_gpm_calibrated ? 'Bypass GPM (calibrated):' : 'Bypass GPM (assumed):';
           const gpmLabel = document.getElementById('flow-gpm-label');
           if (d.gpm !== null && d.gpm !== undefined) {{
             gpmRow.style.display = '';
-            gpmLabel.textContent = isBypass ? 'Bypass GPM (assumed):' : 'Est. GPM (60s):';
+            gpmLabel.textContent = isBypass ? bypassGpmTag : 'Est. GPM (60s):';
             gpmEl.textContent = d.gpm.toFixed(2) + ' gal/min';
           }} else if (d.puff_gpm !== null && d.puff_gpm !== undefined) {{
             gpmRow.style.display = '';
-            gpmLabel.textContent = isBypass ? 'Bypass GPM (assumed):' : 'Puff GPM:';
+            gpmLabel.textContent = isBypass ? bypassGpmTag : 'Puff GPM:';
             gpmEl.textContent = d.puff_gpm.toFixed(2) + ' gal/min';
           }} else if (d.last_gpm !== null && d.last_gpm !== undefined) {{
             gpmRow.style.display = '';
