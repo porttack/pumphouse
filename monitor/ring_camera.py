@@ -39,16 +39,9 @@ def _yolov8_onnx_path() -> Path:
 # COCO class indices that count as "vehicles"
 _VEHICLE_CLASSES = {2, 3, 5, 7}  # car, motorcycle, bus, truck
 
-# Background subtraction: reference images stored per hour-of-day
-# Collected automatically when property is unoccupied and YOLO sees 0 vehicles.
-_RING_REF_DIR      = Path.home() / '.config' / 'pumphouse' / 'ring_reference'
-
-# Archive: every daytime snapshot saved for manual review / reference approval
+# Archive: every daytime snapshot saved for manual review
 _RING_ARCHIVE_DIR  = Path.home() / '.config' / 'pumphouse' / 'ring_archive'
 _RING_ARCHIVE_DAYS = 30  # days to keep
-_BG_ZONE           = (0.55, 0.15, 1.0, 0.60)  # (x1, y1, x2, y2) as fractions of image
-_BG_DIFF_THRESHOLD = 35    # per-pixel abs diff (0-255) to count as "changed"
-_BG_COVERAGE_FRAC  = 0.08  # fraction of zone pixels that must differ to count as a vehicle
 
 _MODEL_URLS = {
     _YOLO_CFG:     'https://raw.githubusercontent.com/AlexeyAB/darknet/master/cfg/yolov4-tiny.cfg',
@@ -104,12 +97,11 @@ def get_snapshot(token_file: Path, camera_name: str = '', force_refresh: bool = 
                 result = _count_vehicles(data)
                 vehicle_count = result[0] if result is not None else None
                 avg_conf      = result[1] if result is not None else None
-                bg_coverage   = result[2] if result is not None else None
-                boxes         = result[3] if result is not None else None
+                boxes         = result[2] if result is not None else None
                 if vehicle_count is not None:
                     _write_count_cache(vehicle_count)
-                data = _stamp_timestamp(data, vehicle_count, avg_conf, bg_coverage, boxes)
-                data = _add_exif_metadata(data, vehicle_count, avg_conf, bg_coverage)
+                data = _stamp_timestamp(data, vehicle_count, avg_conf, boxes)
+                data = _add_exif_metadata(data, vehicle_count, avg_conf)
                 RING_CACHE_FILE.write_bytes(data)
                 logger.info('Ring snapshot fetched and cached (%d bytes, vehicles=%s, conf=%s)',
                             len(data), vehicle_count,
@@ -240,10 +232,9 @@ def _fetch_from_ring(token_file: Path, camera_name: str) -> Optional[bytes]:
 
 def _stamp_timestamp(jpeg_bytes: bytes, vehicle_count: Optional[int] = None,
                      avg_conf: Optional[float] = None,
-                     bg_coverage: Optional[float] = None,
                      boxes: Optional[list] = None) -> bytes:
     """
-    Draw bounding boxes (green=standalone, yellow=bg-assisted) and overlay timestamp/count.
+    Draw bounding boxes and overlay timestamp/count.
     Falls back to the original bytes if cv2 is unavailable or decoding fails.
     """
     try:
@@ -262,8 +253,8 @@ def _stamp_timestamp(jpeg_bytes: bytes, vehicle_count: Optional[int] = None,
     # Draw bounding boxes for each kept detection
     if boxes:
         box_scale = max(0.40, w / 3000)
-        for (bx, by, bw, bh, bconf, is_bg) in boxes:
-            color = (0, 200, 255) if is_bg else (0, 230, 0)  # yellow=bg-assisted, green=standalone
+        color = (0, 230, 0)
+        for (bx, by, bw, bh, bconf) in boxes:
             cv2.rectangle(img, (bx, by), (bx + bw, by + bh), color, 2)
             cv2.putText(img, f'{bconf:.2f}', (bx, max(by - 4, 12)),
                         cv2.FONT_HERSHEY_SIMPLEX, box_scale, color, 1, cv2.LINE_AA)
@@ -275,10 +266,7 @@ def _stamp_timestamp(jpeg_bytes: bytes, vehicle_count: Optional[int] = None,
         _vc_word = _num_words[vehicle_count] if 0 <= vehicle_count < len(_num_words) else str(vehicle_count)
         cars_str = f'{_vc_word} car{"s" if vehicle_count != 1 else ""}'
         if avg_conf is not None and vehicle_count > 0:
-            suffix = f' ({avg_conf:.2f} bg)' if bg_coverage is not None else f' ({avg_conf:.2f})'
-            label = f'{time_str}  {cars_str}{suffix}'
-        elif bg_coverage is not None and vehicle_count > 0:
-            label = f'{time_str}  {cars_str} (bg:{bg_coverage:.2f})'
+            label = f'{time_str}  {cars_str} ({avg_conf:.2f})'
         else:
             label = f'{time_str}  {cars_str}'
     else:
@@ -387,18 +375,14 @@ def _suppress_contained_boxes(boxes: list, containment_threshold: float = 0.80) 
 
 def _count_vehicles(jpeg_bytes: bytes) -> Optional[tuple]:
     """
-    Count vehicles using bg subtraction as a gate for YOLO.
-    Returns (count, avg_conf, bg_coverage, boxes) or None if inference fails.
+    Count vehicles using YOLO confidence alone (no background subtraction).
+    Returns (count, avg_conf, boxes) or None if inference fails.
 
-    bg subtraction runs first. If it fires, YOLO candidates down to
-    YOLO_CONF_THRESHOLD_BG_ASSISTED are kept (bg-assisted). Without bg,
-    only candidates >= YOLO_CONF_THRESHOLD are kept. bg alone never counts.
-
-    boxes: list of (x, y, w, h, conf, is_bg_assisted) for kept detections.
+    boxes: list of (x, y, w, h, conf) for detections kept after NMS,
+    confidence gating, and driveway-zone filtering.
     avg_conf: mean conf of kept detections, or None if count == 0.
-    bg_coverage: coverage fraction if bg fired AND contributed a kept detection, else None.
     """
-    from monitor.config import YOLO_CONF_THRESHOLD, YOLO_CONF_THRESHOLD_BG_ASSISTED
+    from monitor.config import YOLO_CONF_THRESHOLD
 
     try:
         import cv2
@@ -412,18 +396,14 @@ def _count_vehicles(jpeg_bytes: bytes) -> Optional[tuple]:
         logger.warning('Vehicle count: failed to decode JPEG')
         return None
 
-    # Run bg subtraction first — fast, informs YOLO threshold
-    bg_hit, bg_coverage = _count_vehicles_background(img)
-
-    # Run YOLO at the lower threshold to surface all candidates
     onnx_path = _yolov8_onnx_path()
     if onnx_path.exists():
-        result = _count_vehicles_yolov8(img, YOLO_CONF_THRESHOLD_BG_ASSISTED)
+        result = _count_vehicles_yolov8(img, YOLO_CONF_THRESHOLD)
         if result is None:
             logger.warning('%s inference failed; falling back to YOLOv4-tiny', onnx_path.stem)
-            result = _count_vehicles_yolov4(img, YOLO_CONF_THRESHOLD_BG_ASSISTED)
+            result = _count_vehicles_yolov4(img, YOLO_CONF_THRESHOLD)
     else:
-        result = _count_vehicles_yolov4(img, YOLO_CONF_THRESHOLD_BG_ASSISTED)
+        result = _count_vehicles_yolov4(img, YOLO_CONF_THRESHOLD)
 
     if result is None:
         return None
@@ -435,8 +415,7 @@ def _count_vehicles(jpeg_bytes: bytes) -> Optional[tuple]:
     zx1 = int(YOLO_DRIVEWAY_ZONE[0] * img_w); zy1 = int(YOLO_DRIVEWAY_ZONE[1] * img_h)
     zx2 = int(YOLO_DRIVEWAY_ZONE[2] * img_w); zy2 = int(YOLO_DRIVEWAY_ZONE[3] * img_h)
 
-    # Gate: standalone >= high threshold, or bg fired AND >= low threshold
-    # Also require box center to fall within the driveway zone
+    # Require box center to fall within the driveway zone
     kept = []
     for box in candidate_boxes:
         x, y, w, h, conf = box
@@ -444,56 +423,17 @@ def _count_vehicles(jpeg_bytes: bytes) -> Optional[tuple]:
         if not (zx1 <= cx <= zx2 and zy1 <= cy <= zy2):
             logger.debug('Ignoring detection at (%d,%d) outside driveway zone', cx, cy)
             continue
-        if conf >= YOLO_CONF_THRESHOLD:
-            kept.append((x, y, w, h, conf, False))
-        elif bg_hit and conf >= YOLO_CONF_THRESHOLD_BG_ASSISTED:
-            kept.append((x, y, w, h, conf, True))
+        kept.append((x, y, w, h, conf))
 
     # Suppress boxes that are mostly inside a larger box (e.g. license plate inside car)
     kept = _suppress_contained_boxes(kept)
 
-    # If YOLO found zero vehicle candidates at all (not even at the low threshold),
-    # fall back to bg subtraction alone when coverage is strong.
-    # This handles IR night-vision images where YOLO is trained on daytime color photos
-    # and simply cannot recognize car shapes — bg subtraction compares IR to IR directly.
-    from monitor.config import YOLO_BG_STANDALONE_THRESHOLD
-    if not candidate_boxes and bg_hit and bg_coverage >= YOLO_BG_STANDALONE_THRESHOLD:
-        logger.info('YOLO found no candidates; using bg-only detection (coverage=%.3f >= %.3f)',
-                    bg_coverage, YOLO_BG_STANDALONE_THRESHOLD)
-        count    = 1
-        avg_conf = None
-        bg_cov   = bg_coverage
-        return count, avg_conf, bg_cov, []  # no boxes to draw — we don't know where in frame
-
     count    = len(kept)
     avg_conf = sum(b[4] for b in kept) / count if count > 0 else None
-    bg_cov   = bg_coverage if (bg_hit and any(b[5] for b in kept)) else None
 
-    logger.info('Vehicle count: %d (bg_hit=%s, bg_cov=%.3f, candidates=%d, kept=%d)',
-                count, bool(bg_hit), bg_coverage, len(candidate_boxes), count)
-    return count, avg_conf, bg_cov, kept
-
-
-def maybe_save_reference(jpeg_bytes: bytes) -> bool:
-    """
-    Save jpeg_bytes as the reference "empty driveway" image for the current hour.
-    Call only when occupied=NO and YOLO detected 0 vehicles (guards against
-    accidentally capturing a maintenance visit visible to YOLO).
-    Stores one image per hour slot (00–23), continuously refreshed.
-    Returns True if saved successfully.
-    """
-    try:
-        import cv2
-        import numpy as np
-        _RING_REF_DIR.mkdir(parents=True, exist_ok=True)
-        hour = datetime.now().hour
-        ref_path = _RING_REF_DIR / f'{hour:02d}.jpg'
-        ref_path.write_bytes(jpeg_bytes)
-        logger.info('Saved empty-driveway reference for hour %02d (%d bytes)', hour, len(jpeg_bytes))
-        return True
-    except Exception as e:
-        logger.warning('Failed to save reference image (%s: %s)', type(e).__name__, e)
-        return False
+    logger.info('Vehicle count: %d (candidates=%d, kept=%d)',
+                count, len(candidate_boxes), count)
+    return count, avg_conf, kept
 
 
 def save_to_archive(jpeg_bytes: bytes) -> Optional[Path]:
@@ -536,58 +476,6 @@ def _prune_archive() -> None:
                 pass
     except Exception as e:
         logger.warning('Archive prune error (%s: %s)', type(e).__name__, e)
-
-
-def _find_nearest_reference(hour: int) -> Optional[Path]:
-    """Return the reference image whose hour-slot is closest to the given hour."""
-    if not _RING_REF_DIR.exists():
-        return None
-    refs = [p for p in _RING_REF_DIR.glob('??.jpg') if p.stem.isdigit()]
-    if not refs:
-        return None
-    return min(refs, key=lambda p: min(abs(int(p.stem) - hour), 24 - abs(int(p.stem) - hour)))
-
-
-def _count_vehicles_background(img) -> tuple:
-    """
-    Compare the background zone of img against the nearest-hour reference image.
-    Returns (hit, coverage): hit is 1 if coverage >= threshold, 0 otherwise.
-    Returns (0, 0.0) if no reference images exist yet.
-    """
-    try:
-        import cv2
-        import numpy as np
-
-        ref_path = _find_nearest_reference(datetime.now().hour)
-        if ref_path is None:
-            return 0, 0.0
-
-        ref_data = np.frombuffer(ref_path.read_bytes(), dtype=np.uint8)
-        ref_img  = cv2.imdecode(ref_data, cv2.IMREAD_COLOR)
-        if ref_img is None:
-            return 0, 0.0
-
-        h, w = img.shape[:2]
-        if ref_img.shape[:2] != (h, w):
-            ref_img = cv2.resize(ref_img, (w, h))
-
-        x1, y1, x2, y2 = (int(w * _BG_ZONE[0]), int(h * _BG_ZONE[1]),
-                           int(w * _BG_ZONE[2]), int(h * _BG_ZONE[3]))
-
-        zone     = cv2.cvtColor(img[y1:y2, x1:x2],     cv2.COLOR_BGR2GRAY).astype(np.float32)
-        ref_zone = cv2.cvtColor(ref_img[y1:y2, x1:x2], cv2.COLOR_BGR2GRAY).astype(np.float32)
-
-        diff     = np.abs(zone - ref_zone)
-        coverage = float(np.mean(diff > _BG_DIFF_THRESHOLD))
-        mean_diff = float(np.mean(diff))
-
-        logger.info('Background zone vs %s: mean_diff=%.1f coverage=%.3f threshold=%.3f',
-                    ref_path.name, mean_diff, coverage, _BG_COVERAGE_FRAC)
-
-        return (1, coverage) if coverage >= _BG_COVERAGE_FRAC else (0, coverage)
-    except Exception as e:
-        logger.warning('Background subtraction error (%s: %s)', type(e).__name__, e)
-        return 0, 0.0
 
 
 def _apply_clahe(img):
@@ -698,9 +586,8 @@ def _count_vehicles_yolov4(img, conf_threshold: float) -> Optional[tuple]:
 
 
 def _add_exif_metadata(jpeg_bytes: bytes, vehicle_count: Optional[int],
-                       avg_conf: Optional[float] = None,
-                       bg_coverage: Optional[float] = None) -> bytes:
-    """Embed vehicle count, YOLO confidence, and bg coverage in the JPEG UserComment EXIF tag."""
+                       avg_conf: Optional[float] = None) -> bytes:
+    """Embed vehicle count and YOLO confidence in the JPEG UserComment EXIF tag."""
     try:
         import io
         from PIL import Image
@@ -711,8 +598,6 @@ def _add_exif_metadata(jpeg_bytes: bytes, vehicle_count: Optional[int],
             comment = f'vehicles={vehicle_count}'
             if avg_conf is not None:
                 comment += f',conf={avg_conf:.2f}'
-            if bg_coverage is not None:
-                comment += f',bgcov={bg_coverage:.2f}'
         else:
             comment = 'vehicles=unknown'
         exif[0x9286] = comment.encode()

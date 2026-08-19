@@ -1415,18 +1415,6 @@ class SimplifiedMonitor:
                     except Exception:
                         pass
 
-                    # Save empty-driveway reference when unoccupied and no vehicles detected.
-                    # This builds up per-hour reference images for background subtraction,
-                    # while YOLO=0 guards against capturing maintenance visits.
-                    if (occupied_status == 'NO' and
-                            snapshot_vehicle_count == 0 and
-                            _ring_jpeg is not None):
-                        try:
-                            from monitor.ring_camera import maybe_save_reference
-                            maybe_save_reference(_ring_jpeg)
-                        except Exception:
-                            pass
-
                     # Archive every daytime snapshot for manual review at /ring-review.
                     if _ring_jpeg is not None:
                         try:
