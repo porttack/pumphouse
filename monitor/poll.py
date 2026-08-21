@@ -44,7 +44,10 @@ from monitor.tank import get_tank_data
 from monitor.ambient_weather import get_weather_data
 from monitor.logger import log_event, log_snapshot
 from monitor.chlorine import update_chlorine_ppm_estimate
-from monitor.bypass_calibration import record_snapshot as _record_bypass_calibration
+from monitor.bypass_calibration import (
+    record_snapshot as _record_bypass_calibration,
+    get_calibrated_bypass_gpm as _get_calibrated_bypass_gpm,
+)
 try:
     from monitor.dosatron import (
         count_clicks as _count_dosatron_clicks,
@@ -306,11 +309,10 @@ class SnapshotTracker:
         bypass_secs = self.bypass_seconds
         if self._bypass_on_since is not None:
             bypass_secs += time.time() - self._bypass_on_since
-        bypass_gallons = bypass_secs / SECONDS_PER_GALLON if bypass_secs > 0 else 0.0
-        # NOTE: bypass_gallons above uses SECONDS_PER_GALLON, which is known-wrong
-        # (see config.py). bypass_seconds is exposed raw below so callers that want
-        # the owner's separately-calibrated BYPASS_GPM (chlorine ppm estimate) can
-        # do their own conversion instead of relying on this figure.
+        # NOTE: bypass_secs above is relay-open wall time, NOT real flow — the
+        # valve can sit open for a long stretch with no water moving (well-recovery
+        # puffs, calling gaps). Callers must convert via real FFT-detected flow
+        # seconds (monitor.dosatron.sum_flow_seconds) x BYPASS_GPM, not this figure.
 
         # Pressure-HIGH windows (split at snapshot boundary via reset())
         pressure_windows = list(self.pressure_windows)
@@ -334,10 +336,9 @@ class SnapshotTracker:
             'float_always_full': float_always_full,
             'pressure_high_seconds': self.pressure_high_time,
             'pressure_high_percent': pressure_high_percent,
-            'estimated_gallons': estimated_gallons,  # TODO: remove once SECONDS_PER_GALLON is properly calibrated and bypass_gallons is validated
+            'estimated_gallons': estimated_gallons,  # TODO: remove once SECONDS_PER_GALLON is properly calibrated
             'purge_count': self.purge_count,
             'relay_status': relay_status,
-            'bypass_gallons': round(bypass_gallons, 2),
             'bypass_seconds': round(bypass_secs, 1),
             'dosatron_windows': dosatron_windows,
         }
@@ -1475,7 +1476,15 @@ class SimplifiedMonitor:
                         for ws, we in snapshot_data['dosatron_windows']
                     )
                     _dosatron_gal = round(snapshot_dosatron_gal * _DOSATRON_GPK, 2)
-                    _bypass_gal = snapshot_data['bypass_gallons']
+                    # Real FFT-detected flow seconds, NOT bypass relay-open time — the
+                    # valve can sit open for hours with water only actually moving in
+                    # short bursts (well-recovery puffs, calling gaps), so relay time
+                    # overstated gallons_in by ~3-8x here. Same fix already applied to
+                    # the chlorine ppm estimate on 2026-08-01; extended to gallons_in here.
+                    _bypass_flow_secs = _sum_bypass_flow_seconds(
+                        self.snapshot_tracker.start_time, current_time
+                    )
+                    _bypass_gal = round(_bypass_flow_secs / 60.0 * _get_calibrated_bypass_gpm(), 2)
                     _gallons_in = round(_dosatron_gal + _bypass_gal, 2)
                     _gallons_used = (
                         max(0.0, round(_gallons_in - tank_gallons_delta, 1))
@@ -1529,13 +1538,7 @@ class SimplifiedMonitor:
                     
                     # Chlorine ppm estimate: blend this window's dosatron/bypass
                     # delivery into the persisted estimate before the tracker resets.
-                    # Uses real FFT-detected flow seconds, NOT bypass_seconds (relay-
-                    # open time) — the valve can sit open with no float-calling demand
-                    # for long stretches while no water actually moves; using relay
-                    # time there overstated delivered gallons by ~15x on 2026-07-29.
-                    _bypass_flow_secs = _sum_bypass_flow_seconds(
-                        self.snapshot_tracker.start_time, current_time
-                    )
+                    # Reuses _bypass_flow_secs (real FFT-detected flow) computed above.
                     update_chlorine_ppm_estimate(
                         _dosatron_gal,
                         _bypass_flow_secs,
