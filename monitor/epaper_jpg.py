@@ -481,7 +481,7 @@ def render_epaper_jpg(
         _spark_pct    = [(_h / _t * 100) if _t > 0 else 0.0 for _h, _t in _spark]
         _bypass_flag  = [_bypass[i] > 0 for i in range(_n_buckets)]
         _pct_max      = max(_spark_pct) if any(_spark_pct) else 1.0
-        _BYPASS_COLOR = (210, 140, 40)   # orange — matches occupied color elsewhere
+        _BYPASS_COLOR = (210, 140, 40)   # orange — matches the main line's bypass color
 
         # Draw sparkline bars aligned with main graph width
         _gw = graph_right - graph_left
@@ -603,9 +603,11 @@ def render_epaper_jpg(
         graph_gallons = smoothed
 
     # ── Data line (no fill) ───────────────────────────────────────────────
-    _COLOR_OCCUPIED   = (210, 140,  40)  # warm orange-amber — occupied
+    _COLOR_OCCUPIED   = (195,  70,  90)  # rose-red — occupied
     _COLOR_UNOCCUPIED = ( 80, 200, 100)  # fresh green — unoccupied
-    _COLOR_BYPASS     = ( 60, 130, 200)  # blue — bypass, overrides occupied/unoccupied
+    _COLOR_BYPASS     = (210, 140,  40)  # orange — bypass; matches the duty-cycle
+                                          # sparkline's bypass color below, overrides
+                                          # occupied/unoccupied for this segment
     if len(graph_gallons) >= 2:
         points = []
         for i, g in enumerate(graph_gallons):
