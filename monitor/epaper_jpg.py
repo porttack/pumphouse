@@ -375,6 +375,7 @@ def render_epaper_jpg(
     # ── Snapshot data for graph ──────────────────────────────────────────
     graph_gallons:  list[float] = []
     graph_occupied: list[bool]  = []
+    graph_bypass:   list[bool]  = []
     try:
         cutoff = datetime.now() - timedelta(hours=hours)
         for row in rows:
@@ -382,6 +383,7 @@ def render_epaper_jpg(
                 if datetime.fromisoformat(row['timestamp']) >= cutoff:
                     graph_gallons.append(float(row['tank_gallons']))
                     graph_occupied.append(row.get('occupied', '').upper() == 'YES')
+                    graph_bypass.append(row.get('relay_bypass', '').upper() == 'ON')
             except Exception:
                 continue
     except Exception:
@@ -394,6 +396,10 @@ def render_epaper_jpg(
         if not graph_gallons or abs(graph_gallons[-1] - tank_gallons) >= 1.0:
             graph_gallons.append(tank_gallons)
             graph_occupied.append(is_occupied_now)
+            try:
+                graph_bypass.append(get_all_relay_status().get('bypass') == 'ON')
+            except Exception:
+                graph_bypass.append(graph_bypass[-1] if graph_bypass else False)
 
     # ── Y-axis range ─────────────────────────────────────────────────────
     g_min_raw  = min(graph_gallons) if len(graph_gallons) >= 2 else 0.0
@@ -599,6 +605,7 @@ def render_epaper_jpg(
     # ── Data line (no fill) ───────────────────────────────────────────────
     _COLOR_OCCUPIED   = (210, 140,  40)  # warm orange-amber — occupied
     _COLOR_UNOCCUPIED = ( 80, 200, 100)  # fresh green — unoccupied
+    _COLOR_BYPASS     = ( 60, 130, 200)  # blue — bypass, overrides occupied/unoccupied
     if len(graph_gallons) >= 2:
         points = []
         for i, g in enumerate(graph_gallons):
@@ -606,8 +613,9 @@ def render_epaper_jpg(
             y_val = graph_bottom - 1 - int((g - g_min) / g_range * (graph_h - 2))
             points.append((x, y_val))
         for i in range(len(points) - 1):
+            byp   = graph_bypass[i] if i < len(graph_bypass) else False
             occ   = graph_occupied[i] if i < len(graph_occupied) else False
-            color = _COLOR_OCCUPIED if occ else _COLOR_UNOCCUPIED
+            color = _COLOR_BYPASS if byp else (_COLOR_OCCUPIED if occ else _COLOR_UNOCCUPIED)
             draw.line([points[i], points[i + 1]], fill=color, width=2 * scale)
 
     # ── Text overlays: white, no backing ────────────────────────────────
