@@ -2698,21 +2698,22 @@ def control(token):
         success = set_bypass('OFF', debug=False)
         action_taken = "Bypass timer cancelled, bypass turned OFF"
     elif token == SECRET_BYPASS_CYCLE_TOKEN and SECRET_BYPASS_CYCLE_TOKEN:
+        on_h  = float(request.args.get('on',  BYPASS_CYCLE_ON_HOURS))
+        off_h = float(request.args.get('off', BYPASS_CYCLE_OFF_HOURS))
         cycle_info = get_bypass_cycle_info()
-        if cycle_info:
-            # Cycle is already running — stop it, leave bypass as-is
+        if cycle_info and cycle_info['on_hours'] == on_h and cycle_info['off_hours'] == off_h:
+            # This exact preset is already running — stop it, leave bypass as-is
             BYPASS_CYCLE_FILE.unlink(missing_ok=True)
             success = True
             action_taken = "Bypass cycle stopped"
         else:
-            # Start cycle: ON phase first
+            # Start (or switch to) this preset: ON phase first
             _cancel_all_bypass_modes()
-            on_h  = float(request.args.get('on',  BYPASS_CYCLE_ON_HOURS))
-            off_h = float(request.args.get('off', BYPASS_CYCLE_OFF_HOURS))
             next_trans = datetime.now() + timedelta(hours=on_h)
             _write_cycle(on_h, off_h, next_trans, 'OFF')
             success = set_bypass('ON', debug=False)
-            action_taken = f"Bypass cycle started ({on_h:.4g}h ON / {off_h:.4g}h OFF)"
+            verb = 'switched to' if cycle_info else 'started'
+            action_taken = f"Bypass cycle {verb} ({on_h:.4g}h ON / {off_h:.4g}h OFF)"
     elif token == SECRET_PURGE_TOKEN and SECRET_PURGE_TOKEN:
         # Trigger one-time purge immediately
         from monitor.purge import trigger_purge
