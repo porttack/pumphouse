@@ -748,13 +748,38 @@ def render_epaper_jpg(
         _dos_depth = estimate_dosing_tank_depth(conservative=True)
     except Exception:
         _dos_depth = None
+    _dos_y_top = graph_bottom - s(3)
     if _dos_depth is not None:
         _dos_text = f'{_dos_depth:.1f}'
         _db = draw.textbbox((0, 0), _dos_text, font=font_tiny)
         _dw, _dh = _db[2] - _db[0], _db[3] - _db[1]
+        _dos_y_top = graph_bottom - _dh - s(3) - _db[1]
         draw.text(
-            (graph_right - _dw - s(3) - _db[0], graph_bottom - _dh - s(3) - _db[1]),
+            (graph_right - _dw - s(3) - _db[0], _dos_y_top),
             _dos_text, font=font_tiny, fill=WHITE,
+        )
+
+    # ── Estimated chlorine ppm — same corner, directly above the dosing tank
+    # depth readout. Internal display only, same visibility as depth above.
+    # UNVALIDATED rough model — see monitor/chlorine.py and config.py.
+    try:
+        from monitor.chlorine import read_chlorine_ppm_state, blend_ppm
+        from monitor.dosatron import sum_flow_seconds
+        from monitor.bypass_calibration import get_calibrated_bypass_gpm
+        _ppm, _ppm_ts = read_chlorine_ppm_state()
+        if get_all_relay_status().get('bypass') == 'ON' and tank_gallons:
+            _flow_s = sum_flow_seconds(_ppm_ts, time.time())
+            _gal    = _flow_s / 60.0 * get_calibrated_bypass_gpm()
+            _ppm    = blend_ppm(_ppm, _gal, tank_gallons, 0.0)
+    except Exception:
+        _ppm = None
+    if _ppm is not None:
+        _ppm_text = f'{_ppm:.1f}ppm'
+        _pb = draw.textbbox((0, 0), _ppm_text, font=font_tiny)
+        _pw, _ph = _pb[2] - _pb[0], _pb[3] - _pb[1]
+        draw.text(
+            (graph_right - _pw - s(3) - _pb[0], _dos_y_top - _ph - s(2) - _pb[1]),
+            _ppm_text, font=font_tiny, fill=WHITE,
         )
 
     # ── "Save Water" overlay (white text; shown to owner, non-tenant, and public) ────
