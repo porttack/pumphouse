@@ -481,7 +481,7 @@ def render_epaper_jpg(
         _spark_pct    = [(_h / _t * 100) if _t > 0 else 0.0 for _h, _t in _spark]
         _bypass_flag  = [_bypass[i] > 0 for i in range(_n_buckets)]
         _pct_max      = max(_spark_pct) if any(_spark_pct) else 1.0
-        _BYPASS_COLOR = (210, 140, 40)   # orange — matches the main line's bypass color
+        _BYPASS_COLOR = (210, 140, 40)   # orange — same as the main line's occupied color
 
         # Draw sparkline bars aligned with main graph width
         _gw = graph_right - graph_left
@@ -603,11 +603,14 @@ def render_epaper_jpg(
         graph_gallons = smoothed
 
     # ── Data line (no fill) ───────────────────────────────────────────────
-    _COLOR_OCCUPIED   = (195,  70,  90)  # rose-red — occupied
-    _COLOR_UNOCCUPIED = ( 80, 200, 100)  # fresh green — unoccupied
-    _COLOR_BYPASS     = (210, 140,  40)  # orange — bypass; matches the duty-cycle
-                                          # sparkline's bypass color below, overrides
-                                          # occupied/unoccupied for this segment
+    # Original two-color scheme (orange=occupied, green=unoccupied) is unchanged.
+    # Bypass doesn't get a new hue - it darkens whichever of the two applies, so
+    # the line reads as "the same state, just in bypass" rather than a third
+    # unrelated color competing with the duty-cycle sparkline's orange=bypass.
+    _COLOR_OCCUPIED           = (210, 140,  40)  # warm orange-amber — occupied
+    _COLOR_UNOCCUPIED         = ( 80, 200, 100)  # fresh green — unoccupied
+    _COLOR_OCCUPIED_BYPASS    = (130,  85,  25)  # darker orange — occupied + bypass
+    _COLOR_UNOCCUPIED_BYPASS  = ( 45, 120,  60)  # darker green — unoccupied + bypass
     if len(graph_gallons) >= 2:
         points = []
         for i, g in enumerate(graph_gallons):
@@ -615,9 +618,12 @@ def render_epaper_jpg(
             y_val = graph_bottom - 1 - int((g - g_min) / g_range * (graph_h - 2))
             points.append((x, y_val))
         for i in range(len(points) - 1):
-            byp   = graph_bypass[i] if i < len(graph_bypass) else False
-            occ   = graph_occupied[i] if i < len(graph_occupied) else False
-            color = _COLOR_BYPASS if byp else (_COLOR_OCCUPIED if occ else _COLOR_UNOCCUPIED)
+            byp = graph_bypass[i] if i < len(graph_bypass) else False
+            occ = graph_occupied[i] if i < len(graph_occupied) else False
+            if occ:
+                color = _COLOR_OCCUPIED_BYPASS if byp else _COLOR_OCCUPIED
+            else:
+                color = _COLOR_UNOCCUPIED_BYPASS if byp else _COLOR_UNOCCUPIED
             draw.line([points[i], points[i + 1]], fill=color, width=2 * scale)
 
     # ── Text overlays: white, no backing ────────────────────────────────
