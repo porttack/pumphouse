@@ -25,6 +25,7 @@ from monitor.config import (
     NOTIFY_HIGH_PRESSURE_ENABLED, NOTIFY_HIGH_PRESSURE_USE_EMAIL,
     NOTIFY_PRESSURE_LOW_ENABLED, NOTIFY_PRESSURE_LOW_REQUIRES_FLOAT_CALLING, PRESSURE_LOW_WATCH_FILE,
     OVERRIDE_MANUAL_OFF_FILE, OVERRIDE_FILL_TARGET_FILE,
+    BYPASS_CYCLE_FILE, BYPASS_TIMER_FILE,
     NOTIFY_TANK_OUTAGE_ENABLED, NOTIFY_TANK_OUTAGE_THRESHOLD_MINUTES,
     NOTIFY_TANK_LEVEL_MIN_INCREASE,
     DASHBOARD_URL,
@@ -1230,6 +1231,39 @@ class SimplifiedMonitor:
                                             priority='high'
                                         )
                                         self.notification_manager.record_tank_full_alert(self.state.tank_gallons)
+
+                            # Same threshold/reading, extended to bypass — the duty
+                            # cycle (added 2026-08-20) runs bypass independently of
+                            # supply_override with no tank-level cap of its own, so a
+                            # bypass-ON stretch would otherwise run to its full
+                            # scheduled duration regardless of tank level.
+                            if (relay_status['bypass'] == 'ON' and
+                                self.state.tank_gallons is not None and
+                                self.state.tank_gallons >= self.override_shutoff_threshold):
+
+                                if self.debug:
+                                    print(f"  → Tank at {self.state.tank_gallons} gal (>= {self.override_shutoff_threshold}), turning off bypass...")
+
+                                from monitor.relay import set_bypass
+                                if set_bypass('OFF', debug=self.debug):
+                                    # Cancel any active cycle/timer so the watchdog
+                                    # doesn't turn bypass back on at its next scheduled
+                                    # transition regardless of tank level — requires a
+                                    # manual restart once there's room in the tank.
+                                    BYPASS_TIMER_FILE.unlink(missing_ok=True)
+                                    BYPASS_CYCLE_FILE.unlink(missing_ok=True)
+                                    _bp_msg = (f'Bypass safety shutoff: tank at {self.state.tank_gallons:.0f} gal '
+                                               f'(threshold: {self.override_shutoff_threshold}); cycle/timer cancelled')
+                                    self.log_state_event('OVERRIDE_SHUTOFF', _bp_msg)
+
+                                    if (NOTIFY_OVERRIDE_SHUTOFF and
+                                            self.notification_manager.can_notify('bypass_shutoff_safety')):
+                                        self.send_alert(
+                                            'NOTIFY_TANK_FULL',
+                                            f"{self.state.tank_gallons:.0f} gal - Bypass Safety Shutoff",
+                                            _bp_msg + '. Restart the cycle/timer manually once the tank has room.',
+                                            priority='high'
+                                        )
 
                     self.last_tank_check = current_time
 
