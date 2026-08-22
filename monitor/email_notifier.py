@@ -619,6 +619,20 @@ def fetch_system_status(debug=False):
         except Exception:
             pass
 
+        # Estimated main-tank chlorine residual + shock-dose sizing (rough model —
+        # see docs/chlorine-estimate.md). Paired with the live tank level so the
+        # dose reflects the volume actually in the tank right now.
+        chlorine = None
+        try:
+            from monitor.chlorine import read_chlorine_ppm_state, dose_summary
+            _ppm, _ = read_chlorine_ppm_state()
+            _tank_gal = (tank_data or {}).get('gallons')
+            chlorine = dose_summary(_ppm, _tank_gal)
+            chlorine['ppm'] = round(_ppm, 1)
+            chlorine['tank_gallons'] = _tank_gal
+        except Exception:
+            pass
+
         return {
             'tank': tank_data,
             'pressure': pressure,
@@ -636,6 +650,7 @@ def fetch_system_status(debug=False):
             'time_to_full': time_to_full,
             'wind_forecast': wind_forecast,
             'dosing_tank_depth_in': dosing_tank_depth_in,
+            'chlorine': chlorine,
         }
     except Exception as e:
         if debug:
@@ -678,6 +693,7 @@ def _get_daily_summary(n=14):
 
         has_income  = any(r.get('checkout_net_income')  for r in rows)
         has_weather = any(r.get('outdoor_temp_max')      for r in rows)
+        has_chlorine = any(r.get('chlorine_ppm_est')     for r in rows)
 
         def _fmt_date(v):
             try:
@@ -693,6 +709,15 @@ def _get_daily_summary(n=14):
             ('tank_rolling_gph_avg',      'GPH',    lambda v: f"{float(v):.1f}" if v else ''),
             ('pressure_high_pct_overall', 'P-Hi%',  lambda v: f"{float(v):.1f}" if v else ''),
         ]
+        if has_chlorine:
+            # Estimated tank residual, and fl oz of 12% hypochlorite to reach
+            # each dose target from it (see docs/chlorine-estimate.md).
+            cols.append(('chlorine_ppm_est', 'Cl~',
+                         lambda v: f"{float(v):.1f}" if v else ''))
+            cols.append(('chlorine_floz_to_15', 'oz\u219215',
+                         lambda v: f"{float(v):.0f}" if v else ''))
+            cols.append(('chlorine_floz_to_10', 'oz\u219210',
+                         lambda v: f"{float(v):.0f}" if v else ''))
         if has_income:
             cols.append(('checkout_net_income', 'Income',
                          lambda v: f"${float(v):.0f}" if v else ''))
@@ -742,6 +767,7 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
     reservation_list = status_data.get('reservations') if status_data else None
     ecobee_temp = status_data.get('ecobee_temp') if status_data else None
     dosing_tank_depth_in = status_data.get('dosing_tank_depth_in') if status_data else None
+    chlorine = status_data.get('chlorine') if status_data else None
 
     # Get the dashboard link to use in the email
     # Add totals parameter if secret token is configured
@@ -1089,6 +1115,27 @@ def build_html_email(subject, message, priority, dashboard_url, chart_url, statu
                         <div class="status-label">Dosing Tank (est.)</div>
                         <div class="status-value">{dosing_tank_depth_in:.1f}" / {_dos_full_in:.0f}"</div>
                         <div style="margin-top:2px;font-size:11px;color:#555;">from click count, not a sensor — see docs</div>
+                    </div>
+"""
+        # Main tank chlorine estimate + how much 12% hypochlorite to add to reach
+        # each target. Rough model (see docs/chlorine-estimate.md) — the dose is
+        # stated in fl oz and cups because that is what someone on site can measure.
+        if chlorine and chlorine.get('ppm') is not None:
+            _cl_ppm = chlorine['ppm']
+            _cl_color = '#f44336' if _cl_ppm < 4 else ('#ff9800' if _cl_ppm < 7 else '#4CAF50')
+            _hi, _lo = chlorine.get('floz_high'), chlorine.get('floz_low')
+            _dose_lines = []
+            if _hi is not None:
+                _dose_lines.append(f"&rarr;{chlorine['target_high']:.0f} ppm: <b>{_hi:.0f} fl oz</b> ({_hi/8:.1f} cup)")
+            if _lo is not None:
+                _dose_lines.append(f"&rarr;{chlorine['target_low']:.0f} ppm: {_lo:.0f} fl oz ({_lo/8:.1f} cup)")
+            _dose_html = ' &nbsp;|&nbsp; '.join(_dose_lines)
+            html += f"""
+                    <div class="status-item" style="border-left-color: {_cl_color};">
+                        <div class="status-label">Tank Chlorine (est.)</div>
+                        <div class="status-value">~{_cl_ppm:.1f} ppm?</div>
+                        <div style="margin-top:2px;font-size:12px;">{chlorine['percent']:.0f}% chlorine to add &mdash; {_dose_html}</div>
+                        <div style="margin-top:2px;font-size:11px;color:#555;">rough model, wide error bars — see docs</div>
                     </div>
 """
         # Float switch

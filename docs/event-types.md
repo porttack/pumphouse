@@ -53,6 +53,7 @@ All events are appended to `~/.local/share/pumphouse/events.csv` with columns:
 | Event type | Source | Description |
 |---|---|---|
 | `FULL_FLOW` | poll.py | Extended full-flow period detected (pressure ~100% continuously, or GPH surge); notes include start time, duration, gallons pumped, tank gain, and estimated GPH |
+| `CHLORINE_ADDED` | chlorine.py | Someone manually poured hypochlorite into the main tank (via `bin/add_chlorine.py` or the /water2 form); notes show amount, strength, and the ppm step |
 | `BYPASS_FLOW` | dosatron.py | Dosatron bypass valve is open and water is flowing through the bypass path |
 
 ---

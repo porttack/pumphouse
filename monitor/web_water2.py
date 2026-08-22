@@ -30,7 +30,7 @@ from monitor.config import (
 )
 from monitor.gpio_helpers import read_float_sensor, FLOAT_STATE_CALLING
 from monitor.relay import get_all_relay_status
-from monitor.chlorine import read_chlorine_ppm_state, blend_ppm
+from monitor.chlorine import read_chlorine_ppm_state, blend_ppm, dose_summary
 from monitor.bypass_calibration import get_calibrated_bypass_gpm, get_calibration_status
 
 water2_bp = Blueprint('water2', __name__)
@@ -85,6 +85,7 @@ def _puff_stats(click_ts, gpk, gap_threshold=120.0):
         'gap_avg_s':    round(sum(gaps) / len(gaps)) if gaps else None,
         'gpm':          gpm,
         'last_gallons': round(last[2] * gpk, 1),
+        'last_clicks':  last[2],
     }
 
 
@@ -104,8 +105,13 @@ def _click_times(start_unix: float, end_unix: float) -> 'list[float]':
 
     Clicks are the ground truth for "water is moving through the dosatron" — far
     more reliable than the pressure signal, which can stick HIGH for hours.
+
+    Restricted to PRESSURE_HIGH windows (mirrors dosatron.py::_sum_pressure_high_clicks,
+    the official per-snapshot dosatron_gallons count) so idle-noise blips picked up
+    while the pump is off don't show up as live "flow" here but not in the logged
+    gallons — previously this read every raw detection unfiltered.
     """
-    from monitor.dosatron import JSONL_FILE
+    from monitor.dosatron import JSONL_FILE, _pressure_high_windows
     out = []
     try:
         with open(JSONL_FILE, 'rb') as f:
@@ -126,24 +132,18 @@ def _click_times(start_unix: float, end_unix: float) -> 'list[float]':
     except Exception:
         pass
     out.sort()
-    return out
 
-
-def _click_duty_pct(click_ts: 'list[float]', win_start: float, win_end: float,
-                    bucket: float = 30.0) -> 'float | None':
-    """Duty cycle = fraction of `bucket`-second slots in the window with ≥1 click.
-
-    This is "% of time we're actually receiving water": slots with clicks are
-    pumping/flowing, empty slots are idle (between pump cycles, or valve closed)."""
-    span = win_end - win_start
-    if span <= 0:
-        return None
-    n_buckets = max(1, int((span + bucket - 1) // bucket))
-    filled = set()
-    for t in click_ts:
-        if win_start <= t <= win_end:
-            filled.add(int((t - win_start) // bucket))
-    return round(len(filled) / n_buckets * 100, 1)
+    windows = _pressure_high_windows(start_unix, end_unix)
+    if not windows:
+        return []
+    filtered = []
+    idx, n = 0, len(windows)
+    for t in out:
+        while idx < n and windows[idx][1] < t:
+            idx += 1
+        if idx < n and windows[idx][0] <= t <= windows[idx][1]:
+            filtered.append(t)
+    return filtered
 
 
 def _bypass_flow_records(start_unix: float, end_unix: float,
@@ -229,9 +229,9 @@ def _fill_window(float_calling: bool, now: float) -> 'tuple[float | None, float,
     if calling_ts is None:
         return None, now, None, None
     if float_calling:
-        return calling_ts, now, f'since calling ({round((now - calling_ts) / 60)}m)', calling_gal
+        return calling_ts, now, 'since calling', calling_gal
     win_end = full_ts if full_ts else now
-    return calling_ts, win_end, f'last fill ({round((win_end - calling_ts) / 60)}m)', calling_gal
+    return calling_ts, win_end, 'last fill', calling_gal
 
 
 @water2_bp.route('/api/flow_status')
@@ -269,8 +269,14 @@ def api_flow_status():
         'last_click_age_s':     None,
         'duty_cycle_pct':       None,
         'duty_window_label':    None,
+        'duty_window_start_ts': None,
+        'duty_window_elapsed_s': None,
         'duty_window_gallons':  None,
+        'duty_window_dosatron_gallons': None,
+        'duty_window_dosatron_clicks':  None,
+        'duty_window_bypass_gallons':   None,
         'house_used_gallons':   None,
+        'last_flow_clicks':     None,
         'puff_count':           None,
         'puff_on_avg_s':        None,
         'puff_gap_avg_s':       None,
@@ -347,12 +353,60 @@ def api_flow_status():
         display_ppm = blend_ppm(baseline_ppm, gallons_delivered, tank_gal, 0.0)
     result['chlorine_ppm_est'] = round(display_ppm, 1)
     result['chlorine_est_age_min'] = round((now - baseline_ts) / 60)
+    # How much 12% hypochlorite to pour in to reach each dose target, sized
+    # against the live tank volume. Same rough model as the ppm above, so treat
+    # these as planning figures — deliberately aimed above steady state because
+    # the house carbon filter strips the excess (see config.py CHLORINE_DOSE_*).
+    _dose = dose_summary(display_ppm, tank_gal)
+    result['chlorine_dose'] = {
+        k: (round(v, 1) if isinstance(v, float) else v) for k, v in _dose.items()
+    }
 
     win_start, win_end, label, win_start_gal = _fill_window(float_calling, now)
     result['duty_window_label'] = label
 
+    # ── Window totals — combine both delivery sources, since a fill window can
+    # span a mode switch (e.g. started on dosatron, dropped to bypass mid-fill,
+    # or vice versa) and each source only sees its own water. Computed from
+    # history regardless of the *current* relay state, unlike the live,
+    # mode-specific stats below.
+    win_clicks = []
+    if win_start:
+        result['duty_window_start_ts']  = datetime.fromtimestamp(win_start).isoformat()
+        result['duty_window_elapsed_s'] = round(win_end - win_start)
+
+        win_clicks = _click_times(win_start, win_end)
+        dos_gallons = round(len(win_clicks) * _GPK, 1)
+        result['duty_window_dosatron_gallons'] = dos_gallons
+        result['duty_window_dosatron_clicks']  = len(win_clicks)
+        dos_active_buckets = len({int((t - win_start) // 30) for t in win_clicks})
+        dos_active_s = dos_active_buckets * 30
+
+        bypass_records_win = _bypass_flow_records(win_start, win_end)
+        bypass_active_s = sum(min(r['end'], win_end) - max(r['start'], win_start)
+                              for r in bypass_records_win)
+        bypass_gallons = round(bypass_active_s / 60.0 * bypass_gpm, 1)
+        result['duty_window_bypass_gallons'] = bypass_gallons
+
+        received = round(dos_gallons + bypass_gallons, 1)
+        result['duty_window_gallons'] = received
+
+        win_len = win_end - win_start
+        if win_len > 0:
+            result['duty_cycle_pct'] = round(
+                min(dos_active_s + bypass_active_s, win_len) / win_len * 100, 1)
+
+        # House usage over the window by water balance: in − tank level change.
+        # Uses sensor readings for the level change (start = FLOAT_CALLING event,
+        # end = last sensor fetch / base of the estimate) so delivered water
+        # isn't double-counted on both sides.
+        tank_now_sensor = base_gal if base_gal is not None else result.get('tank_gallons')
+        if win_start_gal is not None and tank_now_sensor is not None:
+            used = received - (tank_now_sensor - win_start_gal)
+            result['house_used_gallons'] = round(max(0.0, used), 1)
+
     if not bypass_on:
-        # ── dosatron mode: everything from clicks ────────────────────────────
+        # ── dosatron mode: live flow/rate stats from clicks ──────────────────
         # Fetch at least the last 6 h so puff-cadence + delivered-rate stats have
         # several well-recovery cycles to average, plus the whole fill window.
         puff_window = 6 * 3600
@@ -372,36 +426,22 @@ def api_flow_status():
             c60 = sum(1 for t in clicks if t >= now - 60)
             result['gpm'] = round(c60 * _GPK, 2)
 
-        if win_start:
-            result['duty_cycle_pct'] = _click_duty_pct(clicks, win_start, win_end)
-
-            # Average GPM over the fill window's *active* (clicking) time — shown as
-            # the "last fill" rate when we're not currently flowing. Active time is
-            # counted from 30s buckets that contain a click (matches the duty calc).
-            win_clicks = [t for t in clicks if win_start <= t <= win_end]
-            # Total gallons received over the window (since calling / last fill).
-            received = round(len(win_clicks) * _GPK, 1)
-            result['duty_window_gallons'] = received
-            if win_clicks:
-                active_buckets = len({int((t - win_start) // 30) for t in win_clicks})
-                active_min = active_buckets * 30 / 60
-                if active_min > 0:
-                    result['last_gpm'] = round(len(win_clicks) * _GPK / active_min, 2)
-
-            # House usage over the window by water balance: in − tank level change.
-            # Uses sensor readings for the level change (start = FLOAT_CALLING event,
-            # end = last sensor fetch / base of the estimate) so dosatron clicks
-            # aren't double-counted on both sides.
-            tank_now_sensor = base_gal if base_gal is not None else result.get('tank_gallons')
-            if win_start_gal is not None and tank_now_sensor is not None:
-                used = received - (tank_now_sensor - win_start_gal)
-                result['house_used_gallons'] = round(max(0.0, used), 1)
+        # Average GPM over the fill window's *active* (clicking) time — shown as
+        # the "last fill" rate when we're not currently flowing. Active time is
+        # counted from 30s buckets that contain a click (matches the duty calc);
+        # win_clicks is the same window-scoped click list computed above.
+        if win_start and win_clicks:
+            active_buckets = len({int((t - win_start) // 30) for t in win_clicks})
+            active_min = active_buckets * 30 / 60
+            if active_min > 0:
+                result['last_gpm'] = round(len(win_clicks) * _GPK / active_min, 2)
 
         # ── Puff (well-recovery) cadence over the last 6 h ───────────────────
         recent = [t for t in clicks if t >= now - puff_window]
         pstats = _puff_stats(recent, _GPK)
         if pstats:
             result['last_flow_gallons'] = pstats['last_gallons']
+            result['last_flow_clicks']  = pstats['last_clicks']
             if pstats['n_puffs'] >= 2:
                 result['puff_count']     = pstats['n_puffs']
                 result['puff_on_avg_s']  = pstats['on_avg_s']
@@ -445,23 +485,6 @@ def api_flow_status():
             result['last_click_age_s']  = round(now - last['end'])
             result['last_flow_gallons'] = round(last['duration_s'] / 60.0 * bypass_gpm, 1)
 
-        if win_start:
-            win_records  = [r for r in records if r['end'] >= win_start]
-            flowing_secs = sum(min(r['end'], win_end) - max(r['start'], win_start)
-                               for r in win_records)
-            win_len = win_end - win_start
-            if win_len > 0:
-                result['duty_cycle_pct'] = round(min(flowing_secs, win_len) / win_len * 100, 1)
-
-            received = round(flowing_secs / 60.0 * bypass_gpm, 1)
-            result['duty_window_gallons'] = received
-
-            # House usage over the window by water balance (same as dosatron mode).
-            tank_now_sensor = base_gal if base_gal is not None else result.get('tank_gallons')
-            if win_start_gal is not None and tank_now_sensor is not None:
-                used = received - (tank_now_sensor - win_start_gal)
-                result['house_used_gallons'] = round(max(0.0, used), 1)
-
         # ── Flow-cycle cadence over the last 6 h (well recovery limits bypass
         # delivery the same way it limits dosatron delivery — same well) ──────
         recent = [r for r in records if r['start'] >= now - puff_window]
@@ -489,6 +512,69 @@ def api_flow_status():
     resp = jsonify(result)
     resp.headers['Cache-Control'] = 'no-store'
     return resp
+
+
+@water2_bp.route('/api/record_chlorine', methods=['POST'])
+def api_record_chlorine():
+    """Record a manual chlorine pour and step the persisted ppm estimate up.
+
+    Auth-gated (it mutates the running estimate). `hours_ago` supports logging a
+    pour after the fact — the bump is then decayed by the water that has moved
+    through the tank since. See docs/chlorine-estimate.md.
+    """
+    from flask import request, jsonify
+    try:
+        from monitor.web import check_auth
+        auth = request.authorization
+        if not auth or not check_auth(auth.username, auth.password):
+            return jsonify({'ok': False, 'error': 'authentication required'}), 401
+    except ImportError:
+        pass
+
+    data = request.get_json(silent=True) or request.form
+    try:
+        amount = float(data.get('amount'))
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'amount is required'}), 400
+
+    floz = amount * 8.0 if str(data.get('unit', 'floz')).lower() == 'cups' else amount
+    percent = data.get('percent')
+    try:
+        percent = float(percent) if percent not in (None, '') else None
+    except ValueError:
+        return jsonify({'ok': False, 'error': 'percent must be a number'}), 400
+
+    ts = None
+    hours_ago = data.get('hours_ago')
+    if hours_ago not in (None, '', '0'):
+        try:
+            from datetime import timedelta
+            ts = datetime.now() - timedelta(hours=float(hours_ago))
+        except ValueError:
+            return jsonify({'ok': False, 'error': 'hours_ago must be a number'}), 400
+
+    try:
+        from monitor.chlorine import record_addition
+        rec = record_addition(floz, percent=percent, ts=ts,
+                              note=(data.get('note') or '').strip()[:200],
+                              source='web')
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'could not record: {e}'}), 500
+
+    return jsonify({'ok': True, 'record': rec})
+
+
+@water2_bp.route('/api/chlorine_additions')
+def api_chlorine_additions():
+    """Recent manual chlorine pours, newest first."""
+    from flask import jsonify
+    try:
+        from monitor.chlorine import read_additions
+        return jsonify({'additions': read_additions(limit=20)[::-1]})
+    except Exception:
+        return jsonify({'additions': []})
 
 
 @water2_bp.route('/water2')
@@ -722,10 +808,25 @@ def water2_status():
       <span class="flow-label">Puffs:</span>
       <span class="flow-value" id="flow-puff-text">&mdash;</span>
     </div>
+    <div class="flow-row" id="flow-since-row" style="display:none">
+      <div style="width:10px"></div>
+      <span class="flow-label" id="flow-since-label">Since calling:</span>
+      <span class="flow-value" id="flow-since-text">&mdash;</span>
+    </div>
     <div class="flow-row" id="flow-duty-row" style="display:none">
       <div style="width:10px"></div>
-      <span class="flow-label" id="flow-duty-label">Duty:</span>
+      <span class="flow-label" id="flow-duty-label">Receiving water:</span>
       <span class="flow-value" id="flow-duty-text">&mdash;</span>
+    </div>
+    <div class="flow-row" id="flow-dosatron-row" style="display:none">
+      <div style="width:10px"></div>
+      <span class="flow-label">Dosatron water:</span>
+      <span class="flow-value" id="flow-dosatron-text">&mdash;</span>
+    </div>
+    <div class="flow-row" id="flow-bypassgal-row" style="display:none">
+      <div style="width:10px"></div>
+      <span class="flow-label">Bypass water:</span>
+      <span class="flow-value" id="flow-bypassgal-text">&mdash;</span>
     </div>
     <div class="flow-row" id="flow-used-row" style="display:none">
       <div style="width:10px"></div>
@@ -736,6 +837,32 @@ def water2_status():
       <div style="width:10px"></div>
       <span class="flow-label" title="Rough, unvalidated model — treat as an order-of-magnitude guide, not a precise reading">Est. chlorine (rough):</span>
       <span class="flow-value" id="flow-ppm-text">&mdash;</span>
+    </div>
+    <div class="flow-row" id="flow-dose-row" style="display:none">
+      <div style="width:10px"></div>
+      <span class="flow-label" title="Fluid ounces of 12% sodium hypochlorite to pour into the tank to reach each target, based on the rough estimate above and the current tank volume">12% chlorine to add:</span>
+      <span class="flow-value" id="flow-dose-text">&mdash;</span>
+    </div>
+    <div class="flow-row" id="flow-log-row">
+      <div style="width:10px"></div>
+      <span class="flow-label"><a href="#" id="cl-log-toggle" style="color:#1976d2;text-decoration:none">+ Log a chlorine pour</a></span>
+    </div>
+    <div id="cl-log-form" style="display:none;margin:6px 0 10px 10px;padding:8px;background:#f5f5f5;border-radius:4px;font-size:13px;max-width:420px">
+      <div style="margin-bottom:6px">
+        <input id="cl-amt" type="number" step="0.1" min="0" placeholder="amount" style="width:80px">
+        <select id="cl-unit"><option value="floz">fl oz</option><option value="cups">cups</option></select>
+        of
+        <input id="cl-pct" type="number" step="0.5" min="0" max="100" value="12" style="width:55px">%
+      </div>
+      <div style="margin-bottom:6px">
+        poured <input id="cl-ago" type="number" step="0.5" min="0" value="0" style="width:55px"> hours ago
+      </div>
+      <div style="margin-bottom:6px">
+        <input id="cl-note" type="text" placeholder="who poured it / why" style="width:96%">
+      </div>
+      <button id="cl-submit" type="button">Record pour</button>
+      <span id="cl-result" style="margin-left:8px"></span>
+      <div style="margin-top:6px;font-size:11px;color:#666">Steps the running estimate up. Auth required.</div>
     </div>
     <div class="flow-row" id="flow-eta-row" style="display:none">
       <div style="width:10px"></div>
@@ -843,10 +970,16 @@ def water2_status():
           const dot       = document.getElementById('flow-dot');
           const statusEl  = document.getElementById('flow-status-text');
           const gpmRow    = document.getElementById('flow-gpm-row');
+          const sinceRow  = document.getElementById('flow-since-row');
+          const sinceLabel = document.getElementById('flow-since-label');
+          const sinceEl   = document.getElementById('flow-since-text');
           const dutyRow   = document.getElementById('flow-duty-row');
-          const dutyLabel = document.getElementById('flow-duty-label');
           const gpmEl     = document.getElementById('flow-gpm-text');
           const dutyEl    = document.getElementById('flow-duty-text');
+          const dosRow    = document.getElementById('flow-dosatron-row');
+          const dosEl     = document.getElementById('flow-dosatron-text');
+          const bypGalRow = document.getElementById('flow-bypassgal-row');
+          const bypGalEl  = document.getElementById('flow-bypassgal-text');
           const tankRow   = document.getElementById('flow-tank-row');
           const tankEl    = document.getElementById('flow-tank-text');
           const updEl     = document.getElementById('flow-updated');
@@ -865,6 +998,9 @@ def water2_status():
             let s = 'Filling, between puffs (last flow ' + ago;
             if (d.last_flow_gallons !== null && d.last_flow_gallons !== undefined) {{
               s += ', ' + d.last_flow_gallons + ' gal';
+              if (d.last_flow_clicks !== null && d.last_flow_clicks !== undefined) {{
+                s += ' / ' + d.last_flow_clicks + ' clicks';
+              }}
             }}
             statusEl.textContent = s + ')';
           }} else {{
@@ -878,6 +1014,13 @@ def water2_status():
             if (m < 60) return sec ? (m + 'm ' + sec + 's') : (m + 'm');
             const h = Math.floor(m / 60), mm = m % 60;
             return mm ? (h + 'h ' + mm + 'm') : (h + 'h');
+          }};
+
+          // H:MM duration, e.g. 5025s -> "1:24"
+          const fmtHM = (s) => {{
+            if (s === null || s === undefined) return '';
+            const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+            return h + ':' + String(m).padStart(2, '0');
           }};
 
           // GPM: live rate while flowing; else puff-flow rate; else last fill avg.
@@ -938,17 +1081,49 @@ def water2_status():
             etaRow.style.display = 'none';
           }}
 
-          // Duty cycle (% of time receiving water) + gallons over the window
+          // Fill-window duration: "since calling" while still calling, or the
+          // last completed fill once full. Resets whenever the float re-enters
+          // CALLING (tank went full, or override dropped while not calling).
+          if (d.duty_window_start_ts && d.duty_window_elapsed_s !== null
+              && d.duty_window_elapsed_s !== undefined) {{
+            sinceRow.style.display = '';
+            const label = d.duty_window_label === 'last fill' ? 'Last fill:' : 'Since calling:';
+            sinceLabel.textContent = label;
+            const startDt = new Date(d.duty_window_start_ts);
+            const startStr = startDt.toLocaleString([], {{
+              month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+            }});
+            sinceEl.textContent = fmtHM(d.duty_window_elapsed_s) + ' (started ' + startStr + ')';
+          }} else {{
+            sinceRow.style.display = 'none';
+          }}
+
+          // Duty cycle: % of the window actively receiving water, from either source.
           if (d.duty_cycle_pct !== null && d.duty_cycle_pct !== undefined) {{
             dutyRow.style.display = '';
-            dutyLabel.textContent = 'Receiving water (' + (d.duty_window_label || '?') + '):';
-            let v = d.duty_cycle_pct.toFixed(0) + '%';
-            if (d.duty_window_gallons !== null && d.duty_window_gallons !== undefined) {{
-              v += ' · ' + d.duty_window_gallons + ' gal';
-            }}
-            dutyEl.textContent = v;
+            dutyEl.textContent = d.duty_cycle_pct.toFixed(0) + '%';
           }} else {{
             dutyRow.style.display = 'none';
+          }}
+
+          // Dosatron and bypass water are shown separately — a single fill window
+          // can span both if the mode switched partway through.
+          if (d.duty_window_dosatron_gallons !== null && d.duty_window_dosatron_gallons !== undefined) {{
+            dosRow.style.display = '';
+            let v = d.duty_window_dosatron_gallons + ' gal';
+            if (d.duty_window_dosatron_clicks !== null && d.duty_window_dosatron_clicks !== undefined) {{
+              v += ' (' + d.duty_window_dosatron_clicks + ' clicks)';
+            }}
+            dosEl.textContent = v;
+          }} else {{
+            dosRow.style.display = 'none';
+          }}
+
+          if (d.duty_window_bypass_gallons !== null && d.duty_window_bypass_gallons !== undefined) {{
+            bypGalRow.style.display = '';
+            bypGalEl.textContent = d.duty_window_bypass_gallons + ' gal';
+          }} else {{
+            bypGalRow.style.display = 'none';
           }}
 
           // House usage over the window (received − tank level change)
@@ -980,8 +1155,27 @@ def water2_status():
               pv += ' (updated ' + (d.chlorine_est_age_min < 1 ? 'just now' : d.chlorine_est_age_min + 'm ago') + ')';
             }}
             ppmEl.textContent = pv;
+            const doseRow = document.getElementById('flow-dose-row');
+            const doseEl  = document.getElementById('flow-dose-text');
+            const dz = d.chlorine_dose;
+            if (dz && dz.floz_high !== null && dz.floz_high !== undefined) {{
+              const cups = (n) => (n / 8).toFixed(1) + ' cup';
+              let dv = dz.floz_high > 0
+                ? '\u2192' + dz.target_high + ' ppm: ' + dz.floz_high.toFixed(0) + ' fl oz (' + cups(dz.floz_high) + ')'
+                : '\u2192' + dz.target_high + ' ppm: none needed';
+              if (dz.floz_low !== null && dz.floz_low !== undefined) {{
+                dv += '  |  \u2192' + dz.target_low + ' ppm: ' + (dz.floz_low > 0
+                  ? dz.floz_low.toFixed(0) + ' fl oz (' + cups(dz.floz_low) + ')'
+                  : 'none needed');
+              }}
+              doseEl.textContent = dv;
+              doseRow.style.display = '';
+            }} else {{
+              doseRow.style.display = 'none';
+            }}
           }} else {{
             ppmRow.style.display = 'none';
+            document.getElementById('flow-dose-row').style.display = 'none';
           }}
 
           // Tank level: while filling show the live estimate AND the sensor base it
@@ -1031,6 +1225,54 @@ def water2_status():
           document.getElementById('flow-updated').textContent = 'Flow status unavailable';
         }});
     }}
+
+    // ── manual chlorine pour logging ──────────────────────────────────────
+    document.getElementById('cl-log-toggle').addEventListener('click', (e) => {{
+      e.preventDefault();
+      const f = document.getElementById('cl-log-form');
+      const open = f.style.display === 'none';
+      f.style.display = open ? '' : 'none';
+      e.target.textContent = (open ? '\u2212' : '+') + ' Log a chlorine pour';
+    }});
+
+    document.getElementById('cl-submit').addEventListener('click', () => {{
+      const btn = document.getElementById('cl-submit');
+      const out = document.getElementById('cl-result');
+      const amt = parseFloat(document.getElementById('cl-amt').value);
+      if (!amt || amt <= 0) {{ out.style.color = '#c62828'; out.textContent = 'Enter an amount.'; return; }}
+      btn.disabled = true; out.style.color = '#666'; out.textContent = 'Recording\u2026';
+      fetch('/api/record_chlorine', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{
+          amount:    amt,
+          unit:      document.getElementById('cl-unit').value,
+          percent:   document.getElementById('cl-pct').value,
+          hours_ago: document.getElementById('cl-ago').value,
+          note:      document.getElementById('cl-note').value
+        }})
+      }})
+        .then(r => r.json().then(j => ({{ok: r.ok, j}})))
+        .then(({{ok, j}}) => {{
+          btn.disabled = false;
+          if (!ok || !j.ok) {{
+            out.style.color = '#c62828';
+            out.textContent = j.error || 'Failed.';
+            return;
+          }}
+          const rec = j.record;
+          out.style.color = '#2e7d32';
+          out.textContent = `Recorded: ${{rec.ppm_before.toFixed(1)}} \u2192 ${{rec.ppm_after.toFixed(1)}} ppm`;
+          document.getElementById('cl-amt').value = '';
+          document.getElementById('cl-note').value = '';
+          updateFlow();
+        }})
+        .catch(() => {{
+          btn.disabled = false;
+          out.style.color = '#c62828';
+          out.textContent = 'Request failed.';
+        }});
+    }});
 
     updateFlow();
     setInterval(updateFlow, 10000);

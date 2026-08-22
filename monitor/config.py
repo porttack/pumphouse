@@ -118,6 +118,30 @@ BYPASS_GPM = 4.0  # owner's rough field estimate of bypass delivery rate (2026-0
 # used until then, and if the calibration file is ever missing/corrupt.
 BYPASS_GPM_MIN_CALIBRATION_MINUTES = 60  # min accumulated real flow before trusting the calibrated value over BYPASS_GPM above
 
+# ── Chlorine shock-dose calculator (added 2026-08-22) ─────────────────────────
+# How much 12% sodium hypochlorite ("liquid chlorine"/pool chlorine) to pour into
+# the main tank to bring the estimated residual up to a target. Surfaced on
+# /water2, in the daily status email, and in daily.csv so a maintenance person can
+# be given a single number over the phone.
+#
+# CHLORINE_DOSE_PERCENT is read as TRADE percent — grams of available chlorine
+# (as Cl2) per 100 mL of product, which is how liquid chlorine is normally sold.
+# 12% trade = 120 g/L. If a jug is actually labeled 12% *by weight* it is slightly
+# stronger (~136 g/L), so the trade reading errs toward a marginally larger pour —
+# deliberate, since an aged jug loses strength and owner prefers overshoot (the
+# house carbon filter strips the excess, and getting maintenance on site is hard).
+CHLORINE_DOSE_PERCENT = 12.0        # label strength of the hypochlorite on hand
+CHLORINE_DOSE_TARGET_PPM = 15.0     # primary target — deliberately above steady state
+CHLORINE_DOSE_TARGET_PPM_ALT = 10.0 # secondary target, for comparison
+
+# Anchor for replaying the ppm estimate backwards over historical days (needed for
+# the per-day column in daily.csv — the live model only persists a single current
+# value). Set to the last manually-verified/reconstructed ppm and its timestamp.
+# NOTE: 4 tank turnovers wash out ~98% of any error here, so days more than ~10
+# days after the anchor barely depend on it (see docs/chlorine-estimate.md).
+CHLORINE_ANCHOR_PPM = 9.67
+CHLORINE_ANCHOR_TS = '2026-08-01T00:00:00'
+
 # Purge Configuration
 ENABLE_PURGE = False  # Enable automatic filter purging after every water delivery
 MIN_PURGE_INTERVAL = 3600  # Minimum seconds between purges (default: 3600 = 1 hour)

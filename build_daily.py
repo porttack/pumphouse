@@ -59,6 +59,9 @@ FIELDNAMES = [
     'gallons_end',              # tank level at end of day
     'gallons_net_change',
     'dosing_tank_depth_est_in', # estimated chlorine dosing tank depth, end of day (see docs/dosing-tank-calibration.md)
+    'chlorine_ppm_est',         # estimated tank residual at end of day (rough — see docs/chlorine-estimate.md)
+    'chlorine_floz_to_15',      # fl oz of 12% hypochlorite to reach 15 ppm from that estimate
+    'chlorine_floz_to_10',      # ditto, to reach 10 ppm
     'tank_rolling_gph_avg',     # avg fill rate during calling windows
     'pressure_high_pct_overall',
     'filter_health_ratio',      # avg(gph/pct_high) for bypass-off, unoccupied, non-checkout windows (5–50% band)
@@ -247,11 +250,32 @@ def summarize_day(date, rows, checkout_net_income=0.0, is_checkout=False):
     except Exception:
         pass
 
+    # Estimated chlorine residual at end of day, replayed from the config anchor
+    # (the live model only persists one current value), plus how much 12%
+    # hypochlorite it would take to bring the tank to each dose target.
+    chlorine_ppm_est = chlorine_floz_to_15 = chlorine_floz_to_10 = None
+    try:
+        from monitor.chlorine import ppm_series_by_day, dose_floz
+        from monitor.config import (CHLORINE_DOSE_TARGET_PPM,
+                                    CHLORINE_DOSE_TARGET_PPM_ALT)
+        chlorine_ppm_est = ppm_series_by_day().get(date)
+        if chlorine_ppm_est is not None:
+            _tank_end = gallons[-1]
+            _hi = dose_floz(chlorine_ppm_est, _tank_end, CHLORINE_DOSE_TARGET_PPM)
+            _lo = dose_floz(chlorine_ppm_est, _tank_end, CHLORINE_DOSE_TARGET_PPM_ALT)
+            chlorine_floz_to_15 = round(_hi, 1) if _hi is not None else None
+            chlorine_floz_to_10 = round(_lo, 1) if _lo is not None else None
+    except Exception:
+        pass
+
     return {
         'date':                      date,
         'gallons_in':                gallons_in_total,
         'gallons_used':              gallons_used_total,
         'dosing_tank_depth_est_in':  dosing_tank_depth_est_in,
+        'chlorine_ppm_est':          chlorine_ppm_est,
+        'chlorine_floz_to_15':       chlorine_floz_to_15,
+        'chlorine_floz_to_10':       chlorine_floz_to_10,
         'n_snapshots':               n,
         'hours_covered':             round(dur_all / 3600, 1),
         'gallons_start':             int(gallons[0]),
