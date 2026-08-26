@@ -1,6 +1,7 @@
 # Dosing Tank Depth Estimate
 
 _First calibrated: 2026-07-25, from a single measured interval (6/16 → 7/17)._
+_Recalibrated: 2026-08-25, pooling in a second measured interval (7/17 → 8/25)._
 
 ## Summary
 
@@ -54,11 +55,29 @@ liquid — the piston still clicks, but less chemical actually moves per click
 than the ratio setting implies.
 
 Rather than trust the dial math, `DOSING_TANK_CHEM_GAL_PER_CLICK` is
-calibrated directly against the real depth change:
+calibrated directly against the real depth change. As of 2026-08-25 a second
+real interval is available (maintenance visit measured 16.5", down from the
+7/17 22" anchor), so the constant now pools both intervals — total gallons
+lost across both, divided by total clicks across both — rather than resting
+on the original single data point:
 
 ```
-3.06 gal ÷ 22,101 clicks ≈ 0.0001385 gal/click
+Interval 1  6/16 → 7/17 (post-refill anchor 22"):  4.0 in × 0.765 = 3.0600 gal /  22,101 clicks  ≈ 0.0001385 gal/click
+Interval 2  7/17 → 8/25 (maintenance reading 16.5"): 5.5 in × 0.765 = 4.2075 gal /  65,577 clicks  ≈ 0.0000642 gal/click
+Pooled:                                             7.2675 gal / 87,678 clicks ≈ 0.00008289 gal/click
 ```
+
+Interval 2's rate alone is notably lower than interval 1's — consistent with
+the estimate having overstated real consumption through late July/August
+(the "known unreliable" note from 2026-07-25 in the project memory: the
+click-based estimate was reading well below the owner's physical-plausibility
+judgment, and the 8/25 physical reading confirms it). Pooling rather than
+switching outright to interval 2 alone follows this doc's original guidance
+below — averaging out one-off effects (a stretch of worse air-in-line
+behavior, a measurement error) instead of over-trusting whichever interval is
+most recent. If a third interval diverges from interval 2's rate similarly to
+how interval 2 diverged from interval 1, consider dropping interval 1
+entirely rather than continuing to pool it in — see "how to recalibrate" below.
 
 This bakes the air-loss effect (and any other systematic error) into the
 constant automatically, since it's anchored to what the tank actually lost,
@@ -92,12 +111,12 @@ tank:
 2. Set `DOSING_TANK_ANCHOR_DEPTH_IN` to that value.
 3. Set `DOSING_TANK_ANCHOR_TS` to the reading's timestamp (ISO 8601).
 
-Optionally, once a second real reading exists, recompute
-`DOSING_TANK_CHEM_GAL_PER_CLICK` from the gap between the two readings
-(depth change × gal/inch, divided by clicks in between) rather than
-continuing to rely on the single 6/16→7/17 data point above — the more
-intervals this is calibrated against, the more it averages out one-off air
-pockets vs. a genuinely wrong ratio.
+Optionally, once another real reading exists, recompute
+`DOSING_TANK_CHEM_GAL_PER_CLICK` by pooling in the new interval's (depth
+change × gal/inch) gallons and clicks with the running totals above — the
+more intervals this is calibrated against, the more it averages out one-off
+air pockets vs. a genuinely wrong ratio. Current running totals: 7.2675 gal
+/ 87,678 clicks (intervals 1+2 above).
 
 ## Where the estimate shows up
 
@@ -112,7 +131,7 @@ pockets vs. a genuinely wrong ratio.
 | `DOSING_TANK_DIAMETER_INCHES` | 15 | Estimated tank diameter |
 | `DOSING_TANK_GAL_PER_INCH` | 0.765 | Cylinder cross-section, gal/inch |
 | `DOSING_TANK_CAPACITY_GALLONS` | 15 | Rated capacity |
-| `DOSING_TANK_CHEM_GAL_PER_CLICK` | 0.0001385 | Empirical fudge factor (see derivation above) |
+| `DOSING_TANK_CHEM_GAL_PER_CLICK` | 0.00008289 | Empirical fudge factor, pooled across 2 intervals (see derivation above) |
 | `DOSING_TANK_CONSERVATIVE_MARGIN` | 1.25 | Safety inflation applied to estimated consumption |
-| `DOSING_TANK_ANCHOR_DEPTH_IN` | 22 | Last known physical depth reading (7/17 same-day refill to 22", not the pre-refill 19") |
-| `DOSING_TANK_ANCHOR_TS` | 2026-07-17T23:59:59 | Timestamp of that reading |
+| `DOSING_TANK_ANCHOR_DEPTH_IN` | 16.5 | Last known physical depth reading (2026-08-25 maintenance visit) |
+| `DOSING_TANK_ANCHOR_TS` | 2026-08-25T17:15:00 | Timestamp of that reading (approximate — visit time, not logged precisely) |

@@ -41,18 +41,21 @@ DOSING_TANK_CAPACITY_GALLONS = 15  # rated capacity (fill line sits below the ph
 
 # Empirical fudge factor: chemical gallons drawn from the dosing tank per
 # dosatron click (within pressure-HIGH windows only, same rule as GALLONS_PER_CLICK).
-# Derived from a single real-world calibration point, NOT the theoretical
-# injection-ratio math (dial ~0.07% implied only ~1.16 gal, well under the
-# ~3.06 gal the tank actually lost) — the gap is believed to be air in the
-# suction line causing the piston to draw air instead of liquid on some
-# strokes, so clicks alone understate real consumption. Using the *measured*
-# depth change instead of the dial ratio bakes that loss in automatically:
-#   6/16/26 23"  ->  7/17/26 19" (4" drop, ~3.06 gal @ 0.765 gal/in)
-#   over 22,101 dosatron clicks in that window
-#   -> 3.06 / 22101 ≈ 0.0001385 gal/click
+# Derived from real-world calibration points, NOT the theoretical
+# injection-ratio math (dial ~0.07% implies far less loss than measured) — the
+# gap is believed to be air in the suction line causing the piston to draw air
+# instead of liquid on some strokes, so clicks alone understate real
+# consumption. Using the *measured* depth change instead of the dial ratio
+# bakes that loss in automatically. Two intervals now, pooled (total gallons
+# lost / total clicks) rather than either alone, per docs/dosing-tank-calibration.md:
+#   6/16/26 23" -> 7/17/26 22"(refill anchor): 4" drop, 3.06 gal, 22,101 clicks
+#   7/17/26 22" -> 8/25/26 16.5" (maintenance): 5.5" drop, 4.2075 gal, 65,577 clicks
+#   pooled: 7.2675 gal / 87,678 clicks ≈ 0.00008289 gal/click
+# (interval 2 alone would be ≈0.0000642 gal/click — notably lower than interval
+# 1, consistent with the estimate having overstated consumption recently; see docs)
 # Revisit once the tank is physically re-measured against a fresh click count —
 # see docs/dosing-tank-calibration.md for the full derivation and how to redo it.
-DOSING_TANK_CHEM_GAL_PER_CLICK = 0.0001385
+DOSING_TANK_CHEM_GAL_PER_CLICK = 0.00008289
 
 # Extra safety margin applied on top of the fudge factor above when estimating
 # *current* depth (not applied when back-computing the fudge factor itself).
@@ -66,13 +69,11 @@ DOSING_TANK_CONSERVATIVE_MARGIN = 1.25
 # Update both values whenever someone physically checks the tank — this is
 # what keeps the estimate from drifting indefinitely on a single stale point.
 #
-# CORRECTED 2026-07-25: the 7/17 reading was 19" *before* a same-day refill —
-# owner topped it off to 22" on 7/17, so 22" (not 19") is the correct starting
-# point for anything estimated forward from that date. (19" is still the
-# right endpoint for the 6/16->7/17 fudge-factor derivation above, since that
-# calibration is about the decline *up to* the refill, not past it.)
-DOSING_TANK_ANCHOR_DEPTH_IN = 22
-DOSING_TANK_ANCHOR_TS       = "2026-07-17T23:59:59"
+# UPDATED 2026-08-25: maintenance visit measured 16.5" (was 22" on 7/17,
+# before this refill-corrected reading). This reading also became the second
+# calibration point used to repool DOSING_TANK_CHEM_GAL_PER_CLICK above.
+DOSING_TANK_ANCHOR_DEPTH_IN = 16.5
+DOSING_TANK_ANCHOR_TS       = "2026-08-25T17:15:00"
 
 # Ambient Weather Configuration
 ENABLE_AMBIENT_WEATHER = True  # Enable Ambient Weather integration
