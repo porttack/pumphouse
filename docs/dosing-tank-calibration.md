@@ -133,5 +133,5 @@ air pockets vs. a genuinely wrong ratio. Current running totals: 7.2675 gal
 | `DOSING_TANK_CAPACITY_GALLONS` | 15 | Rated capacity |
 | `DOSING_TANK_CHEM_GAL_PER_CLICK` | 0.00008289 | Empirical fudge factor, pooled across 2 intervals (see derivation above) |
 | `DOSING_TANK_CONSERVATIVE_MARGIN` | 1.25 | Safety inflation applied to estimated consumption |
-| `DOSING_TANK_ANCHOR_DEPTH_IN` | 16.5 | Last known physical depth reading (2026-08-25 maintenance visit) |
-| `DOSING_TANK_ANCHOR_TS` | 2026-08-25T17:15:00 | Timestamp of that reading (approximate — visit time, not logged precisely) |
+| `DOSING_TANK_ANCHOR_DEPTH_IN` | 21.5 | Last known physical depth reading — 16.5" measured, then refilled to 21.5" same 2026-08-25 maintenance visit |
+| `DOSING_TANK_ANCHOR_TS` | 2026-08-25T17:27:31 | Timestamp of the post-refill reading |

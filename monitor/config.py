@@ -70,10 +70,14 @@ DOSING_TANK_CONSERVATIVE_MARGIN = 1.25
 # what keeps the estimate from drifting indefinitely on a single stale point.
 #
 # UPDATED 2026-08-25: maintenance visit measured 16.5" (was 22" on 7/17,
-# before this refill-corrected reading). This reading also became the second
+# before this refill-corrected reading). That 16.5" reading became the second
 # calibration point used to repool DOSING_TANK_CHEM_GAL_PER_CLICK above.
-DOSING_TANK_ANCHOR_DEPTH_IN = 16.5
-DOSING_TANK_ANCHOR_TS       = "2026-08-25T17:15:00"
+#
+# REFILLED same visit, 2026-08-25: maintenance added chlorine, bringing the
+# tank to 21.5" — not a consumption interval, so NOT folded into the fudge
+# factor (same treatment as the 7/17 top-off). Anchor reset to this reading.
+DOSING_TANK_ANCHOR_DEPTH_IN = 21.5
+DOSING_TANK_ANCHOR_TS       = "2026-08-25T17:27:31"
 
 # Ambient Weather Configuration
 ENABLE_AMBIENT_WEATHER = True  # Enable Ambient Weather integration
