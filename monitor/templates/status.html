@@ -1132,7 +1132,7 @@
                             {% for week in month.weeks %}
                             <tr>
                                 {% for cell in week %}
-                                <td class="{{ cell.cls }}{% if cell.today %} cal-today{% endif %}"{% if cell.style %} style="{{ cell.style }}"{% endif %}>{{ cell.day or '' }}</td>
+                                <td class="{{ cell.cls }}{% if cell.today %} cal-today{% endif %}{% if cell.canceled %} cal-canceled{% endif %}"{% if cell.style %} style="{{ cell.style }}"{% endif %}{% if cell.title %} title="{{ cell.title }}"{% endif %}>{{ cell.day or '' }}</td>
                                 {% endfor %}
                             </tr>
                             {% endfor %}
@@ -1163,7 +1163,7 @@
                             {% for week in month.weeks %}
                             <tr>
                                 {% for cell in week %}
-                                <td class="{{ cell.cls }}{% if cell.today %} cal-today{% endif %}{% if cell.canceled %} cal-canceled{% endif %}"{% if cell.style %} style="{{ cell.style }}"{% endif %}{% if cell.canceled_title %} title="{{ cell.canceled_title }}"{% endif %}>{{ cell.day or '' }}</td>
+                                <td class="{{ cell.cls }}{% if cell.today %} cal-today{% endif %}{% if cell.canceled %} cal-canceled{% endif %}"{% if cell.style %} style="{{ cell.style }}"{% endif %}{% if cell.title %} title="{{ cell.title }}"{% endif %}>{{ cell.day or '' }}</td>
                                 {% endfor %}
                             </tr>
                             {% endfor %}

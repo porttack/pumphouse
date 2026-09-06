@@ -910,6 +910,10 @@ def build_calendar_months(all_reservations, num_months=19, start_year=None, star
 
     # day_info[date] = {'in': type, 'out': type, 'mid': type}  (keys present only when set)
     day_info = {}
+    # res_day_info[date] = list of {'guest','gross','net','nights'} — every actual
+    # reservation touching that day, for the hover tooltip (a turn day carries two:
+    # the departing and arriving guest).
+    res_day_info = {}
     monthly_income = {}
 
     for res in all_reservations:
@@ -923,21 +927,31 @@ def build_calendar_months(all_reservations, num_months=19, start_year=None, star
             continue
         day_type = _res_type(res)
 
+        try:
+            gross = float(res.get('Income', 0) or 0)
+            net = gross * (1 - MANAGEMENT_FEE_PERCENT / 100)
+        except (ValueError, TypeError):
+            gross = net = 0.0
+        res_entry = {
+            'guest': res.get('Guest', 'Unknown'),
+            'gross': gross,
+            'net': net,
+            'nights': res.get('Nights', '?'),
+        }
+
         day_info.setdefault(checkin,  {})['in']  = day_type
+        res_day_info.setdefault(checkin, []).append(res_entry)
         cur = checkin + timedelta(days=1)
         while cur < checkout:
             day_info.setdefault(cur, {})['mid'] = day_type
+            res_day_info.setdefault(cur, []).append(res_entry)
             cur += timedelta(days=1)
         day_info.setdefault(checkout, {})['out'] = day_type
+        res_day_info.setdefault(checkout, []).append(res_entry)
 
         if day_type != 'owner':
-            try:
-                gross = float(res.get('Income', 0) or 0)
-                net = gross * (1 - MANAGEMENT_FEE_PERCENT / 100)
-                mk = checkout.strftime('%Y-%m')
-                monthly_income[mk] = monthly_income.get(mk, 0) + net
-            except (ValueError, TypeError):
-                pass
+            mk = checkout.strftime('%Y-%m')
+            monthly_income[mk] = monthly_income.get(mk, 0) + net
 
     # canceled_day_info[date] = list of {'guest','days_before_checkin','still_paid'} —
     # every day the canceled booking would have covered, overlaid as a marker
@@ -1006,21 +1020,28 @@ def build_calendar_months(all_reservations, num_months=19, start_year=None, star
             row = []
             for day_num in week:
                 if day_num == 0:
-                    row.append({'day': None, 'cls': 'cal-pad', 'style': None, 'today': False, 'canceled': None})
+                    row.append({'day': None, 'cls': 'cal-pad', 'style': None, 'today': False, 'canceled': None, 'title': None})
                 else:
                     d = _date(yr, mo, day_num)
                     cls, style = _cell_appearance(d, d < today, is_current_month)
                     canceled = canceled_day_info.get(d)
-                    title = None
-                    if canceled:
-                        title = '; '.join(
+                    reservations = res_day_info.get(d)
+
+                    title_parts = []
+                    for r in (reservations or []):
+                        title_parts.append(
+                            f"{r['guest']}: gross ${r['gross']:,.0f}, net ${r['net']:,.0f} ({r['nights']}n)"
+                        )
+                    for c in (canceled or []):
+                        title_parts.append(
                             f"Canceled: {c['guest']}"
                             + (f" ({c['days_before_checkin']}d before check-in{', still paid' if c['still_paid'] else ''})"
                                if c['days_before_checkin'] is not None else '')
-                            for c in canceled
                         )
+                    title = '; '.join(title_parts) if title_parts else None
+
                     row.append({'day': day_num, 'cls': cls, 'style': style, 'today': d == today,
-                                'canceled': canceled, 'canceled_title': title})
+                                'canceled': canceled, 'title': title})
             week_rows.append(row)
         mk = first.strftime('%Y-%m')
         income = monthly_income.get(mk)
