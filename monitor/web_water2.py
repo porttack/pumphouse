@@ -876,8 +876,7 @@ def water2_status():
     .flow-dot.on  {{ background: #1e90ff; box-shadow: 0 0 6px #1e90ff; }}
     .flow-dot.off {{ background: #4a5568; }}
     .flow-label {{ color: #8fb3e8; }}
-    .flow-value {{ color: #cdd8f0; font-weight: 500; text-align: right; }}
-    .flow-value.wrap {{ text-align: left; }}
+    .flow-value {{ color: #cdd8f0; font-weight: 500; text-align: left; }}
     .flow-ts {{ font-size: 0.75rem; color: #4a6080; margin-top: 8px; }}
     .links {{
       font-size: 0.82rem;
@@ -904,7 +903,7 @@ def water2_status():
     <div class="flow-row">
       <div class="flow-dot" id="flow-dot"></div>
       <span class="flow-label">Flow:</span>
-      <span class="flow-value wrap" id="flow-status-text">&mdash;</span>
+      <span class="flow-value" id="flow-status-text">&mdash;</span>
     </div>
     <div class="flow-row" id="flow-gpm-row" style="display:none">
       <div style="width:10px"></div>
@@ -924,7 +923,7 @@ def water2_status():
     <div class="flow-row" style="font-size:0.78rem;">
       <div></div>
       <span class="flow-label">Window:</span>
-      <span class="flow-value" style="display:flex;gap:12px;flex-wrap:wrap;justify-content:flex-end;">
+      <span class="flow-value" style="display:flex;gap:12px;flex-wrap:wrap;">
         <a href="#" class="win-link active" data-win="calling" style="text-decoration:none;">Since calling</a>
         <a href="#" class="win-link" data-win="6h" style="text-decoration:none;">6h</a>
         <a href="#" class="win-link" data-win="12h" style="text-decoration:none;">12h</a>
