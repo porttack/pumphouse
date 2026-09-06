@@ -1183,7 +1183,7 @@ def water2_status():
             const unit = isBypass ? 'cycles' : 'puffs';
             puffEl.innerHTML = 'on ~' + fmtDur(d.puff_on_avg_s)
               + ', every ~' + fmtDur(d.puff_gap_avg_s)
-              + ' (<a href="/dosatron?hours=6" target="_blank" title="Listen to the audio behind this count">'
+              + ' (<a href="/dosatron?hours=6" target="_blank" style="color:#7aa4d8" title="Listen to the audio behind this count">'
               + d.puff_count + ' ' + unit + '/6h</a>)';
           }} else {{
             puffRow.style.display = 'none';
@@ -1247,7 +1247,7 @@ def water2_status():
             if (d.duty_window_dosatron_clicks !== null && d.duty_window_dosatron_clicks !== undefined) {{
               const dosLink = '/dosatron?start=' + encodeURIComponent(d.duty_window_start_ts || '')
                 + '&end=' + encodeURIComponent(new Date().toISOString());
-              v += ' (<a href="' + dosLink + '" target="_blank" title="Listen to the clicks behind this count">'
+              v += ' (<a href="' + dosLink + '" target="_blank" style="color:#7aa4d8" title="Listen to the clicks behind this count">'
                 + d.duty_window_dosatron_clicks + ' clicks</a>)';
             }}
             dosEl.innerHTML = v;
