@@ -375,6 +375,8 @@ def api_flow_status():
         'duty_window_dosatron_gallons': None,
         'duty_window_dosatron_clicks':  None,
         'duty_window_bypass_gallons':   None,
+        'duty_window_bypass_seconds':   None,
+        'duty_window_bypass_cycles':    None,
         'house_used_gallons':   None,
         'last_flow_clicks':     None,
         'puff_count':           None,
@@ -488,6 +490,8 @@ def api_flow_status():
                               for r in bypass_records_win)
         bypass_gallons = round(bypass_active_s / 60.0 * bypass_gpm, 1)
         result['duty_window_bypass_gallons'] = bypass_gallons
+        result['duty_window_bypass_seconds'] = round(bypass_active_s)
+        result['duty_window_bypass_cycles']  = len(bypass_records_win)
 
         received = round(dos_gallons + bypass_gallons, 1)
         result['duty_window_gallons'] = received
@@ -1150,6 +1154,18 @@ def water2_status():
             return h + ':' + String(m).padStart(2, '0');
           }};
 
+          // Full h/m/s duration, e.g. 4350s -> "1h 12m 30s"
+          const fmtHMS = (s) => {{
+            if (s === null || s === undefined) return '';
+            s = Math.round(s);
+            const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+            const parts = [];
+            if (h) parts.push(h + 'h');
+            if (m) parts.push(m + 'm');
+            if (sec || !parts.length) parts.push(sec + 's');
+            return parts.join(' ');
+          }};
+
           // GPM: live rate while flowing; else puff-flow rate; else last fill avg.
           // Bypass mode: flow *timing* is measured (audio); the rate is either
           // still the owner's assumed constant or, once enough clean-session
@@ -1257,7 +1273,18 @@ def water2_status():
 
           if (d.duty_window_bypass_gallons !== null && d.duty_window_bypass_gallons !== undefined) {{
             bypGalRow.style.display = '';
-            bypGalEl.textContent = d.duty_window_bypass_gallons + ' gal';
+            let bv = d.duty_window_bypass_gallons + ' gal';
+            if (d.duty_window_bypass_seconds !== null && d.duty_window_bypass_seconds !== undefined
+                && d.duty_window_bypass_cycles) {{
+              const avgS = d.duty_window_bypass_seconds / d.duty_window_bypass_cycles;
+              const bypLink = '/dosatron?start=' + encodeURIComponent(d.duty_window_start_ts || '')
+                + '&end=' + encodeURIComponent(new Date().toISOString());
+              bv += ' (<a href="' + bypLink + '" target="_blank" style="color:#7aa4d8" title="Listen to the flow recordings behind this">'
+                + fmtHMS(d.duty_window_bypass_seconds) + ' over ' + d.duty_window_bypass_cycles
+                + (d.duty_window_bypass_cycles === 1 ? ' cycle' : ' cycles')
+                + ', avg ~' + fmtHMS(avgS) + '</a>)';
+            }}
+            bypGalEl.innerHTML = bv;
           }} else {{
             bypGalRow.style.display = 'none';
           }}
