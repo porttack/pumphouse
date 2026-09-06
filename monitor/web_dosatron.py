@@ -158,8 +158,42 @@ def _atomic_write(path: str, data: dict):
     os.replace(tmp, path)
 
 
-def _read_detections(hours: int = 24) -> list:
-    cutoff = datetime.now() - timedelta(hours=hours)
+def _parse_dt(s: 'str | None'):
+    """Parse an ISO 8601 datetime string, dropping tzinfo. None on failure/absence."""
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=None)
+        return dt
+    except Exception:
+        return None
+
+
+def _resolve_window(default_hours: float = 24):
+    """Parse start/end/hours query params into (start_dt, end_dt).
+
+    Explicit start/end (ISO 8601) take precedence — used when linking in from
+    elsewhere (e.g. /water2) with a specific duty window. Otherwise hours is
+    a duration back from end (or from now, if end isn't given either), so the
+    existing quick-refresh buttons/auto-refresh keep working unchanged.
+    """
+    end_dt = _parse_dt(request.args.get('end')) or datetime.now()
+    start_dt = _parse_dt(request.args.get('start'))
+    if start_dt is None:
+        try:
+            hours = float(request.args.get('hours', default_hours))
+        except (TypeError, ValueError):
+            hours = default_hours
+        start_dt = end_dt - timedelta(hours=hours)
+    return start_dt, end_dt
+
+
+def _read_detections(hours: int = 24, start_dt=None, end_dt=None) -> list:
+    if start_dt is None and end_dt is None:
+        end_dt = datetime.now()
+        start_dt = end_dt - timedelta(hours=hours)
     rows = []
     try:
         with open(JSONL_FILE) as f:
@@ -172,7 +206,7 @@ def _read_detections(hours: int = 24) -> list:
                     ts = datetime.fromisoformat(rec["ts"])
                     if ts.tzinfo is not None:
                         ts = ts.replace(tzinfo=None)
-                    if ts >= cutoff:
+                    if start_dt <= ts <= end_dt:
                         rows.append(rec)
                 except Exception:
                     pass
@@ -181,8 +215,10 @@ def _read_detections(hours: int = 24) -> list:
     return rows
 
 
-def _read_cycles(hours: int = 24) -> list:
-    cutoff = datetime.now() - timedelta(hours=hours)
+def _read_cycles(hours: int = 24, start_dt=None, end_dt=None) -> list:
+    if start_dt is None and end_dt is None:
+        end_dt = datetime.now()
+        start_dt = end_dt - timedelta(hours=hours)
     rows = []
     try:
         with open(CYCLES_JSONL) as f:
@@ -195,7 +231,7 @@ def _read_cycles(hours: int = 24) -> list:
                     ts = datetime.fromisoformat(rec["high_ts"])
                     if ts.tzinfo is not None:
                         ts = ts.replace(tzinfo=None)
-                    if ts >= cutoff:
+                    if start_dt <= ts <= end_dt:
                         rows.append(rec)
                 except Exception:
                     pass
@@ -204,8 +240,10 @@ def _read_cycles(hours: int = 24) -> list:
     return rows
 
 
-def _read_flow_cycles(hours: int = 24) -> list:
-    cutoff = datetime.now() - timedelta(hours=hours)
+def _read_flow_cycles(hours: int = 24, start_dt=None, end_dt=None) -> list:
+    if start_dt is None and end_dt is None:
+        end_dt = datetime.now()
+        start_dt = end_dt - timedelta(hours=hours)
     rows = []
     try:
         with open(FLOW_CYCLES_JSONL) as f:
@@ -218,7 +256,7 @@ def _read_flow_cycles(hours: int = 24) -> list:
                     ts = datetime.fromisoformat(rec["start_ts"])
                     if ts.tzinfo is not None:
                         ts = ts.replace(tzinfo=None)
-                    if ts >= cutoff:
+                    if start_dt <= ts <= end_dt:
                         rows.append(rec)
                 except Exception:
                     pass
@@ -272,9 +310,11 @@ def api_status():
 
 @dosatron_bp.route("/api/dosatron/cycles")
 def api_cycles():
-    hours        = int(request.args.get("hours", 24))
+    start_dt, end_dt = _resolve_window()
     cycle_labels = _read_labels(CYCLE_LABELS)
-    rows         = _read_cycles(hours=max(hours, 48))  # need extra history for duty calc
+    # Pad the lookback so the duty-cycle calc has a prior cycle to diff against
+    # even when the requested window starts mid-history.
+    rows         = _read_cycles(start_dt=start_dt - timedelta(hours=24), end_dt=end_dt)
     result       = []
 
     # Sort by high_ts ascending so we can compute cycle period from consecutive highs
@@ -291,10 +331,10 @@ def api_cycles():
         pass
 
     for i, rec in enumerate(sorted_rows):
-        # Only return cycles within the requested hours window
+        # Only return cycles within the requested window
         try:
             high_dt = datetime.fromisoformat(rec["high_ts"])
-            if (datetime.now() - high_dt).total_seconds() > hours * 3600:
+            if not (start_dt <= high_dt <= end_dt):
                 continue
         except Exception:
             pass
@@ -337,7 +377,8 @@ def api_cycles():
         })
 
     result.reverse()   # newest first
-    return jsonify({"cycles": result})
+    return jsonify({"cycles": result,
+                    "window": {"start": start_dt.isoformat(), "end": end_dt.isoformat()}})
 
 
 @dosatron_bp.route("/api/dosatron/cycles/<path:filename>")
@@ -372,9 +413,9 @@ def api_cycle_manual_count(filename):
 
 @dosatron_bp.route("/api/dosatron/detections")
 def api_detections():
-    hours  = int(request.args.get("hours", 24))
+    start_dt, end_dt = _resolve_window()
     labels = _read_labels(LABELS_FILE)
-    rows   = _read_detections(hours)
+    rows   = _read_detections(start_dt=start_dt, end_dt=end_dt)
     result = []
     for rec in reversed(rows):
         clip = rec.get("clip", "")
@@ -394,6 +435,7 @@ def api_detections():
     return jsonify({
         "detections": result,
         "summary": {"total": total, "labeled": labeled, "clicks": clicks, "noise": noise},
+        "window": {"start": start_dt.isoformat(), "end": end_dt.isoformat()},
     })
 
 
@@ -515,9 +557,9 @@ def api_prediction():
 
 @dosatron_bp.route("/api/dosatron/flow_cycles")
 def api_flow_cycles():
-    hours  = int(request.args.get("hours", 24))
+    start_dt, end_dt = _resolve_window()
     labels = _read_labels(FLOW_CYCLE_LABELS)
-    rows   = _read_flow_cycles(hours)
+    rows   = _read_flow_cycles(start_dt=start_dt, end_dt=end_dt)
     result = []
     for rec in reversed(rows):
         fn     = rec.get("audio_file", "")
@@ -530,7 +572,8 @@ def api_flow_cycles():
             "truncated":  rec.get("truncated", False),
             "verified":   labels.get(fn) or labels.get(resolved_fn),
         })
-    return jsonify({"flow_cycles": result})
+    return jsonify({"flow_cycles": result,
+                    "window": {"start": start_dt.isoformat(), "end": end_dt.isoformat()}})
 
 
 @dosatron_bp.route("/api/dosatron/flow_cycles/<path:filename>")

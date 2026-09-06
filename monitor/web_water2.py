@@ -1181,9 +1181,10 @@ def water2_status():
           if (d.puff_count) {{
             puffRow.style.display = '';
             const unit = isBypass ? 'cycles' : 'puffs';
-            puffEl.textContent = 'on ~' + fmtDur(d.puff_on_avg_s)
+            puffEl.innerHTML = 'on ~' + fmtDur(d.puff_on_avg_s)
               + ', every ~' + fmtDur(d.puff_gap_avg_s)
-              + ' (' + d.puff_count + ' ' + unit + '/6h)';
+              + ' (<a href="/dosatron?hours=6" target="_blank" title="Listen to the audio behind this count">'
+              + d.puff_count + ' ' + unit + '/6h</a>)';
           }} else {{
             puffRow.style.display = 'none';
           }}
@@ -1244,9 +1245,12 @@ def water2_status():
             dosRow.style.display = '';
             let v = d.duty_window_dosatron_gallons + ' gal';
             if (d.duty_window_dosatron_clicks !== null && d.duty_window_dosatron_clicks !== undefined) {{
-              v += ' (' + d.duty_window_dosatron_clicks + ' clicks)';
+              const dosLink = '/dosatron?start=' + encodeURIComponent(d.duty_window_start_ts || '')
+                + '&end=' + encodeURIComponent(new Date().toISOString());
+              v += ' (<a href="' + dosLink + '" target="_blank" title="Listen to the clicks behind this count">'
+                + d.duty_window_dosatron_clicks + ' clicks</a>)';
             }}
-            dosEl.textContent = v;
+            dosEl.innerHTML = v;
           }} else {{
             dosRow.style.display = 'none';
           }}

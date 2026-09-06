@@ -118,6 +118,13 @@
     .collapsible-body.open { display: block; }
     .empty-state { color: #666; text-align: center; padding: 24px; font-size: 14px; }
     #refreshStatus { color: #888; font-size: 12px; }
+    /* time range */
+    .range-bar { padding: 10px 20px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .range-label { color: #888; font-size: 12px; }
+    .range-btn { background: #333; border: 1px solid #555; color: #aaa; }
+    .range-btn:hover { border-color: #888; color: #ccc; }
+    .range-btn.active { background: #4CAF50; border-color: #4CAF50; color: #000; }
+    #rangeCustomLabel { color: #ccc; font-size: 12px; margin-left: 4px; }
   </style>
 </head>
 <body>
@@ -126,6 +133,16 @@
   <div class="subtitle">
     <a href="/">← dashboard</a> &nbsp;|&nbsp;
     <span id="refreshStatus">loading…</span>
+  </div>
+
+  <!-- Time range -->
+  <div class="section range-bar">
+    <span class="range-label">Time range:</span>
+    <button class="btn btn-sm range-btn" data-hours="6">6h</button>
+    <button class="btn btn-sm range-btn" data-hours="24">24h</button>
+    <button class="btn btn-sm range-btn" data-hours="48">48h</button>
+    <button class="btn btn-sm range-btn" data-hours="168">7d</button>
+    <span id="rangeCustomLabel"></span>
   </div>
 
   <!-- Live listen -->
@@ -188,7 +205,7 @@
   <!-- Pressure cycle recordings -->
   <div class="section">
     <h2>
-      Pressure Cycles — last 24 h
+      Pressure Cycles — <span id="cyclesRangeLabel">last 24 h</span>
       <button class="btn btn-sm" onclick="loadAll()">↻ refresh</button>
     </h2>
     <p style="color:#888; font-size:12px; margin-bottom:12px;">
@@ -204,7 +221,7 @@
   <!-- Individual click calibration (collapsible) -->
   <div class="section">
     <h2>
-      Click Calibration — last 24 h
+      Click Calibration — <span id="calibRangeLabel">last 24 h</span>
       <button class="collapsible-toggle" onclick="toggleCalib(this)">show ▾</button>
     </h2>
     <div id="calibBody" class="collapsible-body">
@@ -220,7 +237,7 @@
   <!-- Bypass flow cycles -->
   <div class="section">
     <h2>
-      Bypass Flow Cycles — last 24 h
+      Bypass Flow Cycles — <span id="flowRangeLabel">last 24 h</span>
       <button class="btn btn-sm" onclick="loadFlow()">↻ refresh</button>
     </h2>
     <p style="color:#888; font-size:12px; margin-bottom:12px;">
@@ -248,12 +265,67 @@ const fmt = iso => {
 };
 const fmtDur = s => s >= 60 ? `${(s/60).toFixed(1)} min` : `${Math.round(s)} s`;
 
+// ── time range ───────────────────────────────────────────────────────────────
+// Either an explicit start/end (arrived here via a link, e.g. from /water2's
+// duty window) or a plain hours-back-from-now preset. Presets stay live
+// (always "now" relative); a linked-in start/end is a fixed point in time.
+const initParams = new URLSearchParams(location.search);
+let currentWindow = initParams.get('start')
+  ? { start: initParams.get('start'), end: initParams.get('end') || null, hours: null }
+  : { start: null, end: null, hours: initParams.get('hours') || '24' };
+
+function windowQS() {
+  if (currentWindow.start) {
+    let qs = 'start=' + encodeURIComponent(currentWindow.start);
+    if (currentWindow.end) qs += '&end=' + encodeURIComponent(currentWindow.end);
+    return qs;
+  }
+  return 'hours=' + currentWindow.hours;
+}
+
+function rangeText() {
+  if (currentWindow.start) {
+    return fmt(currentWindow.start) + ' → ' + (currentWindow.end ? fmt(currentWindow.end) : 'now');
+  }
+  const h = Number(currentWindow.hours);
+  return 'last ' + (h === 168 ? '7 d' : h + ' h');
+}
+
+function updateRangeUI() {
+  document.querySelectorAll('.range-btn').forEach(b => {
+    b.classList.toggle('active', !currentWindow.start && currentWindow.hours === b.dataset.hours);
+  });
+  document.getElementById('rangeCustomLabel').textContent = currentWindow.start
+    ? '(custom: ' + rangeText() + ')' : '';
+  const label = rangeText();
+  document.getElementById('cyclesRangeLabel').textContent = label;
+  document.getElementById('calibRangeLabel').textContent = label;
+  document.getElementById('flowRangeLabel').textContent = label;
+}
+
+function setRangeHours(hours) {
+  currentWindow = { start: null, end: null, hours: String(hours) };
+  const params = new URLSearchParams(location.search);
+  params.delete('start'); params.delete('end');
+  params.set('hours', hours);
+  history.replaceState(null, '', '?' + params.toString());
+  updateRangeUI();
+  loadAll();
+  loadFlow();
+  if (calibLoaded) loadCalib();
+}
+
+document.querySelectorAll('.range-btn').forEach(b => {
+  b.addEventListener('click', () => setRangeHours(b.dataset.hours));
+});
+updateRangeUI();
+
 async function loadAll() {
   document.getElementById('refreshStatus').textContent = 'refreshing…';
   try {
     const [statusRes, cyclesRes, predRes] = await Promise.all([
       fetch('/api/dosatron/status'),
-      fetch('/api/dosatron/cycles?hours=24'),
+      fetch('/api/dosatron/cycles?' + windowQS()),
       fetch('/api/dosatron/prediction'),
     ]);
     const status    = await statusRes.json();
@@ -313,7 +385,7 @@ async function loadAll() {
 function renderCycles(cycles) {
   const el = document.getElementById('cycleList');
   if (!cycles.length) {
-    el.innerHTML = '<div class="empty-state">No pressure cycles recorded in the last 24 hours.</div>';
+    el.innerHTML = '<div class="empty-state">No pressure cycles recorded for ' + rangeText() + '.</div>';
     return;
   }
   el.innerHTML = cycles.map(c => cycleCard(c)).join('');
@@ -321,12 +393,12 @@ function renderCycles(cycles) {
 
 async function loadFlow() {
   try {
-    const res = await fetch('/api/dosatron/flow_cycles?hours=24');
+    const res = await fetch('/api/dosatron/flow_cycles?' + windowQS());
     const data = await res.json();
     const el = document.getElementById('flowList');
     const cycles = data.flow_cycles || [];
     if (!cycles.length) {
-      el.innerHTML = '<div class="empty-state">No bypass flow cycles in the last 24 hours.</div>';
+      el.innerHTML = '<div class="empty-state">No bypass flow cycles for ' + rangeText() + '.</div>';
       return;
     }
     el.innerHTML = cycles.map(c => flowCard(c)).join('');
@@ -484,7 +556,7 @@ function toggleCalib(btn) {
 
 async function loadCalib() {
   try {
-    const res = await fetch('/api/dosatron/detections?hours=24');
+    const res = await fetch('/api/dosatron/detections?' + windowQS());
     const data = await res.json();
     renderDetections(data.detections || []);
   } catch(e) {
@@ -496,7 +568,7 @@ async function loadCalib() {
 function renderDetections(detections) {
   const el = document.getElementById('detectionList');
   if (!detections.length) {
-    el.innerHTML = '<div class="empty-state">No individual detections in last 24 h.</div>';
+    el.innerHTML = '<div class="empty-state">No individual detections for ' + rangeText() + '.</div>';
     return;
   }
   el.innerHTML = detections.map(d => detCard(d)).join('');
