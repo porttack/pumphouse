@@ -374,6 +374,8 @@ def api_flow_status():
         'duty_window_gallons':  None,
         'duty_window_dosatron_gallons': None,
         'duty_window_dosatron_clicks':  None,
+        'duty_window_dosatron_seconds': None,
+        'duty_window_dosatron_cycles':  None,
         'duty_window_bypass_gallons':   None,
         'duty_window_bypass_seconds':   None,
         'duty_window_bypass_cycles':    None,
@@ -484,6 +486,14 @@ def api_flow_status():
         result['duty_window_dosatron_clicks']  = len(win_clicks)
         dos_active_buckets = len({int((t - win_start) // 30) for t in win_clicks})
         dos_active_s = dos_active_buckets * 30
+
+        # Pump on/off cycles (pressure-HIGH windows, ground truth from events.csv —
+        # same source _click_times uses to filter clicks) for the "N cycles, avg ~Ms"
+        # display, mirroring the bypass flow-cycle breakdown below.
+        from monitor.dosatron import _pressure_high_windows
+        dos_cycle_windows = _pressure_high_windows(win_start, win_end)
+        result['duty_window_dosatron_seconds'] = round(sum(e - s for s, e in dos_cycle_windows))
+        result['duty_window_dosatron_cycles']  = len(dos_cycle_windows)
 
         bypass_records_win = _bypass_flow_records(win_start, win_end)
         bypass_active_s = sum(min(r['end'], win_end) - max(r['start'], win_start)
@@ -1263,8 +1273,16 @@ def water2_status():
             if (d.duty_window_dosatron_clicks !== null && d.duty_window_dosatron_clicks !== undefined) {{
               const dosLink = '/dosatron?start=' + encodeURIComponent(d.duty_window_start_ts || '')
                 + '&end=' + encodeURIComponent(new Date().toISOString());
+              let detail = d.duty_window_dosatron_clicks + ' clicks';
+              if (d.duty_window_dosatron_seconds !== null && d.duty_window_dosatron_seconds !== undefined
+                  && d.duty_window_dosatron_cycles) {{
+                const avgS = d.duty_window_dosatron_seconds / d.duty_window_dosatron_cycles;
+                detail += ', ' + fmtHMS(d.duty_window_dosatron_seconds) + ' over ' + d.duty_window_dosatron_cycles
+                  + (d.duty_window_dosatron_cycles === 1 ? ' cycle' : ' cycles')
+                  + ', avg ~' + fmtHMS(avgS);
+              }}
               v += ' (<a href="' + dosLink + '" target="_blank" style="color:#7aa4d8" title="Listen to the clicks behind this count">'
-                + d.duty_window_dosatron_clicks + ' clicks</a>)';
+                + detail + '</a>)';
             }}
             dosEl.innerHTML = v;
           }} else {{
