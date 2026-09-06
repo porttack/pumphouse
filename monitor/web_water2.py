@@ -100,6 +100,41 @@ def _read_events_tail_raw(chunk: int = 262144) -> str:
         return ''
 
 
+def _tail_covering(path, start_unix: float, ts_key: str, min_chunk: int = 262144) -> bytes:
+    """Tail-read `path`, growing the read size until the earliest line's
+    `ts_key` timestamp is <= start_unix (or the whole file has been read).
+
+    A fixed-size tail read silently truncates once a requested window (e.g. a
+    multi-day "since calling" fill window) outlives what that fixed byte count
+    covers — the returned data then only reflects the most recent slice of the
+    file, not the actual window, without any error or empty result to flag it.
+    Growing the chunk guarantees the read reaches back to start_unix.
+    """
+    try:
+        with open(path, 'rb') as f:
+            f.seek(0, 2)
+            file_size = f.tell()
+            chunk = min_chunk
+            while True:
+                read_from = max(0, file_size - chunk)
+                f.seek(read_from)
+                data = f.read()
+                if read_from == 0:
+                    return data
+                nl = data.find(b'\n')
+                if nl != -1:
+                    try:
+                        rec = json.loads(data[:nl].strip())
+                        first_ts = datetime.fromisoformat(rec[ts_key]).timestamp()
+                        if first_ts <= start_unix:
+                            return data
+                    except Exception:
+                        pass
+                chunk = min(chunk * 4, file_size)
+    except Exception:
+        return b''
+
+
 def _click_times(start_unix: float, end_unix: float) -> 'list[float]':
     """Return sorted unix timestamps of dosatron clicks in [start,end] via tail read.
 
@@ -114,10 +149,7 @@ def _click_times(start_unix: float, end_unix: float) -> 'list[float]':
     from monitor.dosatron import JSONL_FILE, _pressure_high_windows
     out = []
     try:
-        with open(JSONL_FILE, 'rb') as f:
-            f.seek(0, 2)
-            f.seek(max(0, f.tell() - 524288))   # ~last few thousand clicks
-            data = f.read()
+        data = _tail_covering(JSONL_FILE, start_unix, 'ts', min_chunk=524288)
         for line in data.split(b'\n'):
             line = line.strip()
             if not line:
@@ -155,10 +187,7 @@ def _bypass_flow_records(start_unix: float, end_unix: float,
     from monitor.dosatron import FLOW_CYCLES_JSONL as _FCJ
     out = []
     try:
-        with open(_FCJ, 'rb') as f:
-            f.seek(0, 2)
-            f.seek(max(0, f.tell() - chunk))
-            data = f.read()
+        data = _tail_covering(_FCJ, start_unix, 'start_ts', min_chunk=chunk)
         for line in data.split(b'\n'):
             line = line.strip()
             if not line:
