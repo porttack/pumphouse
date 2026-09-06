@@ -953,7 +953,7 @@ def build_calendar_months(all_reservations, num_months=19, start_year=None, star
             mk = checkout.strftime('%Y-%m')
             monthly_income[mk] = monthly_income.get(mk, 0) + net
 
-    # canceled_day_info[date] = list of {'guest','days_before_checkin','still_paid'} —
+    # canceled_day_info[date] = list of {'guest','gross','net','days_before_checkin','still_paid'} —
     # every day the canceled booking would have covered, overlaid as a marker
     # regardless of what (if anything) actually occupies that day now.
     canceled_day_info = {}
@@ -967,8 +967,15 @@ def build_calendar_months(all_reservations, num_months=19, start_year=None, star
             days_before = int(res.get('Days Before Checkin', ''))
         except (ValueError, TypeError):
             days_before = None
+        try:
+            gross = float(res.get('Income', 0) or 0)
+            net = gross * (1 - MANAGEMENT_FEE_PERCENT / 100)
+        except (ValueError, TypeError):
+            gross = net = 0.0
         entry = {
             'guest': res.get('Guest', 'Unknown'),
+            'gross': gross,
+            'net': net,
             'days_before_checkin': days_before,
             'still_paid': days_before is not None and days_before <= CANCELLATION_STILL_PAID_DAYS,
         }
@@ -1033,11 +1040,11 @@ def build_calendar_months(all_reservations, num_months=19, start_year=None, star
                             f"{r['guest']}: gross ${r['gross']:,.0f}, net ${r['net']:,.0f} ({r['nights']}n)"
                         )
                     for c in (canceled or []):
-                        title_parts.append(
-                            f"Canceled: {c['guest']}"
-                            + (f" ({c['days_before_checkin']}d before check-in{', still paid' if c['still_paid'] else ''})"
-                               if c['days_before_checkin'] is not None else '')
-                        )
+                        detail = f"gross ${c['gross']:,.0f}, net ${c['net']:,.0f}"
+                        if c['days_before_checkin'] is not None:
+                            detail += f", {c['days_before_checkin']}d before check-in"
+                            detail += ', still paid' if c['still_paid'] else ', not counted'
+                        title_parts.append(f"Canceled: {c['guest']} — {detail}")
                     title = '; '.join(title_parts) if title_parts else None
 
                     row.append({'day': day_num, 'cls': cls, 'style': style, 'today': d == today,
