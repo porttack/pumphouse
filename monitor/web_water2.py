@@ -21,6 +21,7 @@ from flask import Blueprint, Response, request, jsonify
 
 from monitor.config import (
     EVENTS_FILE,
+    SNAPSHOTS_FILE,
     DOS_ESTIMATE_FILE,
     TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS, TANK_FULL_GALLONS,
     SECRET_BYPASS_ON_TOKEN, SECRET_BYPASS_OFF_TOKEN,
@@ -100,15 +101,17 @@ def _read_events_tail_raw(chunk: int = 262144) -> str:
         return ''
 
 
-def _tail_covering(path, start_unix: float, ts_key: str, min_chunk: int = 262144) -> bytes:
-    """Tail-read `path`, growing the read size until the earliest line's
-    `ts_key` timestamp is <= start_unix (or the whole file has been read).
+def _tail_covering(path, start_unix: float, parse_ts, min_chunk: int = 262144) -> bytes:
+    """Tail-read `path`, growing the read size until some complete line's
+    timestamp (via `parse_ts(line_bytes) -> float | None`) is <= start_unix,
+    or the whole file has been read.
 
     A fixed-size tail read silently truncates once a requested window (e.g. a
-    multi-day "since calling" fill window) outlives what that fixed byte count
-    covers — the returned data then only reflects the most recent slice of the
-    file, not the actual window, without any error or empty result to flag it.
-    Growing the chunk guarantees the read reaches back to start_unix.
+    multi-day "since calling" fill window, or an arbitrary lookback) outlives
+    what that fixed byte count covers — the returned data then only reflects
+    the most recent slice of the file, not the actual window, without any
+    error or empty result to flag it. Growing the chunk guarantees the read
+    reaches back to start_unix.
     """
     try:
         with open(path, 'rb') as f:
@@ -121,18 +124,63 @@ def _tail_covering(path, start_unix: float, ts_key: str, min_chunk: int = 262144
                 data = f.read()
                 if read_from == 0:
                     return data
-                nl = data.find(b'\n')
-                if nl != -1:
-                    try:
-                        rec = json.loads(data[:nl].strip())
-                        first_ts = datetime.fromisoformat(rec[ts_key]).timestamp()
-                        if first_ts <= start_unix:
+                # The first line may be a partial fragment (read started
+                # mid-line) — check the next complete line instead.
+                nl1 = data.find(b'\n')
+                if nl1 != -1:
+                    nl2 = data.find(b'\n', nl1 + 1)
+                    line = data[nl1 + 1:nl2] if nl2 != -1 else None
+                    if line is not None:
+                        ts = parse_ts(line)
+                        if ts is not None and ts <= start_unix:
                             return data
-                    except Exception:
-                        pass
                 chunk = min(chunk * 4, file_size)
     except Exception:
         return b''
+
+
+def _jsonl_ts(key: str):
+    """Build a `parse_ts` callback for _tail_covering over a JSONL file."""
+    def parse(line: bytes) -> 'float | None':
+        try:
+            rec = json.loads(line.strip())
+            return datetime.fromisoformat(rec[key]).timestamp()
+        except Exception:
+            return None
+    return parse
+
+
+def _csv_ts(line: bytes) -> 'float | None':
+    """parse_ts callback for a CSV file with the timestamp as the first field."""
+    try:
+        return datetime.fromisoformat(line.split(b',', 1)[0].decode().strip()).timestamp()
+    except Exception:
+        return None
+
+
+def _tank_gallons_at(ts: float) -> 'float | None':
+    """Return the tank sensor reading (gallons) from the snapshot nearest
+    at-or-before `ts` — for water-balance calcs over an arbitrary rolling
+    lookback window, which (unlike a fill window) has no FLOAT_CALLING event
+    to anchor a starting level to. None if no snapshot at/before ts exists."""
+    best_gal, best_ts = None, None
+    data = _tail_covering(SNAPSHOTS_FILE, ts, _csv_ts, min_chunk=65536)
+    for line in data.split(b'\n'):
+        line = line.strip()
+        if not line or line.startswith(b'timestamp,'):
+            continue
+        parts = line.split(b',')
+        if len(parts) < 4:
+            continue
+        try:
+            row_ts = datetime.fromisoformat(parts[0].decode().strip()).timestamp()
+            if row_ts > ts:
+                continue
+            if best_ts is None or row_ts > best_ts:
+                best_ts, best_gal = row_ts, float(parts[3])
+        except Exception:
+            continue
+    return best_gal
 
 
 def _click_times(start_unix: float, end_unix: float) -> 'list[float]':
@@ -149,7 +197,7 @@ def _click_times(start_unix: float, end_unix: float) -> 'list[float]':
     from monitor.dosatron import JSONL_FILE, _pressure_high_windows
     out = []
     try:
-        data = _tail_covering(JSONL_FILE, start_unix, 'ts', min_chunk=524288)
+        data = _tail_covering(JSONL_FILE, start_unix, _jsonl_ts('ts'), min_chunk=524288)
         for line in data.split(b'\n'):
             line = line.strip()
             if not line:
@@ -187,7 +235,7 @@ def _bypass_flow_records(start_unix: float, end_unix: float,
     from monitor.dosatron import FLOW_CYCLES_JSONL as _FCJ
     out = []
     try:
-        data = _tail_covering(_FCJ, start_unix, 'start_ts', min_chunk=chunk)
+        data = _tail_covering(_FCJ, start_unix, _jsonl_ts('start_ts'), min_chunk=chunk)
         for line in data.split(b'\n'):
             line = line.strip()
             if not line:
@@ -261,6 +309,29 @@ def _fill_window(float_calling: bool, now: float) -> 'tuple[float | None, float,
         return calling_ts, now, 'since calling', calling_gal
     win_end = full_ts if full_ts else now
     return calling_ts, win_end, 'last fill', calling_gal
+
+
+def _resolve_window(win_param: 'str | None', float_calling: bool, now: float):
+    """Return (win_start, win_end, label, start_gallons) for the data panel's
+    selected lookback window.
+
+    'calling' (default) is the current float fill window — see _fill_window.
+    '6h'/'12h' are simple rolling lookbacks from now. 'today' is local
+    midnight to now. The non-calling windows have no FLOAT_CALLING event to
+    anchor a starting tank level to, so start_gallons instead comes from the
+    nearest logged snapshot at-or-before win_start.
+    """
+    if win_param == '6h':
+        win_start = now - 6 * 3600
+        return win_start, now, 'past 6h', _tank_gallons_at(win_start)
+    if win_param == '12h':
+        win_start = now - 12 * 3600
+        return win_start, now, 'past 12h', _tank_gallons_at(win_start)
+    if win_param == 'today':
+        midnight = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        win_start = midnight.timestamp()
+        return win_start, now, 'today', _tank_gallons_at(win_start)
+    return _fill_window(float_calling, now)
 
 
 @water2_bp.route('/api/flow_status')
@@ -391,7 +462,8 @@ def api_flow_status():
         k: (round(v, 1) if isinstance(v, float) else v) for k, v in _dose.items()
     }
 
-    win_start, win_end, label, win_start_gal = _fill_window(float_calling, now)
+    win_param = request.args.get('win', 'calling')
+    win_start, win_end, label, win_start_gal = _resolve_window(win_param, float_calling, now)
     result['duty_window_label'] = label
 
     # ── Window totals — combine both delivery sources, since a fill window can
@@ -630,17 +702,20 @@ def water2_status():
     img_base    = f'/api/epaper.jpg?tenant=no&hours={hours_arg}&est=1&minrange=4'
     img_tag     = f'<img id="tank-img" src="/api/epaper.jpg?{img_param}" alt="Water tank level graph">'
 
-    # Range toggle: 6 hours (default) vs 3 days
-    is_long_view = hours_arg >= 72
+    # Graph range toggle: 6 hours (default), 12 hours, 24 hours, or 3 days.
     def _range_link(text, qs, active):
         style = ('color:#cdd8f0;font-weight:600;' if active else 'color:#7aa4d8;')
         return f'<a href="/water2?{qs}" style="text-decoration:none;{style}">{text}</a>'
     range_html = (
         '<div style="font-size:0.82rem;color:#6a82b0;display:flex;gap:14px;'
         'justify-content:center;margin-top:-8px;">'
-        + _range_link('6 hours', 'hours=6', not is_long_view)
+        + _range_link('6 hours',  'hours=6',  hours_arg == 6)
         + '<span>&bull;</span>'
-        + _range_link('3 days', 'days=3', is_long_view)
+        + _range_link('12 hours', 'hours=12', hours_arg == 12)
+        + '<span>&bull;</span>'
+        + _range_link('24 hours', 'hours=24', hours_arg == 24)
+        + '<span>&bull;</span>'
+        + _range_link('3 days',   'days=3',   hours_arg == 72)
         + '</div>'
     )
     if via_cloudflare:
@@ -813,6 +888,8 @@ def water2_status():
     }}
     .links a {{ color: #7aa4d8; text-decoration: none; }}
     .links a:hover {{ text-decoration: underline; }}
+    .win-link {{ color: #7aa4d8; }}
+    .win-link.active {{ color: #cdd8f0; font-weight: 600; }}
   </style>
 </head>
 <body>
@@ -841,6 +918,16 @@ def water2_status():
       <div style="width:10px"></div>
       <span class="flow-label" id="flow-since-label">Since calling:</span>
       <span class="flow-value" id="flow-since-text">&mdash;</span>
+    </div>
+    <div class="flow-row" style="font-size:0.78rem;">
+      <div style="width:10px"></div>
+      <span class="flow-label" style="min-width:auto;">Window:</span>
+      <span style="display:flex;gap:12px;flex-wrap:wrap;">
+        <a href="#" class="win-link active" data-win="calling" style="text-decoration:none;">Since calling</a>
+        <a href="#" class="win-link" data-win="6h" style="text-decoration:none;">6h</a>
+        <a href="#" class="win-link" data-win="12h" style="text-decoration:none;">12h</a>
+        <a href="#" class="win-link" data-win="today" style="text-decoration:none;">Today</a>
+      </span>
     </div>
     <div class="flow-row" id="flow-duty-row" style="display:none">
       <div style="width:10px"></div>
@@ -923,6 +1010,16 @@ def water2_status():
     const CTRL = {json.dumps(ctrl_cfg)};
     let _lastFlowing = false;
     let _imgTimer = null;
+    let _dataWin = 'calling';
+
+    document.querySelectorAll('.win-link').forEach(a => {{
+      a.addEventListener('click', (e) => {{
+        e.preventDefault();
+        _dataWin = a.dataset.win;
+        document.querySelectorAll('.win-link').forEach(x => x.classList.toggle('active', x === a));
+        updateFlow();
+      }});
+    }});
 
     // Re-sync the control buttons from live state each poll, so a change made
     // from another device (or the pump itself) shows here within the interval.
@@ -991,7 +1088,7 @@ def water2_status():
     }}
 
     function updateFlow() {{
-      fetch('/api/flow_status')
+      fetch('/api/flow_status?win=' + encodeURIComponent(_dataWin))
         .then(r => r.json())
         .then(d => {{
           applyControlState(d);
@@ -1116,8 +1213,13 @@ def water2_status():
           if (d.duty_window_start_ts && d.duty_window_elapsed_s !== null
               && d.duty_window_elapsed_s !== undefined) {{
             sinceRow.style.display = '';
-            const label = d.duty_window_label === 'last fill' ? 'Last fill:' : 'Since calling:';
-            sinceLabel.textContent = label;
+            const winLabels = {{
+              'last fill': 'Last fill:',
+              'past 6h':   'Past 6h:',
+              'past 12h':  'Past 12h:',
+              'today':     'Today:',
+            }};
+            sinceLabel.textContent = winLabels[d.duty_window_label] || 'Since calling:';
             const startDt = new Date(d.duty_window_start_ts);
             const startStr = startDt.toLocaleString([], {{
               month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
