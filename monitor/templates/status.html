@@ -279,6 +279,7 @@
             border-radius: 3px;
             border: none;
             line-height: 1.5;
+            position: relative;
         }
         .cal-pad   { color: transparent; }
         .cal-past  { color: #3a3a3a; }
@@ -289,6 +290,17 @@
         .cal-owner  { background: #4a2e00; color: #e8a030; }
         .cal-maintenance { background: #4a4000; color: #e8d030; }
         .cal-today { outline: 2px solid #c0c0c0; outline-offset: -1px; }
+        .cal-canceled::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: #e0954a;
+            box-shadow: 0 0 0 1px #1a1a1a;
+        }
         .cal-legend {
             display: flex;
             gap: 16px;
@@ -1135,7 +1147,7 @@
         <!-- Prior 6-Month History -->
         {% if prior_calendar_months and show_totals %}
         <div class="section">
-            <h2>HISTORY — PRIOR 6 MONTHS</h2>
+            <h2>HISTORY — PRIOR 6 MONTHS <span style="font-weight:normal; font-size:0.7em; color:#888;">(<span style="display:inline-block; width:5px; height:5px; border-radius:50%; background:#e0954a; margin-right:3px;"></span>= canceled, hover for details)</span></h2>
             <div class="cal-grid">
                 {% for month in prior_calendar_months %}
                 <div class="cal-month">
@@ -1151,7 +1163,7 @@
                             {% for week in month.weeks %}
                             <tr>
                                 {% for cell in week %}
-                                <td class="{{ cell.cls }}{% if cell.today %} cal-today{% endif %}"{% if cell.style %} style="{{ cell.style }}"{% endif %}>{{ cell.day or '' }}</td>
+                                <td class="{{ cell.cls }}{% if cell.today %} cal-today{% endif %}{% if cell.canceled %} cal-canceled{% endif %}"{% if cell.style %} style="{{ cell.style }}"{% endif %}{% if cell.canceled_title %} title="{{ cell.canceled_title }}"{% endif %}>{{ cell.day or '' }}</td>
                                 {% endfor %}
                             </tr>
                             {% endfor %}
@@ -1205,13 +1217,13 @@
                             </td>
                         </tr>
                         {% else %}
-                        <tr style="color:#555e72;">
+                        <tr style="color:{{ '#c08050' if res.get('canceled') else '#555e72' }};">
                             <td>{{ format_date_short(res['Check-In']) }}</td>
                             <td>{{ format_date_short(res['Checkout']) }}</td>
                             <td style="text-align:center;">{{ res['Nights'] }}</td>
                             <td>{{ 'Owner' if 'Owner' in res['Type'] else 'Guest' }}</td>
                             <td style="text-align:center;">{{ res.get('repeat_guest', '?') }}</td>
-                            <td>{{ res['Type'] }}</td>
+                            <td>{{ res['Type'] }}{% if res.get('canceled') %} <span style="font-size:0.8em; opacity:0.85;">(Canceled{% if res.get('Days Before Checkin') %}, {{ res['Days Before Checkin'] }}d before{% endif %})</span>{% endif %}</td>
                             <td style="text-align:right;">${{ "%.0f"|format(res.get('gross_income', 0)) }}</td>
                             <td style="text-align:right;">${{ "%.0f"|format(res.get('net_income', 0)) }}</td>
                             <td style="text-align:right; font-weight:bold;">${{ "%.0f"|format(res.get('monthly_total', 0)) }}</td>

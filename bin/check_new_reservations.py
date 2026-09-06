@@ -18,7 +18,7 @@ from pathlib import Path
 
 # Add monitor module to path
 sys.path.insert(0, str(Path(__file__).parent.parent))  # project root
-from monitor.config import EVENTS_FILE, RESERVATIONS_FILE, RESERVATIONS_SNAPSHOT_FILE
+from monitor.config import EVENTS_FILE, RESERVATIONS_FILE, RESERVATIONS_SNAPSHOT_FILE, CANCELED_RESERVATIONS_FILE
 
 def load_reservations_csv(filepath):
     """
@@ -115,6 +115,13 @@ def detect_canceled_reservations(current_file, snapshot_file, debug=False):
 
 # Fields to compare when checking for changes
 TRACKED_FIELDS = ['Check-In', 'Checkout', 'Nights', 'Guest', 'Type', 'Income', 'Status']
+
+# Columns for the persistent canceled_reservations.csv (structured, unlike the events.csv note)
+CANCELED_RESERVATIONS_FIELDS = [
+    'Reservation Id', 'Status', 'Type', 'Unit', 'Guest', 'Booked Date',
+    'Check-In', 'Checkout', 'Nights', 'Income', 'Currency',
+    'Canceled Date', 'Days Before Checkin',
+]
 
 
 def detect_changed_reservations(current_file, snapshot_file, debug=False):
@@ -504,6 +511,49 @@ def log_canceled_reservation(reservation):
         return False
 
 
+def record_canceled_reservation(reservation, canceled_dt=None):
+    """Append a structured record of this cancellation to canceled_reservations.csv.
+
+    Unlike the events.csv note (human-readable, scrolls off the dashboard's
+    default lookback window), this file persists every cancellation with a
+    'Days Before Checkin' column so the dashboard can still credit income for
+    cancellations that happened close enough to check-in to still be paid.
+    """
+    from monitor.occupancy import parse_date
+
+    canceled_dt = canceled_dt or datetime.now()
+    checkin_date = parse_date(reservation.get('Check-In'))
+    days_before_checkin = (checkin_date.date() - canceled_dt.date()).days if checkin_date else ''
+
+    row = {
+        'Reservation Id':      reservation.get('Reservation Id', ''),
+        'Status':              reservation.get('Status', ''),
+        'Type':                reservation.get('Type', ''),
+        'Unit':                reservation.get('Unit', ''),
+        'Guest':               reservation.get('Guest', ''),
+        'Booked Date':         reservation.get('Booked Date', ''),
+        'Check-In':            reservation.get('Check-In', ''),
+        'Checkout':            reservation.get('Checkout', ''),
+        'Nights':              reservation.get('Nights', ''),
+        'Income':              reservation.get('Income', '0'),
+        'Currency':            reservation.get('Currency', 'USD'),
+        'Canceled Date':       canceled_dt.strftime('%Y-%m-%d %H:%M:%S'),
+        'Days Before Checkin': days_before_checkin,
+    }
+
+    try:
+        file_exists = CANCELED_RESERVATIONS_FILE.exists()
+        with open(CANCELED_RESERVATIONS_FILE, 'a', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=CANCELED_RESERVATIONS_FIELDS)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(row)
+        return True
+    except Exception as e:
+        print(f"ERROR logging to canceled_reservations.csv: {e}")
+        return False
+
+
 def log_changed_reservation(current_res, old_res, changed_fields):
     """Log changed reservation to events.csv."""
     try:
@@ -757,6 +807,7 @@ def main():
             print()
 
             log_canceled_reservation(res)
+            record_canceled_reservation(res)
             send_notification_canceled(res, debug=args.debug)
 
         print(f"✓ Logged {len(canceled_reservations)} canceled reservation(s) to events.csv")

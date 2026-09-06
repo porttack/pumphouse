@@ -260,6 +260,7 @@ DASHBOARD_SNAPSHOT_AGG_HOURS = 2   # Bucket size (hours) for older rows; use eve
 
 # Reservation/Rental Income Configuration
 MANAGEMENT_FEE_PERCENT = 36  # Percentage paid to management company (subtracted from displayed income)
+CANCELLATION_STILL_PAID_DAYS = 14  # Cancellations within this many days of check-in are still owed income (owner's cancellation-policy cutoff)
 
 # E-Paper Display Configuration
 EPAPER_CONSERVE_WATER_THRESHOLD = 50  # Show "Save Water" when tank percent <= this value (None to disable)
@@ -282,6 +283,7 @@ SNAPSHOTS_FILE             = DATA_DIR / 'snapshots.csv'
 DAILY_CSV                  = DATA_DIR / 'daily.csv'
 RESERVATIONS_FILE          = DATA_DIR / 'reservations.csv'
 RESERVATIONS_SNAPSHOT_FILE = DATA_DIR / 'reservations_snapshot.csv'
+CANCELED_RESERVATIONS_FILE = DATA_DIR / 'canceled_reservations.csv'
 WORK_ORDERS_FILE           = DATA_DIR / 'work_orders.csv'
 STATEMENTS_FILE            = DATA_DIR / 'statements.csv'
 

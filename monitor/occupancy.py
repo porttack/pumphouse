@@ -42,6 +42,42 @@ def load_reservations(csv_path):
 
     return reservations
 
+def load_canceled_reservations(csv_path, still_paid_within_days=None):
+    """
+    Load cancellation records from canceled_reservations.csv.
+
+    Args:
+        csv_path: Path to canceled_reservations.csv
+        still_paid_within_days: if given, only return rows whose 'Days Before
+            Checkin' is <= this (i.e. canceled too close to check-in to be
+            refunded, so the income is still owed)
+
+    Returns:
+        list: List of cancellation dicts (same reservation columns plus
+              'Canceled Date' and 'Days Before Checkin')
+    """
+    canceled = []
+
+    if not Path(csv_path).exists():
+        return canceled
+
+    try:
+        with open(csv_path, 'r') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if still_paid_within_days is not None:
+                    try:
+                        days = int(row.get('Days Before Checkin', ''))
+                    except (ValueError, TypeError):
+                        continue
+                    if days > still_paid_within_days:
+                        continue
+                canceled.append(row)
+    except Exception as e:
+        print(f"ERROR reading canceled reservations: {e}")
+
+    return canceled
+
 def parse_date(date_str):
     """
     Parse date string from CSV (YYYY-MM-DD format).

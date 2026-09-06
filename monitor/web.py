@@ -16,7 +16,8 @@ from functools import wraps
 
 from monitor import __version__
 from monitor.config import (
-    EVENTS_FILE, RESERVATIONS_FILE, WORK_ORDERS_FILE, STATEMENTS_FILE, DEFAULT_SNAPSHOTS_FILE, DAILY_CSV,
+    EVENTS_FILE, RESERVATIONS_FILE, CANCELED_RESERVATIONS_FILE, CANCELLATION_STILL_PAID_DAYS,
+    WORK_ORDERS_FILE, STATEMENTS_FILE, DEFAULT_SNAPSHOTS_FILE, DAILY_CSV,
     NOTIFY_BACKFLUSH_TIME_START, NOTIFY_BACKFLUSH_TIME_END,
     TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS, TANK_FULL_GALLONS,
     EPAPER_CONSERVE_WATER_THRESHOLD, EPAPER_OWNER_STAY_TYPES,
@@ -57,7 +58,8 @@ from monitor.relay import get_all_relay_status, set_supply_override, set_bypass
 from monitor.stats import find_last_refill
 from monitor.occupancy import (
     get_occupancy_status, get_current_and_upcoming_reservations,
-    load_reservations, format_date_short, get_next_reservation, get_checkin_datetime
+    load_reservations, load_canceled_reservations, format_date_short,
+    get_next_reservation, get_checkin_datetime
 )
 from monitor.gph_calculator import get_cached_gph, format_gph_for_display
 from monitor import ring_camera
@@ -717,7 +719,7 @@ def get_snapshots_stats(filepath=DEFAULT_SNAPSHOTS_FILE):
     except Exception as e:
         return None
 
-def _build_prior_calendar(all_reservations, num_months=6, statements_by_month=None):
+def _build_prior_calendar(all_reservations, num_months=6, statements_by_month=None, canceled_reservations=None):
     """Return calendar months for the prior 6 complete months, oldest first."""
     from datetime import date as _date
     today = _date.today()
@@ -735,14 +737,20 @@ def _build_prior_calendar(all_reservations, num_months=6, statements_by_month=No
         start_month=mo,
         show_past_detail=True,
         statements_by_month=statements_by_month,
+        canceled_reservations=canceled_reservations,
     )
 
 
-def _build_past_reservations(all_reservations, management_fee_pct, guest_counts, statements_by_month=None):
+def _build_past_reservations(all_reservations, management_fee_pct, guest_counts, statements_by_month=None, canceled_reservations=None):
     """Return reservation rows (with gross/net/monthly_total) for checkouts in the prior 6 months.
 
     If statements_by_month is provided, a special '_type':'statement' summary row is appended
     after each month's reservations showing the Meredith portal statement figures.
+
+    canceled_reservations (optional): rows from canceled_reservations.csv, already
+    pre-filtered (by the caller) to cancellations close enough to check-in that the
+    income is still owed. These are merged in like any other reservation, marked
+    with res['canceled']=True, so their income still counts toward the monthly total.
     """
     from datetime import date as _date
     from monitor.occupancy import parse_date
@@ -758,8 +766,11 @@ def _build_past_reservations(all_reservations, management_fee_pct, guest_counts,
     # End = start of this month
     window_end = parse_date(today.replace(day=1).isoformat())
 
+    combined = [(res, False) for res in all_reservations] + \
+               [(res, True) for res in (canceled_reservations or [])]
+
     rows = []
-    for res in all_reservations:
+    for res, is_canceled in combined:
         checkout_date = parse_date(res.get('Checkout'))
         if not checkout_date:
             continue
@@ -773,6 +784,7 @@ def _build_past_reservations(all_reservations, management_fee_pct, guest_counts,
         res = dict(res)
         res['gross_income'] = gross
         res['net_income'] = net
+        res['canceled'] = is_canceled
         guest = res.get('Guest', '')
         res['repeat_guest'] = 'Yes' if guest and guest_counts.get(guest, 0) > 1 else 'No'
         rows.append(res)
@@ -858,14 +870,20 @@ def _build_past_reservations(all_reservations, management_fee_pct, guest_counts,
     return result
 
 
-def build_calendar_months(all_reservations, num_months=19, start_year=None, start_month=None, show_past_detail=False, statements_by_month=None):
+def build_calendar_months(all_reservations, num_months=19, start_year=None, start_month=None, show_past_detail=False, statements_by_month=None, canceled_reservations=None):
     """Build calendar data for the availability calendar.
 
     start_year/start_month: override the starting month (default: current month).
     show_past_detail: when True, past days outside the current month still show
                       booking colors (used for the prior-months history section).
+    canceled_reservations: optional list of cancellation dicts (from
+        canceled_reservations.csv) whose original Check-In/Checkout span gets a
+        small marker overlaid on those days, so a canceled booking still shows
+        up in the history calendar even though it never actually occupied the
+        house. Independent of show_past_detail/date range filtering below.
 
-    Each cell dict: {'day': int|None, 'cls': str, 'style': str|None, 'today': bool}
+    Each cell dict: {'day': int|None, 'cls': str, 'style': str|None, 'today': bool,
+                     'canceled': list[dict]|None}
     Split days use inline linear-gradient style:
       check-in  → right half colored
       check-out → left half colored
@@ -921,6 +939,30 @@ def build_calendar_months(all_reservations, num_months=19, start_year=None, star
             except (ValueError, TypeError):
                 pass
 
+    # canceled_day_info[date] = list of {'guest','days_before_checkin','still_paid'} —
+    # every day the canceled booking would have covered, overlaid as a marker
+    # regardless of what (if anything) actually occupies that day now.
+    canceled_day_info = {}
+    for res in (canceled_reservations or []):
+        try:
+            checkin  = _date.fromisoformat(res.get('Check-In', ''))
+            checkout = _date.fromisoformat(res.get('Checkout', ''))
+        except ValueError:
+            continue
+        try:
+            days_before = int(res.get('Days Before Checkin', ''))
+        except (ValueError, TypeError):
+            days_before = None
+        entry = {
+            'guest': res.get('Guest', 'Unknown'),
+            'days_before_checkin': days_before,
+            'still_paid': days_before is not None and days_before <= CANCELLATION_STILL_PAID_DAYS,
+        }
+        cur = checkin
+        while cur < checkout:
+            canceled_day_info.setdefault(cur, []).append(entry)
+            cur += timedelta(days=1)
+
     def _cell_appearance(d, is_past, is_current_month):
         """Return (cls, style) for a day cell."""
         # Past days outside the current month: dim unless showing history detail
@@ -964,11 +1006,21 @@ def build_calendar_months(all_reservations, num_months=19, start_year=None, star
             row = []
             for day_num in week:
                 if day_num == 0:
-                    row.append({'day': None, 'cls': 'cal-pad', 'style': None, 'today': False})
+                    row.append({'day': None, 'cls': 'cal-pad', 'style': None, 'today': False, 'canceled': None})
                 else:
                     d = _date(yr, mo, day_num)
                     cls, style = _cell_appearance(d, d < today, is_current_month)
-                    row.append({'day': day_num, 'cls': cls, 'style': style, 'today': d == today})
+                    canceled = canceled_day_info.get(d)
+                    title = None
+                    if canceled:
+                        title = '; '.join(
+                            f"Canceled: {c['guest']}"
+                            + (f" ({c['days_before_checkin']}d before check-in{', still paid' if c['still_paid'] else ''})"
+                               if c['days_before_checkin'] is not None else '')
+                            for c in canceled
+                        )
+                    row.append({'day': day_num, 'cls': cls, 'style': style, 'today': d == today,
+                                'canceled': canceled, 'canceled_title': title})
             week_rows.append(row)
         mk = first.strftime('%Y-%m')
         income = monthly_income.get(mk)
@@ -2340,6 +2392,12 @@ def index():
         if guest:
             guest_counts[guest] = guest_counts.get(guest, 0) + 1
 
+    # Cancellations close enough to check-in that the income is still owed
+    still_paid_canceled_reservations = load_canceled_reservations(
+        CANCELED_RESERVATIONS_FILE, still_paid_within_days=CANCELLATION_STILL_PAID_DAYS)
+    # All cancellations (any days-before-checkin) for the history calendar markers
+    all_canceled_reservations = load_canceled_reservations(CANCELED_RESERVATIONS_FILE)
+
     # Get reservations with checkout in current month or next month
     from monitor.occupancy import parse_date
     now = datetime.now()
@@ -2492,8 +2550,8 @@ def index():
                          fill_extra_gallons=OVERRIDE_FILL_EXTRA_GALLONS,
                          fill_extra_active=OVERRIDE_FILL_TARGET_FILE.exists(),
                          calendar_months=build_calendar_months(all_reservations),
-                         prior_calendar_months=_build_prior_calendar(all_reservations, statements_by_month=statements_by_month),
-                         past_reservation_list=_build_past_reservations(all_reservations, MANAGEMENT_FEE_PERCENT, guest_counts, statements_by_month),
+                         prior_calendar_months=_build_prior_calendar(all_reservations, statements_by_month=statements_by_month, canceled_reservations=all_canceled_reservations),
+                         past_reservation_list=_build_past_reservations(all_reservations, MANAGEMENT_FEE_PERCENT, guest_counts, statements_by_month, canceled_reservations=still_paid_canceled_reservations),
                          work_order_headers=work_order_headers,
                          work_order_rows=work_order_rows)
 
