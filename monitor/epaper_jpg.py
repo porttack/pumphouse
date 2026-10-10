@@ -423,6 +423,11 @@ def render_epaper_jpg(
     y_min_label = f'{int(round(g_min_raw / TANK_FULL_GALLONS * 100))}%'
     draw.text((graph_left - y_label_w - s(3), graph_top    - s(1)),  y_max_label, font=font_small, fill=AXIS_COLOR)
     draw.text((graph_left - y_label_w - s(3), graph_bottom - s(11)), y_min_label, font=font_small, fill=AXIS_COLOR)
+    # Gallons under the top % and above the bottom %, so the axis reads in gallons too
+    _gal_x   = graph_left - y_label_w - s(3)
+    _gal_h   = draw.textbbox((0, 0), '0', font=font_tiny)[3]
+    draw.text((_gal_x, graph_top - s(1) + s(11)),             f'{g_max_raw:.0f}', font=font_tiny, fill=AXIS_COLOR)
+    draw.text((_gal_x, graph_bottom - s(11) - _gal_h - s(2)), f'{g_min_raw:.0f}', font=font_tiny, fill=AXIS_COLOR)
 
     # ── Flow sparkline + label (pressure high % past 24h) ────────────────
     _FLOW_BAR_COLOR  = ( 50, 90, 170)   # dark blue on light BG
