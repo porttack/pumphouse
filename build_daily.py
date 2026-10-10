@@ -55,6 +55,7 @@ FIELDNAMES = [
     'date',
     'occupied_pct',
     'gallons_in',               # total water delivered via dosatron + bypass
+    'dosatron_clicks',          # raw dosatron click count for the day (ground truth; see summarize_day)
     'gallons_used',             # gallons_in - net tank change (water consumed)
     'gallons_end',              # tank level at end of day
     'gallons_net_change',
@@ -118,6 +119,20 @@ def summarize_day(date, rows, checkout_net_income=0.0, is_checkout=False):
     gallons_in_total = round(sum(flt(r, 'gallons_in') for r in rows), 1)
     gallons_net = gallons[-1] - gallons[0]
     gallons_used_total = max(0.0, round(gallons_in_total - gallons_net, 1))
+
+    # Raw dosatron click count, recovered by inverting the gallons conversion
+    # (dosatron_gallons was computed as clicks * GALLONS_PER_CLICK in the first
+    # place) rather than re-parsing detections.jsonl — gives the exact original
+    # click count regardless of whether GALLONS_PER_CLICK itself is right, so it
+    # works as an independent sanity check on "is the dosatron firing at all"
+    # even if the gallons-per-click calibration is later revised.
+    dosatron_gallons_total = round(sum(flt(r, 'dosatron_gallons') for r in rows), 2)
+    dosatron_clicks = None
+    try:
+        from monitor.dosatron import GALLONS_PER_CLICK
+        dosatron_clicks = round(dosatron_gallons_total / GALLONS_PER_CLICK)
+    except Exception:
+        pass
 
     bypass_rows = [r for r in rows if r.get('relay_bypass', '').upper() == 'ON']
     non_bypass  = [r for r in rows if r.get('relay_bypass', '').upper() != 'ON']
@@ -272,6 +287,7 @@ def summarize_day(date, rows, checkout_net_income=0.0, is_checkout=False):
         'date':                      date,
         'gallons_in':                gallons_in_total,
         'gallons_used':              gallons_used_total,
+        'dosatron_clicks':           dosatron_clicks,
         'dosing_tank_depth_est_in':  dosing_tank_depth_est_in,
         'chlorine_ppm_est':          chlorine_ppm_est,
         'chlorine_floz_to_15':       chlorine_floz_to_15,
