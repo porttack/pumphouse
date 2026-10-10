@@ -31,6 +31,7 @@ from monitor.config import (
     SECRET_BYPASS_ON_TOKEN, SECRET_BYPASS_OFF_TOKEN,
     SECRET_BYPASS_TIMED_TOKEN, SECRET_BYPASS_CANCEL_TIMER_TOKEN,
     SECRET_BYPASS_CYCLE_TOKEN, SECRET_TEST_FILTER_TOKEN,
+    SECRET_BYPASS_UNTIL_VEHICLE_TOKEN,
     SECRET_PURGE_TOKEN, SECRET_PURGE_NEXT_TOKEN, SECRET_PURGE_CANCEL_NEXT_TOKEN,
     SECRET_FILL_EXTRA_TOKEN, OVERRIDE_FILL_TARGET_FILE, OVERRIDE_FILL_EXTRA_GALLONS,
     MANAGEMENT_FEE_PERCENT,
@@ -45,6 +46,8 @@ from monitor.config import (
     BYPASS_CYCLE_FILE,
     BYPASS_CYCLE_ON_HOURS,
     BYPASS_CYCLE_OFF_HOURS,
+    BYPASS_UNTIL_VEHICLE_FILE,
+    BYPASS_UNTIL_VEHICLE_MAX_HOURS,
     NATIONAL_WEATHER_URL,
     DOS_ESTIMATE_FILE,
 )
@@ -154,10 +157,33 @@ def _write_cycle(on_hours, off_hours, next_transition_dt, next_state):
     }))
 
 
+def get_bypass_until_vehicle_info():
+    """Return {baseline, started} (started as datetime) or None if not active."""
+    import json as _json
+    try:
+        if BYPASS_UNTIL_VEHICLE_FILE.exists():
+            d = _json.loads(BYPASS_UNTIL_VEHICLE_FILE.read_text())
+            d['started'] = datetime.fromtimestamp(d['started_ts'])
+            return d
+    except Exception:
+        pass
+    return None
+
+
+def _write_bypass_until_vehicle(baseline):
+    import json as _json
+    BYPASS_UNTIL_VEHICLE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    BYPASS_UNTIL_VEHICLE_FILE.write_text(_json.dumps({
+        'baseline': baseline,
+        'started_ts': _time.time(),
+    }))
+
+
 def _cancel_all_bypass_modes():
-    """Clear both timer and cycle state files."""
+    """Clear timer, cycle, and until-vehicle state files."""
     BYPASS_TIMER_FILE.unlink(missing_ok=True)
     BYPASS_CYCLE_FILE.unlink(missing_ok=True)
+    BYPASS_UNTIL_VEHICLE_FILE.unlink(missing_ok=True)
 
 
 def _bypass_timer_watchdog():
@@ -190,6 +216,35 @@ def _bypass_timer_watchdog():
                 _write_cycle(on_h, off_h, new_trans, new_next)
             except Exception as e:
                 print(f'bypass_cycle_watchdog: {e}')
+
+        # "Bypass until a car arrives"
+        until_vehicle = get_bypass_until_vehicle_info()
+        if until_vehicle:
+            try:
+                reason = None
+                hours_running = (datetime.now() - until_vehicle['started']).total_seconds() / 3600
+                if hours_running >= BYPASS_UNTIL_VEHICLE_MAX_HOURS:
+                    reason = (f"no vehicle detected after {hours_running:.0f}h "
+                              f"(safety cap: {BYPASS_UNTIL_VEHICLE_MAX_HOURS}h)")
+                else:
+                    from monitor.ring_camera import get_vehicle_count
+                    count = get_vehicle_count()
+                    if count is not None and count > until_vehicle['baseline']:
+                        reason = f"vehicle count {until_vehicle['baseline']} -> {count}"
+                if reason:
+                    BYPASS_UNTIL_VEHICLE_FILE.unlink(missing_ok=True)
+                    set_bypass('OFF', debug=False)
+                    from monitor.logger import log_event
+                    log_event(EVENTS_FILE, 'REMOTE_CONTROL', read_pressure(), read_float_sensor(),
+                              None, None, None, None, get_all_relay_status(),
+                              f'Bypass until car arrives: ended ({reason}), bypass OFF')
+                    from monitor.ntfy import send_notification
+                    send_notification(
+                        '🚗 Bypass ended' if 'vehicle count' in reason else '⏱ Bypass safety timeout',
+                        f'Bypass turned OFF: {reason}.',
+                        priority='default')
+            except Exception as e:
+                print(f'bypass_until_vehicle_watchdog: {e}')
 
 
 threading.Thread(target=_bypass_timer_watchdog, daemon=True, name='bypass-timer').start()
@@ -2570,6 +2625,9 @@ def index():
                          bypass_cycle=get_bypass_cycle_info(),
                          bypass_cycle_on_hours=BYPASS_CYCLE_ON_HOURS,
                          bypass_cycle_off_hours=BYPASS_CYCLE_OFF_HOURS,
+                         token_bypass_until_vehicle=SECRET_BYPASS_UNTIL_VEHICLE_TOKEN,
+                         bypass_until_vehicle=get_bypass_until_vehicle_info(),
+                         bypass_until_vehicle_max_hours=BYPASS_UNTIL_VEHICLE_MAX_HOURS,
                          token_purge=SECRET_PURGE_TOKEN,
                          token_purge_next=SECRET_PURGE_NEXT_TOKEN,
                          token_purge_cancel_next=SECRET_PURGE_CANCEL_NEXT_TOKEN,
@@ -2800,6 +2858,14 @@ def control(token):
             success = set_bypass('ON', debug=False)
             verb = 'switched to' if cycle_info else 'started'
             action_taken = f"Bypass cycle {verb} ({on_h:.4g}h ON / {off_h:.4g}h OFF)"
+    elif token == SECRET_BYPASS_UNTIL_VEHICLE_TOKEN and SECRET_BYPASS_UNTIL_VEHICLE_TOKEN:
+        _cancel_all_bypass_modes()
+        from monitor.ring_camera import get_vehicle_count
+        baseline = get_vehicle_count() or 0
+        _write_bypass_until_vehicle(baseline)
+        success = set_bypass('ON', debug=False)
+        action_taken = (f"Bypass ON until a car arrives (baseline {baseline}, "
+                        f"safety cap {BYPASS_UNTIL_VEHICLE_MAX_HOURS}h)")
     elif token == SECRET_PURGE_TOKEN and SECRET_PURGE_TOKEN:
         # Trigger one-time purge immediately
         from monitor.purge import trigger_purge

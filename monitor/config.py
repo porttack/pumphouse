@@ -340,6 +340,19 @@ BYPASS_CYCLE_FILE     = Path.home() / '.config' / 'pumphouse' / 'bypass_cycle.js
 BYPASS_CYCLE_ON_HOURS  = 4   # Default ON duration  (hours)
 BYPASS_CYCLE_OFF_HOURS = 2   # Default OFF duration (hours)
 
+# "Bypass until a car arrives": holds bypass ON (ignoring the timer/cycle
+# watchdog, which would otherwise end it on its own schedule) so an unattended
+# flow-rate experiment survives until someone actually shows up on site. When
+# this file exists (JSON: {baseline, started_ts}), the watchdog compares the
+# live Ring vehicle count against `baseline` (the count at activation time, not
+# always 0 — the owner's own car may already be in frame) and turns bypass OFF
+# the moment it rises above that. BYPASS_UNTIL_VEHICLE_MAX_HOURS is a safety net
+# independent of vehicle detection — added 2026-10-04 because this mode can
+# leave the tank on fully untreated water for as long as no one arrives, and a
+# dead camera/model should not silently extend that indefinitely.
+BYPASS_UNTIL_VEHICLE_FILE      = Path.home() / '.config' / 'pumphouse' / 'bypass_until_vehicle.json'
+BYPASS_UNTIL_VEHICLE_MAX_HOURS = 48
+
 # Dosatron running estimate: written by the monitor every poll cycle, read by the web server
 # for the current-level display and as the live right-edge graph point.
 DOS_ESTIMATE_FILE = Path.home() / '.local/share/pumphouse/dos_estimate.json'
@@ -477,6 +490,7 @@ if PUMPHOUSE_HOST and not DASHBOARD_URL:
 SECRET_BYPASS_TIMED_TOKEN        = (SECRET_BYPASS_ON_TOKEN + '-4h')          if SECRET_BYPASS_ON_TOKEN else ''
 SECRET_BYPASS_CANCEL_TIMER_TOKEN = (SECRET_BYPASS_ON_TOKEN + '-cancel')      if SECRET_BYPASS_ON_TOKEN else ''
 SECRET_BYPASS_CYCLE_TOKEN        = (SECRET_BYPASS_ON_TOKEN + '-cycle')       if SECRET_BYPASS_ON_TOKEN else ''
+SECRET_BYPASS_UNTIL_VEHICLE_TOKEN = (SECRET_BYPASS_ON_TOKEN + '-until-car')  if SECRET_BYPASS_ON_TOKEN else ''
 SECRET_TEST_FILTER_TOKEN         = (SECRET_BYPASS_ON_TOKEN + '-test-filter') if SECRET_BYPASS_ON_TOKEN else ''
 SECRET_PURGE_NEXT_TOKEN          = (SECRET_PURGE_TOKEN + '-next')            if SECRET_PURGE_TOKEN else ''
 SECRET_PURGE_CANCEL_NEXT_TOKEN   = (SECRET_PURGE_TOKEN + '-cancel')          if SECRET_PURGE_TOKEN else ''
