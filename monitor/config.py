@@ -120,6 +120,16 @@ SECONDS_PER_GALLON = 10 / 0.14   # 10 seconds = 0.14 gallons
 # estimate below. Recalibrate once there's a real data point: a controlled
 # bypass run of known gallons with a trustworthy before/after ppm reading
 # (titration test kit ideally, not strips, given the ±5-10ppm noise floor).
+#
+# Partial recalibration 2026-10-04: maintenance reported the tank water smelling
+# off at 2026-09-28 ~12:00, right when a 4-day stretch of intermittent bypass use
+# (9/24-9/28) was ending. Replaying the model from the CHLORINE_ANCHOR_PPM anchor
+# with a 3x multiplier on the bypass (untreated-water) term lands at ~4.1 ppm at
+# that exact timestamp — a close match for a "stinky" read, and not something a
+# bare guess would hit on the nose. Still not a titration reading, so treat 3x as
+# a working estimate, not a settled constant. Applies only to bypass water, not
+# dosatron-treated water (CHLORINE_STEADY_STATE_PPM recovery is unaffected).
+CHLORINE_BYPASS_DEMAND_MULTIPLIER = 3.0
 CHLORINE_STEADY_STATE_PPM = 10.0  # measured steady-state ppm when dosatron is in use (stable for months as of 2026-07)
 BYPASS_GPM = 4.0  # owner's rough field estimate of bypass delivery rate (2026-07-29); NOT derived from SECONDS_PER_GALLON above (that constant is known-wrong for this purpose, see docs/tank-calibration.md)
 # Fallback only — monitor/bypass_calibration.py derives a real BYPASS_GPM from actual

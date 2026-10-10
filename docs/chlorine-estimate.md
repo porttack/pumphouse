@@ -18,7 +18,9 @@ its own assumed inflow concentration, proportional to gallons delivered:
   Gallons come from the click count — real ground truth.
 - **Bypass water** enters at 0 ppm, so the estimate declines while bypassing.
   Gallons come from FFT-detected flow seconds × the calibrated bypass GPM
-  (`monitor/bypass_calibration.py`), *not* relay-open time.
+  (`monitor/bypass_calibration.py`), *not* relay-open time — then multiplied by
+  `CHLORINE_BYPASS_DEMAND_MULTIPLIER` (3.0) before blending, modeling the raw
+  water's own chlorine demand on top of plain dilution (see Recalibration below).
 
 State persists in `chlorine_ppm_state.json`, advanced once per ~15-min snapshot
 by `monitor/poll.py`. `/water2` projects it forward live during active bypass.
@@ -94,6 +96,34 @@ dated before `CHLORINE_ANCHOR_TS` are skipped — the anchor already reflects th
 A pour is a step change with no error bars of its own, so it does not make the
 estimate more trustworthy — it just stops it from being wrong by the size of the
 pour. The uncertainty below still applies afterward.
+
+## Recalibration: bypass demand multiplier (2026-10-04)
+
+The original model treated bypass (untreated well) water as a 0 ppm inert
+diluent — pure dilution, no reaction. Owner pushback since 2026-07-29 was that
+raw water likely carries its own chlorine demand, so real decline during
+bypass should be faster than pure dilution predicts, but there was no real
+data point to recalibrate from.
+
+One arrived 2026-10-04: maintenance reported the tank water smelling off at
+2026-09-28 ~12:00, after a multi-day stretch of intermittent bypass (9/24-9/28)
+during a weak-well period. Replaying the model from `CHLORINE_ANCHOR_PPM`
+forward with a multiplier on the bypass term, 3.0x lands the estimate at
+~4.1 ppm at that exact timestamp — a close match for "stinky" at the right
+moment, not just the right ballpark. `CHLORINE_BYPASS_DEMAND_MULTIPLIER = 3.0`
+was set from this and applied to both the live updater
+(`update_chlorine_ppm_estimate()`) and the historical replay
+(`ppm_series_by_day()`); `daily.csv` was rebuilt from scratch
+(`build_daily.py --rebuild`, prior version backed up to
+`daily.csv.bak-20261004-precal-bypass-demand`) and the live
+`chlorine_ppm_state.json` was re-anchored to the recalibrated replay value
+(9.9 ppm -> 7.68 ppm) so the live number didn't sit on stale pre-recalibration
+math until it happened to drift there on its own.
+
+Still not a titration reading — a smell report only says "low," not a number —
+so 3.0x is a working estimate, not a settled constant. It only affects bypass
+water; dosatron recovery toward `CHLORINE_STEADY_STATE_PPM` is unchanged, which
+is why the estimate still climbs during dosatron-only stretches same as before.
 
 ## Uncertainty (analysis 2026-08-22)
 

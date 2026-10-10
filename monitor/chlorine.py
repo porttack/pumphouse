@@ -27,6 +27,7 @@ from datetime import datetime
 
 from monitor.config import (
     CHLORINE_STEADY_STATE_PPM,
+    CHLORINE_BYPASS_DEMAND_MULTIPLIER,
     CHLORINE_DOSE_PERCENT,
     CHLORINE_DOSE_TARGET_PPM,
     CHLORINE_DOSE_TARGET_PPM_ALT,
@@ -77,7 +78,7 @@ def update_chlorine_ppm_estimate(dosatron_gallons: float, bypass_flowing_seconds
     ppm, _ = read_chlorine_ppm_state()
     ppm = blend_ppm(ppm, dosatron_gallons, tank_gallons, CHLORINE_STEADY_STATE_PPM)
     bypass_gallons = bypass_flowing_seconds / 60.0 * get_calibrated_bypass_gpm() if bypass_flowing_seconds else 0.0
-    ppm = blend_ppm(ppm, bypass_gallons, tank_gallons, 0.0)
+    ppm = blend_ppm(ppm, bypass_gallons * CHLORINE_BYPASS_DEMAND_MULTIPLIER, tank_gallons, 0.0)
     _write_state(ppm)
 
 
@@ -231,7 +232,7 @@ def ppm_series_by_day(snapshots_csv: 'str | None' = None) -> dict:
                             ppm += additions[a_i][1]
                         a_i += 1
                     ppm = blend_ppm(ppm, dos, tank, CHLORINE_STEADY_STATE_PPM)
-                    ppm = blend_ppm(ppm, byp_s / 60.0 * gpm, tank, 0.0)
+                    ppm = blend_ppm(ppm, byp_s / 60.0 * gpm * CHLORINE_BYPASS_DEMAND_MULTIPLIER, tank, 0.0)
                     series[ts.strftime('%Y-%m-%d')] = round(ppm, 2)
                 prev_unix = unix
     except Exception:
