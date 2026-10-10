@@ -64,8 +64,14 @@ on the original single data point:
 ```
 Interval 1  6/16 → 7/17 (post-refill anchor 22"):  4.0 in × 0.765 = 3.0600 gal /  22,101 clicks  ≈ 0.0001385 gal/click
 Interval 2  7/17 → 8/25 (maintenance reading 16.5"): 5.5 in × 0.765 = 4.2075 gal /  65,577 clicks  ≈ 0.0000642 gal/click
-Pooled:                                             7.2675 gal / 87,678 clicks ≈ 0.00008289 gal/click
+Pooled (1+2, retired 2026-10-10):                   7.2675 gal / 87,678 clicks ≈ 0.00008289 gal/click
+Interval 3  8/25 → 10/10 (21.5" → 17" on site):     4.5 in × 0.765 = 3.4425 gal /  53,879 clicks  ≈ 0.0000639 gal/click
+Pooled (2+3, current):                              7.65 gal / 119,456 clicks ≈ 0.0000640 gal/click
 ```
+
+Interval 3 landed on interval 2's rate (0.0000639 vs 0.0000642), the
+divergence from interval 1 that this doc anticipated, so interval 1 was dropped
+from the pool on 2026-10-10. At the time the estimate read 14.2" vs 17" actual.
 
 Interval 2's rate alone is notably lower than interval 1's — consistent with
 the estimate having overstated real consumption through late July/August
@@ -115,8 +121,8 @@ Optionally, once another real reading exists, recompute
 `DOSING_TANK_CHEM_GAL_PER_CLICK` by pooling in the new interval's (depth
 change × gal/inch) gallons and clicks with the running totals above — the
 more intervals this is calibrated against, the more it averages out one-off
-air pockets vs. a genuinely wrong ratio. Current running totals: 7.2675 gal
-/ 87,678 clicks (intervals 1+2 above).
+air pockets vs. a genuinely wrong ratio. Current running totals: 7.65 gal
+/ 119,456 clicks (intervals 2+3 above).
 
 ## Where the estimate shows up
 
@@ -131,7 +137,7 @@ air pockets vs. a genuinely wrong ratio. Current running totals: 7.2675 gal
 | `DOSING_TANK_DIAMETER_INCHES` | 15 | Estimated tank diameter |
 | `DOSING_TANK_GAL_PER_INCH` | 0.765 | Cylinder cross-section, gal/inch |
 | `DOSING_TANK_CAPACITY_GALLONS` | 15 | Rated capacity |
-| `DOSING_TANK_CHEM_GAL_PER_CLICK` | 0.00008289 | Empirical fudge factor, pooled across 2 intervals (see derivation above) |
+| `DOSING_TANK_CHEM_GAL_PER_CLICK` | 0.0000640 | Empirical fudge factor, pooled over intervals 2+3 (see derivation above) |
 | `DOSING_TANK_CONSERVATIVE_MARGIN` | 1.25 | Safety inflation applied to estimated consumption |
-| `DOSING_TANK_ANCHOR_DEPTH_IN` | 21.5 | Last known physical depth reading — 16.5" measured, then refilled to 21.5" same 2026-08-25 maintenance visit |
-| `DOSING_TANK_ANCHOR_TS` | 2026-08-25T17:27:31 | Timestamp of the post-refill reading |
+| `DOSING_TANK_ANCHOR_DEPTH_IN` | 17.0 | Last physical reading (owner, 2026-10-10) |
+| `DOSING_TANK_ANCHOR_TS` | 2026-10-10T10:14:32 | Timestamp of that reading |

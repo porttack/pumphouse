@@ -51,11 +51,14 @@ DOSING_TANK_CAPACITY_GALLONS = 15  # rated capacity (fill line sits below the ph
 #   6/16/26 23" -> 7/17/26 22"(refill anchor): 4" drop, 3.06 gal, 22,101 clicks
 #   7/17/26 22" -> 8/25/26 16.5" (maintenance): 5.5" drop, 4.2075 gal, 65,577 clicks
 #   pooled: 7.2675 gal / 87,678 clicks ≈ 0.00008289 gal/click
+#   8/25/26 21.5" -> 10/10/26 17" (owner on site): 4.5" drop, 3.4425 gal, 53,879 clicks
+#     ≈ 0.0000639 gal/click — matches interval 2 almost exactly, so interval 1 was
+#     dropped from the pool (2026-10-10): intervals 2+3 = 7.65 gal / 119,456 clicks
 # (interval 2 alone would be ≈0.0000642 gal/click — notably lower than interval
 # 1, consistent with the estimate having overstated consumption recently; see docs)
 # Revisit once the tank is physically re-measured against a fresh click count —
 # see docs/dosing-tank-calibration.md for the full derivation and how to redo it.
-DOSING_TANK_CHEM_GAL_PER_CLICK = 0.00008289
+DOSING_TANK_CHEM_GAL_PER_CLICK = 0.0000640
 
 # Extra safety margin applied on top of the fudge factor above when estimating
 # *current* depth (not applied when back-computing the fudge factor itself).
@@ -76,8 +79,10 @@ DOSING_TANK_CONSERVATIVE_MARGIN = 1.25
 # REFILLED same visit, 2026-08-25: maintenance added chlorine, bringing the
 # tank to 21.5" — not a consumption interval, so NOT folded into the fudge
 # factor (same treatment as the 7/17 top-off). Anchor reset to this reading.
-DOSING_TANK_ANCHOR_DEPTH_IN = 21.5
-DOSING_TANK_ANCHOR_TS       = "2026-08-25T17:27:31"
+#
+# UPDATED 2026-10-10: owner read 17" on site (estimate said 14.2"). Re-anchored.
+DOSING_TANK_ANCHOR_DEPTH_IN = 17.0
+DOSING_TANK_ANCHOR_TS       = "2026-10-10T10:14:32"
 
 # Ambient Weather Configuration
 ENABLE_AMBIENT_WEATHER = True  # Enable Ambient Weather integration
