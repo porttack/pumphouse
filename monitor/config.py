@@ -81,8 +81,12 @@ DOSING_TANK_CONSERVATIVE_MARGIN = 1.25
 # factor (same treatment as the 7/17 top-off). Anchor reset to this reading.
 #
 # UPDATED 2026-10-10: owner read 17" on site (estimate said 14.2"). Re-anchored.
-DOSING_TANK_ANCHOR_DEPTH_IN = 17.0
-DOSING_TANK_ANCHOR_TS       = "2026-10-10T10:14:32"
+#
+# REFILLED 2026-10-12: owner added 3.5 gal (~4.6") of the aged ~9% bleach, bringing
+# the tank to 22". Not a consumption interval, so not folded into the fudge factor.
+# Time of day wasn't logged; 12:00 used.
+DOSING_TANK_ANCHOR_DEPTH_IN = 22.0
+DOSING_TANK_ANCHOR_TS       = "2026-10-12T12:00:00"
 
 # Ambient Weather Configuration
 ENABLE_AMBIENT_WEATHER = True  # Enable Ambient Weather integration
@@ -130,7 +134,7 @@ SECONDS_PER_GALLON = 10 / 0.14   # 10 seconds = 0.14 gallons
 # a working estimate, not a settled constant. Applies only to bypass water, not
 # dosatron-treated water (CHLORINE_STEADY_STATE_PPM recovery is unaffected).
 CHLORINE_BYPASS_DEMAND_MULTIPLIER = 3.0
-CHLORINE_STEADY_STATE_PPM = 10.0  # measured steady-state ppm when dosatron is in use (stable for months as of 2026-07)
+CHLORINE_STEADY_STATE_PPM = 8.0  # dosatron steady-state ppm; was 10.0 (strip-measured, stable as of 2026-07). Lowered 2026-10-13: same aging bleach feeds the dosing tank (~9% effective vs 12% label), so ~10 x 9/10.5 rounds to 8
 BYPASS_GPM = 4.0  # owner's rough field estimate of bypass delivery rate (2026-07-29); NOT derived from SECONDS_PER_GALLON above (that constant is known-wrong for this purpose, see docs/tank-calibration.md)
 # Fallback only — monitor/bypass_calibration.py derives a real BYPASS_GPM from actual
 # tank readings during zero-usage bypass sessions once enough clean data has
@@ -150,7 +154,7 @@ BYPASS_GPM_MIN_CALIBRATION_MINUTES = 60  # min accumulated real flow before trus
 # stronger (~136 g/L), so the trade reading errs toward a marginally larger pour —
 # deliberate, since an aged jug loses strength and owner prefers overshoot (the
 # house carbon filter strips the excess, and getting maintenance on site is hard).
-CHLORINE_DOSE_PERCENT = 12.0        # label strength of the hypochlorite on hand
+CHLORINE_DOSE_PERCENT = 9.0         # effective strength of the hypochlorite on hand (12% label, ~1 yr old as of 2026-10-13; 11am 10/12 tank reading ran well below the 12% prediction)
 CHLORINE_DOSE_TARGET_PPM = 15.0     # primary target — deliberately above steady state
 CHLORINE_DOSE_TARGET_PPM_ALT = 10.0 # secondary target, for comparison
 
