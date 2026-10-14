@@ -305,6 +305,7 @@ RESERVATIONS_SNAPSHOT_FILE = DATA_DIR / 'reservations_snapshot.csv'
 CANCELED_RESERVATIONS_FILE = DATA_DIR / 'canceled_reservations.csv'
 WORK_ORDERS_FILE           = DATA_DIR / 'work_orders.csv'
 STATEMENTS_FILE            = DATA_DIR / 'statements.csv'
+STATEMENT_RESERVATIONS_FILE = DATA_DIR / 'statement_reservations.csv'
 
 # Default file paths (used by main.py CLI args and legacy callers)
 DEFAULT_LOG_FILE       = 'pressure_log.txt'

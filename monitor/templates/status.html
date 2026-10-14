@@ -1194,6 +1194,8 @@
                             <th>Booking</th>
                             <th>Gross</th>
                             <th>Net</th>
+                            <th>Actual</th>
+                            <th>Variance</th>
                             <th>Total</th>
                         </tr>
                     </thead>
@@ -1204,7 +1206,7 @@
                         {% if checkout_month != ns.prev_month %}
                         {% set ns.prev_month = checkout_month %}
                         <tr style="color:#444; font-size:0.8em;">
-                            <td colspan="9" style="padding-top:8px; border-top:1px solid #333;">
+                            <td colspan="11" style="padding-top:8px; border-top:1px solid #333;">
                                 {{ res['Checkout']|format_month_year }}
                             </td>
                         </tr>
@@ -1219,11 +1221,10 @@
                                 mgmt ${{ "%.0f"|format(res['stmt_mgmt_fee']) }}{% if res['stmt_other'] > 1 %} &nbsp;·&nbsp; other ${{ "%.0f"|format(res['stmt_other']) }}{% endif %}
                             </td>
                             <td></td>
-                            <td style="text-align:right; color:#5a7a50;">our net<br>${{ "%.0f"|format(res['computed_net']) }}</td>
-                            <td style="text-align:right; font-weight:bold; color:{% if delta >= -50 and delta <= 50 %}#6a8060{% elif delta > 50 %}#80b870{% else %}#c07070{% endif %};">
-                                paid ${{ "%.0f"|format(res['stmt_paid']) }}
-                                {% if delta > 1 %}<br><span style="font-size:0.85em; color:#80b870;">+${{ "%.0f"|format(delta) }}</span>{% elif delta < -1 %}<br><span style="font-size:0.85em; color:#c07070;">−${{ "%.0f"|format(delta|abs) }}</span>{% endif %}
-                            </td>
+                            <td style="text-align:right; color:#5a7a50;">${{ "%.0f"|format(res['computed_net']) }}</td>
+                            <td style="text-align:right; font-weight:bold; color:#6a8060;" title="Meredith paid to owner">${{ "%.0f"|format(res['stmt_paid']) }}</td>
+                            <td style="text-align:right; font-weight:bold; color:{% if delta >= -50 and delta <= 50 %}#6a8060{% elif delta > 50 %}#80b870{% else %}#c07070{% endif %};" title="Actual paid minus our computed net">{% if delta > 1 %}+${{ "%.0f"|format(delta) }}{% elif delta < -1 %}−${{ "%.0f"|format(delta|abs) }}{% else %}$0{% endif %}</td>
+                            <td></td>
                         </tr>
                         {% else %}
                         <tr style="color:{{ '#c08050' if res.get('canceled') else '#555e72' }};">
@@ -1235,6 +1236,9 @@
                             <td>{{ res['Type'] }}{% if res.get('canceled') %} <span style="font-size:0.8em; opacity:0.85;">(Canceled{% if res.get('Days Before Checkin') %}, {{ res['Days Before Checkin'] }}d before{% endif %})</span>{% endif %}</td>
                             <td style="text-align:right;">${{ "%.0f"|format(res.get('gross_income', 0)) }}</td>
                             <td style="text-align:right;">${{ "%.0f"|format(res.get('net_income', 0)) }}</td>
+                            {% set v = res.get('variance') %}
+                            <td style="text-align:right;">{% if res.get('actual') is not none %}${{ "%.0f"|format(res['actual']) }}{% endif %}</td>
+                            <td style="text-align:right;{% if v is not none %} color:{% if v > 50 %}#80b870{% elif v < -50 %}#c07070{% else %}#6a8060{% endif %};{% endif %}">{% if v is not none %}{% if v > 0.5 %}+${{ "%.0f"|format(v) }}{% elif v < -0.5 %}−${{ "%.0f"|format(v|abs) }}{% else %}$0{% endif %}{% endif %}</td>
                             <td style="text-align:right; font-weight:bold;">${{ "%.0f"|format(res.get('monthly_total', 0)) }}</td>
                         </tr>
                         {% endif %}

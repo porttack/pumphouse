@@ -2,6 +2,15 @@
 
 All notable changes to the pressure monitoring system.
 
+## [Unreleased]
+
+### Added — Reservations: per-reservation actual payout and variance
+
+- **`bin/scrape_statements.py`**: now also downloads each monthly statement PDF (`/owner/statements/pdf/?id=N`), parses it with `pdftotext -layout`, and writes `~/.local/share/pumphouse/statement_reservations.csv` (one row per reservation per statement: rental income, linen, commission, other charges, `actual` = income − charges). Only new statements plus the newest 2 are re-downloaded each run; failure is non-fatal. Parsed revenue matches `statements.csv` to the cent for all 9 months; the remaining gap to `paid` is work orders
+- **History table (dashboard)**: new **Actual** and **Variance** columns after Net. Reservation rows show actual payout and variance (actual − our net) joined by Reservation Id; the month's statement row shows Meredith's paid total (after work orders) vs our net
+- **`config.py`**: added `STATEMENT_RESERVATIONS_FILE`; **`web.py`**: added `load_statement_reservations()`
+- Observation: Meredith's actual commission is ~32% + 1% linen versus the 36% `MANAGEMENT_FEE_PERCENT` we assume, so reservations show a small positive variance (~+4.5% of net)
+
 ## [2.30.0] - 2026-05-19
 
 ### Added — Daily Summary: Filter Health Ratio

@@ -17,7 +17,7 @@ from functools import wraps
 from monitor import __version__
 from monitor.config import (
     EVENTS_FILE, RESERVATIONS_FILE, CANCELED_RESERVATIONS_FILE, CANCELLATION_STILL_PAID_DAYS,
-    WORK_ORDERS_FILE, STATEMENTS_FILE, DEFAULT_SNAPSHOTS_FILE, DAILY_CSV,
+    WORK_ORDERS_FILE, STATEMENTS_FILE, STATEMENT_RESERVATIONS_FILE, DEFAULT_SNAPSHOTS_FILE, DAILY_CSV,
     NOTIFY_BACKFLUSH_TIME_START, NOTIFY_BACKFLUSH_TIME_END,
     TANK_URL, TANK_HEIGHT_INCHES, TANK_CAPACITY_GALLONS, TANK_FULL_GALLONS,
     EPAPER_CONSERVE_WATER_THRESHOLD, EPAPER_OWNER_STAY_TYPES,
@@ -774,6 +774,29 @@ def get_snapshots_stats(filepath=DEFAULT_SNAPSHOTS_FILE):
     except Exception as e:
         return None
 
+def load_statement_reservations(filepath):
+    """Load statement_reservations.csv -> {reservation_id: actual_payout_float}.
+
+    'actual' is rental income minus linen, commission and other per-reservation charges
+    as itemized on the Meredith statement. Summed if a reservation appears on more than
+    one statement. Returns {} if the file is missing or unreadable.
+    """
+    if not os.path.exists(filepath):
+        return {}
+    result = {}
+    try:
+        with open(filepath, newline='') as f:
+            for row in csv.DictReader(f):
+                try:
+                    rid = row['reservation_id']
+                    result[rid] = result.get(rid, 0.0) + float(row['actual'])
+                except (ValueError, KeyError):
+                    continue
+    except Exception as e:
+        print(f"Error loading statement reservations: {e}")
+    return result
+
+
 def _build_prior_calendar(all_reservations, num_months=6, statements_by_month=None, canceled_reservations=None):
     """Return calendar months for the prior 6 complete months, oldest first."""
     from datetime import date as _date
@@ -796,7 +819,7 @@ def _build_prior_calendar(all_reservations, num_months=6, statements_by_month=No
     )
 
 
-def _build_past_reservations(all_reservations, management_fee_pct, guest_counts, statements_by_month=None, canceled_reservations=None):
+def _build_past_reservations(all_reservations, management_fee_pct, guest_counts, statements_by_month=None, canceled_reservations=None, actual_by_reservation=None):
     """Return reservation rows (with gross/net/monthly_total) for checkouts in the prior 6 months.
 
     If statements_by_month is provided, a special '_type':'statement' summary row is appended
@@ -840,6 +863,9 @@ def _build_past_reservations(all_reservations, management_fee_pct, guest_counts,
         res['gross_income'] = gross
         res['net_income'] = net
         res['canceled'] = is_canceled
+        actual = (actual_by_reservation or {}).get(str(res.get('Reservation Id', '')))
+        res['actual'] = actual
+        res['variance'] = (actual - net) if actual is not None else None
         guest = res.get('Guest', '')
         res['repeat_guest'] = 'Yes' if guest and guest_counts.get(guest, 0) > 1 else 'No'
         rows.append(res)
@@ -2637,7 +2663,7 @@ def index():
                          fill_extra_active=OVERRIDE_FILL_TARGET_FILE.exists(),
                          calendar_months=build_calendar_months(all_reservations),
                          prior_calendar_months=_build_prior_calendar(all_reservations, statements_by_month=statements_by_month, canceled_reservations=all_canceled_reservations),
-                         past_reservation_list=_build_past_reservations(all_reservations, MANAGEMENT_FEE_PERCENT, guest_counts, statements_by_month, canceled_reservations=still_paid_canceled_reservations),
+                         past_reservation_list=_build_past_reservations(all_reservations, MANAGEMENT_FEE_PERCENT, guest_counts, statements_by_month, canceled_reservations=still_paid_canceled_reservations, actual_by_reservation=load_statement_reservations(STATEMENT_RESERVATIONS_FILE)),
                          work_order_headers=work_order_headers,
                          work_order_rows=work_order_rows)
 
