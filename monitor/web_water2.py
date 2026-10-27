@@ -629,6 +629,16 @@ def api_flow_status():
     return resp
 
 
+@water2_bp.route('/api/fills')
+def api_fills():
+    """Fills (contiguous inflow episodes) over the last `hours` (default 24)."""
+    from monitor.fills import recent_fills
+    hours = min(max(request.args.get('hours', 24, type=float), 1), 168)
+    resp = jsonify({'hours': hours, 'fills': recent_fills(hours)})
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
 @water2_bp.route('/api/record_chlorine', methods=['POST'])
 def api_record_chlorine():
     """Record a manual chlorine pour and step the persisted ppm estimate up.
@@ -892,6 +902,21 @@ def water2_status():
     .flow-label {{ color: #8fb3e8; }}
     .flow-value {{ color: #cdd8f0; font-weight: 500; text-align: left; }}
     .flow-ts {{ font-size: 0.75rem; color: #4a6080; margin-top: 8px; }}
+    .fills-card {{
+      background: #1e2d54; border-radius: 12px; padding: 12px 14px;
+      max-width: 900px; width: 100%; box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+      font-size: 0.8rem; overflow-x: auto;
+    }}
+    .fills-card h3 {{ margin: 0 0 8px; font-size: 0.9rem; color: #8fb3e8; font-weight: 600; }}
+    .fills-card table {{ border-collapse: collapse; width: 100%; white-space: nowrap; }}
+    .fills-card th {{ color: #8fb3e8; font-weight: 500; text-align: right; padding: 2px 8px; }}
+    .fills-card td {{ color: #cdd8f0; text-align: right; padding: 2px 8px; border-top: 1px solid #2c3e6b; }}
+    .fills-card th:first-child, .fills-card td:first-child {{ text-align: left; }}
+    .fills-card .k-dosatron {{ color: #7fd4a0; }}
+    .fills-card .k-bypass {{ color: #ffb74d; }}
+    .fills-card .k-mixed {{ color: #ce93d8; }}
+    .fills-card .up   {{ color: #7fd4a0; }}
+    .fills-card .down {{ color: #ef5350; }}
     .links {{
       font-size: 0.82rem;
       color: #6a82b0;
@@ -1011,6 +1036,17 @@ def water2_status():
       <span class="flow-value" id="flow-sensor-text">&mdash;</span>
     </div>
     <div class="flow-ts" id="flow-updated"></div>
+  </div>
+  <div class="fills-card" id="fills-card">
+    <h3>Fills, last 24h</h3>
+    <table>
+      <thead><tr>
+        <th>Start</th><th>Type</th><th>Gal in</th><th>Duration</th><th>GPM</th><th>Clicks</th>
+        <th>Tank gal</th><th>ppm</th><th>Purge</th><th>Cars</th>
+      </tr></thead>
+      <tbody id="fills-body"><tr><td colspan="10">Loading&hellip;</td></tr></tbody>
+    </table>
+    <div class="flow-ts">GPM = gallons &divide; duration, so it's rough (bypass GPM is the assumed/calibrated rate; dosatron includes idle time in the pressure window). Gallons are estimates (clicks &times; gal/click; bypass flow time &times; GPM). Tank: sensor readings before and after the fill, ~ = estimate. ppm is the rough model.</div>
   </div>
   {controls_html}
   <div class="links">
@@ -1455,8 +1491,65 @@ def water2_status():
         }});
     }});
 
+    function updateFills() {{
+      fetch('/api/fills?hours=24')
+        .then(r => r.json())
+        .then(d => {{
+          const body = document.getElementById('fills-body');
+          if (!d.fills.length) {{
+            body.innerHTML = '<tr><td colspan="10">No fills in the last 24h</td></tr>';
+            return;
+          }}
+          const dash = '\u2014', arrow = ' \u2192 ';
+          const mmss = s => {{
+            if (s === null || s === undefined) return dash;
+            s = Math.round(s);
+            const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+            const p = n => String(n).padStart(2, '0');
+            return h ? h + ':' + p(m) + ':' + p(sec) : m + ':' + p(sec);
+          }};
+          const v = x => (x === null || x === undefined) ? dash : x;
+          // Click count links to the pump-cycle recording; bypass-only fills (no clicks)
+          // get a play glyph instead. Extra recordings in a merged fill follow as +2, +3...
+          const listen = f => {{
+            const label = f.kind === 'bypass' ? '\u25B6' : f.clicks;
+            if (!f.audio.length) return f.kind === 'bypass' ? dash : label;
+            return f.audio.map((u, j) =>
+              '<a href="' + u + '" target="_blank" style="color:inherit">' + (j === 0 ? label : '+' + (j + 1)) + '</a>'
+            ).join(' ');
+          }};
+          const trend = (a, b) => (a === null || b === null || a === b) ? '' : (b > a ? ' class="up"' : ' class="down"');
+          body.innerHTML = d.fills.map((f, i) => {{
+            const t = new Date(f.start_ts);
+            const when = t.toLocaleDateString('en-US', {{weekday: 'short'}}) + ', '
+              + (t.getMonth() + 1) + '/' + t.getDate() + ' '
+              + t.toLocaleTimeString('en-US', {{hour: 'numeric', minute: '2-digit'}});
+            const afterVal = f.tank_after !== null ? f.tank_after : f.tank_guess;
+            const tankBefore = f.tank_before !== null ? f.tank_before : dash;
+            const after = f.tank_after !== null ? f.tank_after
+              : (f.tank_guess !== null ? '~' + f.tank_guess : dash);
+            const gal = f.kind === 'mixed'
+              ? f.gallons_in + ' (' + f.dosatron_gallons + ' + ' + f.bypass_gallons + ')'
+              : f.gallons_in;
+            return '<tr><td>' + when + '</td>'
+              + '<td class="k-' + f.kind + '">' + f.kind + '</td>'
+              + '<td>' + gal + '</td>'
+              + '<td>' + mmss(f.flow_seconds) + '</td>'
+              + '<td>' + (f.gpm === null ? dash : f.gpm.toFixed(1)) + '</td>'
+              + '<td>' + listen(f) + '</td>'
+              + '<td' + trend(f.tank_before, afterVal) + '>' + tankBefore + arrow + after + '</td>'
+              + '<td' + trend(f.ppm_before, f.ppm_after) + '>' + v(f.ppm_before) + arrow + v(f.ppm_after) + '</td>'
+              + '<td>' + (f.purge ? 'yes' : '') + '</td>'
+              + '<td>' + v(f.cars) + '</td></tr>';
+          }}).join('');
+        }})
+        .catch(() => {{}});
+    }}
+
     updateFlow();
     setInterval(updateFlow, 10000);
+    updateFills();
+    setInterval(updateFills, 60000);
     scheduleImg(false);
   </script>
 </body>

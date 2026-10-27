@@ -237,6 +237,75 @@ def _pressure_high_windows(start_unix: float, end_unix: float):
     return clipped
 
 
+def _fill_gate_windows(start_unix: float, end_unix: float):
+    """Return (start, end) windows in which the tank was actually allowed to fill:
+    float CALLING or supply override ON, AND the tank not reading >= the override
+    shutoff threshold, AND no dosatron/override safety shutoff latched (a
+    OVERRIDE_SHUTOFF stays latched until the float goes FULL or the override is
+    turned back on). Built from events.csv row states. Used to bound pressure-HIGH
+    windows, since pressure alone can sit HIGH with no fill under way.
+    """
+    try:
+        import csv
+        from monitor.config import OVERRIDE_SHUTOFF_THRESHOLD
+        with open(_EVENTS_FILE) as f:
+            rows = list(csv.DictReader(f))
+    except Exception:
+        return []
+
+    windows = []
+    open_at = None          # start of the current open gate window
+    flt = ovr = None
+    tank = None
+    latched = False
+    for row in rows:
+        try:
+            ts = datetime.fromisoformat(row.get('timestamp', '')).timestamp()
+        except Exception:
+            continue
+        if ts > end_unix:
+            break
+        new_flt = (row.get('float_state') or '').strip() or None
+        new_ovr = (row.get('relay_supply_override') or '').strip() or None
+        if new_flt is None and new_ovr is None:
+            continue    # reservation/notification rows carry no state
+        if new_flt == 'FULL' and flt != 'FULL':
+            latched = False
+        if new_ovr == 'ON' and ovr != 'ON':
+            latched = False
+        if row.get('event_type') == 'OVERRIDE_SHUTOFF':
+            latched = True
+        flt, ovr = new_flt or flt, new_ovr or ovr
+        try:
+            if row.get('tank_gallons'):
+                tank = float(row['tank_gallons'])
+        except ValueError:
+            pass
+        active = ((flt == 'CALLING' or ovr == 'ON') and not latched
+                  and not (tank is not None and tank >= OVERRIDE_SHUTOFF_THRESHOLD))
+        if active and open_at is None:
+            open_at = ts
+        elif not active and open_at is not None:
+            windows.append((open_at, ts))
+            open_at = None
+    if open_at is not None:
+        windows.append((open_at, end_unix))
+    return [(max(s, start_unix), min(e, end_unix)) for s, e in windows
+            if max(s, start_unix) < min(e, end_unix)]
+
+
+def _fill_pressure_windows(start_unix: float, end_unix: float):
+    """Pressure-HIGH windows intersected with the fill-gate windows."""
+    gates = _fill_gate_windows(start_unix, end_unix)
+    out = []
+    for ps, pe in _pressure_high_windows(start_unix, end_unix):
+        for gs, ge in gates:
+            s, e = max(ps, gs), min(pe, ge)
+            if s < e:
+                out.append((s, e))
+    return sorted(out)
+
+
 def _sum_pressure_high_clicks(start_unix: float, end_unix: float) -> int:
     """Sum dosatron clicks within pressure-HIGH windows between two timestamps.
 
