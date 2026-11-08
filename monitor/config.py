@@ -58,14 +58,14 @@ DOSING_TANK_CAPACITY_GALLONS = 15  # rated capacity (fill line sits below the ph
 # 1, consistent with the estimate having overstated consumption recently; see docs)
 # Revisit once the tank is physically re-measured against a fresh click count —
 # see docs/dosing-tank-calibration.md for the full derivation and how to redo it.
-DOSING_TANK_CHEM_GAL_PER_CLICK = 0.0000640
+DOSING_TANK_CHEM_GAL_PER_CLICK = 0.0000600
 
 # Extra safety margin applied on top of the fudge factor above when estimating
 # *current* depth (not applied when back-computing the fudge factor itself).
 # Purely a hedge — inflates estimated consumption by 25% so the estimate errs
 # toward "less left than you think," since a single calibration point plus a
 # known air-in-line issue means the true rate could still be higher than measured.
-DOSING_TANK_CONSERVATIVE_MARGIN = 1.25
+DOSING_TANK_CONSERVATIVE_MARGIN = 1.10
 
 # Anchor point: the last known *physical* depth reading. Estimates going
 # forward are last-known-depth minus (clicks-since-anchor × fudge factor).
@@ -85,8 +85,12 @@ DOSING_TANK_CONSERVATIVE_MARGIN = 1.25
 # REFILLED 2026-10-12: owner added 3.5 gal (~4.6") of the aged ~9% bleach, bringing
 # the tank to 22". Not a consumption interval, so not folded into the fudge factor.
 # Time of day wasn't logged; 12:00 used.
-DOSING_TANK_ANCHOR_DEPTH_IN = 22.0
-DOSING_TANK_ANCHOR_TS       = "2026-10-12T12:00:00"
+#
+# UPDATED 2026-11-08: owner read 20" (estimate said 18.5"). Re-anchored. Interval
+# 12 Oct -> 8 Nov implied ~0.000046 gal/click (22" anchor may have been ~0.5" high);
+# pooled into the rate (now 0.0000600) and margin cut 1.25 -> 1.10.
+DOSING_TANK_ANCHOR_DEPTH_IN = 20.0
+DOSING_TANK_ANCHOR_TS       = "2026-11-08T13:20:00"
 
 # Ambient Weather Configuration
 ENABLE_AMBIENT_WEATHER = True  # Enable Ambient Weather integration
