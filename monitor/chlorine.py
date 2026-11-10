@@ -38,6 +38,7 @@ from monitor.config import (
 from monitor.bypass_calibration import get_calibrated_bypass_gpm
 
 CHLORINE_PPM_STATE_FILE = DATA_DIR / 'chlorine_ppm_state.json'
+CHLORINE_PPM_HISTORY_FILE = DATA_DIR / 'chlorine_ppm_history.jsonl'
 
 
 def read_chlorine_ppm_state() -> 'tuple[float, float]':
@@ -83,13 +84,54 @@ def update_chlorine_ppm_estimate(dosatron_gallons: float, bypass_flowing_seconds
 
 
 def _write_state(ppm: float) -> None:
+    now_iso = datetime.now().isoformat()
     try:
         tmp = str(CHLORINE_PPM_STATE_FILE) + '.tmp'
         with open(tmp, 'w') as f:
-            json.dump({'ppm': round(ppm, 3), 'ts': datetime.now().isoformat()}, f)
+            json.dump({'ppm': round(ppm, 3), 'ts': now_iso}, f)
         os.replace(tmp, CHLORINE_PPM_STATE_FILE)
     except Exception:
         pass
+    # Append-only history so /water2's fill table can show ppm before/after a fill.
+    try:
+        with open(CHLORINE_PPM_HISTORY_FILE, 'a') as f:
+            f.write(json.dumps({'ts': now_iso, 'ppm': round(ppm, 3)}) + '\n')
+    except Exception:
+        pass
+
+
+def read_ppm_history(start_unix: float, end_unix: float) -> 'list[tuple[float, float]]':
+    """(unix_ts, ppm) points from the history log within [start, end], sorted.
+    Reads only the file tail, so cost is independent of log length."""
+    out = []
+    try:
+        with open(CHLORINE_PPM_HISTORY_FILE, 'rb') as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            chunk = 65536
+            while True:
+                f.seek(max(0, size - chunk))
+                data = f.read()
+                first = data.split(b'\n', 1)[0]
+                try:
+                    first_ts = datetime.fromisoformat(json.loads(first)['ts']).timestamp()
+                except Exception:
+                    first_ts = None
+                if size <= chunk or (first_ts is not None and first_ts <= start_unix):
+                    break
+                chunk *= 4
+        for line in data.split(b'\n'):
+            try:
+                rec = json.loads(line)
+                t = datetime.fromisoformat(rec['ts']).timestamp()
+                if start_unix <= t <= end_unix:
+                    out.append((t, float(rec['ppm'])))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    out.sort()
+    return out
 
 
 # ── shock-dose calculator ─────────────────────────────────────────────────────
@@ -133,6 +175,8 @@ def dose_summary(current_ppm: 'float | None', tank_gallons: 'float | None') -> d
 
 # ── historical replay (for the per-day column in daily.csv) ───────────────────
 _ppm_series_cache: 'dict | None' = None
+_ppm_points_cache: 'list | None' = None   # [(unix, ppm)] per snapshot, from the same replay
+_ppm_steps_cache: 'list | None' = None    # [(unix, dos_gal, bypass_gal_effective, tank)] per snapshot
 
 
 def ppm_series_by_day(snapshots_csv: 'str | None' = None) -> dict:
@@ -145,12 +189,14 @@ def ppm_series_by_day(snapshots_csv: 'str | None' = None) -> dict:
     bypass flow seconds × the calibrated bypass GPM. Computed once per process
     and cached — build_daily.py --rebuild would otherwise re-walk it per day.
     """
-    global _ppm_series_cache
+    global _ppm_series_cache, _ppm_points_cache, _ppm_steps_cache
     if _ppm_series_cache is not None:
         return _ppm_series_cache
 
     import csv as _csv
     series: dict = {}
+    points: list = []
+    steps: list = []
     try:
         from monitor.dosatron import FLOW_CYCLES_JSONL
         path = snapshots_csv or str(DATA_DIR / 'snapshots.csv')
@@ -232,14 +278,34 @@ def ppm_series_by_day(snapshots_csv: 'str | None' = None) -> dict:
                             ppm += additions[a_i][1]
                         a_i += 1
                     ppm = blend_ppm(ppm, dos, tank, CHLORINE_STEADY_STATE_PPM)
-                    ppm = blend_ppm(ppm, byp_s / 60.0 * gpm * CHLORINE_BYPASS_DEMAND_MULTIPLIER, tank, 0.0)
+                    byp_eff = byp_s / 60.0 * gpm * CHLORINE_BYPASS_DEMAND_MULTIPLIER
+                    ppm = blend_ppm(ppm, byp_eff, tank, 0.0)
+                    steps.append((unix, dos, byp_eff, tank))
                     series[ts.strftime('%Y-%m-%d')] = round(ppm, 2)
+                    points.append((unix, round(ppm, 3)))
                 prev_unix = unix
     except Exception:
         pass
 
     _ppm_series_cache = series
+    _ppm_points_cache = points
+    _ppm_steps_cache = steps
     return series
+
+
+def ppm_steps_replay() -> 'list[tuple[float, float, float, float]]':
+    """Per-snapshot model inputs (unix, dosatron_gal, effective_bypass_gal, tank_gal)
+    from the same replay, so history can be reconstructed backward from the live
+    state instead of forward from the (drifted) config anchor."""
+    ppm_series_by_day()
+    return list(_ppm_steps_cache or [])
+
+
+def ppm_points_replay() -> 'list[tuple[float, float]]':
+    """Per-snapshot (unix, ppm) points from the replay in ppm_series_by_day —
+    used once by bin/backfill_ppm_history.py to seed the history log."""
+    ppm_series_by_day()
+    return list(_ppm_points_cache or [])
 
 
 # ── manual chlorine additions ─────────────────────────────────────────────────
