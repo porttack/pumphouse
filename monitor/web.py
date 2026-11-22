@@ -87,11 +87,13 @@ from monitor.web_dosatron import dosatron_bp  # noqa: E402
 from monitor.web_ring import ring_bp  # noqa: E402
 from monitor.web_weather import weather_bp  # noqa: E402
 from monitor.web_water2 import water2_bp  # noqa: E402
+from monitor.web_backup import backup_bp  # noqa: E402
 app.register_blueprint(timelapse_bp)
 app.register_blueprint(dosatron_bp)
 app.register_blueprint(ring_bp)
 app.register_blueprint(weather_bp)
 app.register_blueprint(water2_bp)
+app.register_blueprint(backup_bp)
 
 # Hostname-based redirects for CNAME subdomains
 _SUBDOMAIN_REDIRECTS = {
