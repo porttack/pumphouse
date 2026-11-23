@@ -1,11 +1,11 @@
 """
-Recent-fills table for /water2 (/api/fills).
+Recent-fills table for /water (/api/fills).
 
 A "fill" is one contiguous inflow episode: dosatron click bursts and/or bypass
 flow-cycle records (FFT-detected), merged when the gap between them is under
 FILL_MERGE_GAP_S. Per fill we report type (dosatron / bypass / mixed), gallons
 in, flowing time, clicks, tank before/after, ppm before/after, purge, and car
-count. Gallons are estimates: clicks x GALLONS_PER_CLICK, bypass flow seconds x
+count, plus estimated house use (gallons in minus tank gain). Gallons are estimates: clicks x GALLONS_PER_CLICK, bypass flow seconds x
 calibrated bypass GPM.
 """
 
@@ -192,6 +192,12 @@ def recent_fills(hours: float = 24.0) -> 'list[dict]':
         if tank_after is None and tank_before is not None:
             tank_guess = round(tank_before + dos_gal + byp_gal)
 
+        # House use during the fill (water balance): gallons in minus tank gain.
+        # Needs real sensor readings on both sides; a guessed 'after' says nothing.
+        house_gal = None
+        if tank_before is not None and tank_after is not None:
+            house_gal = round(max(0.0, dos_gal + byp_gal - (tank_after - tank_before)), 1)
+
         # Cars: nearest non-blank vehicle_count to the fill (camera is daytime-only).
         cars = None
         best = None
@@ -219,6 +225,7 @@ def recent_fills(hours: float = 24.0) -> 'list[dict]':
             'tank_before': None if tank_before is None else round(tank_before),
             'tank_after': None if tank_after is None else round(tank_after),
             'tank_guess': tank_guess,
+            'house_gallons': house_gal,
             'ppm_before': None if ppm_b is None else round(ppm_b, 1),
             'ppm_after': None if ppm_a is None else round(ppm_a, 1),
             'purge': any(f['start'] - PURGE_MARGIN_S <= p <= f['end'] + PURGE_MARGIN_S for p in purges),
