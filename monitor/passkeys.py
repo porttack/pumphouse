@@ -113,6 +113,28 @@ def _mutate_creds(fn):
 
 # ── auth checks ──────────────────────────────────────────────────────────────
 
+def _basic_active():
+    try:
+        from monitor.web import basic_auth_active  # lazy: web imports this module
+        return basic_auth_active()
+    except ImportError:
+        return False
+
+
+def _unauth_401():
+    """401 that only invites a Basic login when Basic auth is actually on."""
+    headers = {'WWW-Authenticate': 'Basic realm="Pumphouse"'} if _basic_active() else {}
+    return Response('Authentication required', 401, headers)
+
+
+def _basic_fp():
+    """Fingerprint of the current Basic password; baked into the Basic session
+    cookie so rotating (or removing) the password invalidates old cookies."""
+    import hashlib
+    from monitor.web import PASSWORD
+    return hashlib.sha256(('pw:' + PASSWORD).encode()).hexdigest()[:16]
+
+
 def _basic_ok():
     try:
         from monitor.web import check_auth  # lazy: web imports this module
@@ -124,10 +146,10 @@ def _basic_ok():
 
 def _session_ok():
     btok = request.cookies.get(BASIC_COOKIE)
-    if btok:
+    if btok and _basic_active():
         try:
-            _serializer('basic-session').loads(btok, max_age=BASIC_MAX_AGE)
-            return True
+            if _serializer('basic-session').loads(btok, max_age=BASIC_MAX_AGE) == _basic_fp():
+                return True
         except BadSignature:
             pass
     tok = request.cookies.get(SESSION_COOKIE)
@@ -157,8 +179,7 @@ def requires_auth(f=None, *, page=True):
                 return fn(*args, **kwargs)
             if page and request.method == 'GET':
                 return redirect('/login?next=' + quote(request.full_path.rstrip('?'), safe='/'))
-            return Response('Authentication required', 401,
-                            {'WWW-Authenticate': 'Basic realm="Pumphouse"'})
+            return _unauth_401()
         decorated._auth = 'login'     # read by /sitemap
         return decorated
     return wrap(f) if f else wrap
@@ -344,7 +365,7 @@ _LOGIN = """<!doctype html><meta charset=utf-8><meta name=viewport content="widt
 <h2>Pumphouse</h2>
 <button id=go>Sign in with passkey</button>
 <div class=err id=err></div>
-<small>No passkey on this device? <a href="/login/basic?next={{next|urlencode}}">Use password</a></small>
+{% if basic %}<small>No passkey on this device? <a href="/login/basic?next={{next|urlencode}}">Use password</a></small>{% endif %}
 <script>{{b64|safe}}
 const next={{next|tojson}};
 go.onclick=async()=>{err.textContent='';
@@ -405,10 +426,17 @@ def login_page():
     if is_authed():
         # Nothing enrolled yet -> go set one up rather than to the target page.
         return redirect(nxt if _load_creds() else '/passkeys')
-    return render_template_string(_LOGIN, css=_BASE_CSS, b64=_B64, next=nxt)
+    return render_template_string(_LOGIN, css=_BASE_CSS, b64=_B64, next=nxt, basic=_basic_active())
 
 
 @passkeys_bp.route('/login/basic')
+def login_basic_entry():
+    """Password login entry point; absent when Basic auth is disabled."""
+    if not _basic_active():
+        return redirect('/login')
+    return login_basic()
+
+
 @requires_auth(page=False)
 def login_basic():
     """Triggers the browser's Basic-auth prompt, then continues to ``next``."""
@@ -417,7 +445,7 @@ def login_basic():
         # Browsers only resend cached Basic creds under this path, so carry the
         # login across pages with a short-lived cookie.
         _set_cookie(resp, BASIC_COOKIE,
-                    _serializer('basic-session').dumps('ok'), BASIC_MAX_AGE)
+                    _serializer('basic-session').dumps(_basic_fp()), BASIC_MAX_AGE)
     return resp
 
 
@@ -437,8 +465,7 @@ def protect_blueprint(bp):
             return None
         if request.method == 'GET' and not request.path.startswith('/api/'):
             return redirect('/login?next=' + quote(request.full_path.rstrip('?'), safe='/'))
-        return Response('Authentication required', 401,
-                        {'WWW-Authenticate': 'Basic realm="Pumphouse"'})
+        return _unauth_401()
     bp._auth = 'login'      # read by /sitemap
 
 
@@ -531,8 +558,7 @@ def require_login_for_direct_access(app):
             return None
         if request.method == 'GET':
             return redirect('/login?next=' + quote(request.full_path.rstrip('?'), safe='/'))
-        return Response('Authentication required', 401,
-                        {'WWW-Authenticate': 'Basic realm="Pumphouse"'})
+        return _unauth_401()
 
 
 # ── signed, expiring links (for ntfy attachments) ────────────────────────────

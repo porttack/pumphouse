@@ -49,17 +49,17 @@ python -m monitor.web --no-ssl
 - **LAN URL**: `https://your-pi-hostname:6443/`
 - **Public URL**: `https://onblackberryhill.com/` (via Cloudflare CDN — timelapse viewer only)
 - **Default username**: `admin`
-- **Default password**: `pumphouse`
+- **Login**: passkeys (see `/passkeys`) and/or HTTP Basic auth. Credentials live in `~/.config/pumphouse/secrets.conf`, not in the service file or code.
 
-### Custom Credentials
+### Credentials (`secrets.conf`)
 
-Set environment variables before starting, or configure in the systemd service override:
-
-```bash
-export PUMPHOUSE_USER=yourusername
-export PUMPHOUSE_PASS=yourpassword
-python -m monitor.web
 ```
+PUMPHOUSE_USER=admin
+PUMPHOUSE_PASS=<long random password>   # no default; empty = Basic auth off
+BASIC_AUTH_ENABLED=true                 # false = passkey only
+```
+
+Restart `pumphouse-web` after editing. Enroll a passkey at `/passkeys` before setting `BASIC_AUTH_ENABLED=false`; if you lock yourself out, edit the file and restart. Rotating the password also ends existing Basic-auth sessions.
 
 ---
 

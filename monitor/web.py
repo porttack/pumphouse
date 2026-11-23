@@ -126,8 +126,7 @@ def uptime_redirect():
     return redirect('/internet', code=302)
 
 # Configuration
-USERNAME = os.environ.get('PUMPHOUSE_USER', 'admin')
-PASSWORD = os.environ.get('PUMPHOUSE_PASS', 'pumphouse')
+from monitor.config import PUMPHOUSE_USER as USERNAME, PUMPHOUSE_PASS as PASSWORD, BASIC_AUTH_ENABLED  # noqa: E402
 STARTUP_TIME = datetime.now()  # Track when web server started
 
 
@@ -290,17 +289,18 @@ def human_time_filter(timestamp_str):
     except:
         return timestamp_str
 
-def check_auth(username, password):
-    """Check if username/password is valid"""
-    return username == USERNAME and password == PASSWORD
+def basic_auth_active():
+    """Basic auth is usable only if enabled in secrets.conf AND a password is set
+    (there is deliberately no default password)."""
+    return bool(BASIC_AUTH_ENABLED and PASSWORD)
 
-def authenticate():
-    """Send 401 response for authentication"""
-    return Response(
-        'Authentication required',
-        401,
-        {'WWW-Authenticate': 'Basic realm="Pumphouse Monitor"'}
-    )
+def check_auth(username, password):
+    """Check if username/password is valid (always False when Basic auth is off)"""
+    import hmac
+    if not basic_auth_active():
+        return False
+    return (hmac.compare_digest((username or '').encode(), USERNAME.encode())
+            & hmac.compare_digest((password or '').encode(), PASSWORD.encode()))
 
 # requires_auth now lives in monitor/passkeys.py (passkey session OR Basic auth).
 
@@ -2954,11 +2954,10 @@ def main():
     else:
         print(f"Starting HTTP server on http://{args.host}:{args.port}/")
 
-    print(f"Username: {USERNAME}")
-    print(f"Password: {PASSWORD}")
-    print("\nSet credentials with environment variables:")
-    print("  export PUMPHOUSE_USER=yourusername")
-    print("  export PUMPHOUSE_PASS=yourpassword")
+    if basic_auth_active():
+        print(f"Basic auth: ON (user {USERNAME!r}); passkeys also accepted")
+    else:
+        print("Basic auth: OFF (passkey only). Set PUMPHOUSE_PASS and BASIC_AUTH_ENABLED=true in secrets.conf to enable.")
 
     app.run(host=args.host, port=args.port, ssl_context=ssl_context, debug=args.debug, threaded=True)
 

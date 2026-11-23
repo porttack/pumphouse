@@ -194,6 +194,15 @@ ENABLE_NOTIFICATIONS = True  # Master switch (default OFF for safety)
 NTFY_SERVER = "https://ntfy.sh"  # Can change to self-hosted later
 NTFY_TOPIC = ""  # Loaded from secrets file - set unique topic per installation!
 PUMPHOUSE_HOST = ""  # DDNS hostname - loaded from secrets file
+
+# Web login (HTTP Basic auth), alongside passkeys. Set in secrets.conf:
+#   PUMPHOUSE_USER=admin
+#   PUMPHOUSE_PASS=...            (plaintext; no built-in default)
+#   BASIC_AUTH_ENABLED=false      (passkey-only; Basic auth is rejected entirely)
+# Basic auth is also off whenever PUMPHOUSE_PASS is empty.
+PUMPHOUSE_USER = 'admin'
+PUMPHOUSE_PASS = ''
+BASIC_AUTH_ENABLED = True
 PUMPHOUSE_PORT = 6443  # Web server port - loaded from secrets file
 DASHBOARD_URL = ""  # Computed after secrets load: https://{PUMPHOUSE_HOST}:{PUMPHOUSE_PORT}/
 DASHBOARD_EMAIL_URL = None  # Custom URL for emails (default: None uses DASHBOARD_URL with ?hours=DAILY_STATUS_EMAIL_CHART_HOURS)
@@ -481,6 +490,12 @@ if SECRETS_FILE.exists():
                         CAMERA_PASS = value
                     elif key == 'PUMPHOUSE_HOST' and not PUMPHOUSE_HOST:
                         PUMPHOUSE_HOST = value
+                    elif key == 'PUMPHOUSE_USER' and value:
+                        PUMPHOUSE_USER = value
+                    elif key == 'PUMPHOUSE_PASS':
+                        PUMPHOUSE_PASS = value
+                    elif key == 'BASIC_AUTH_ENABLED':
+                        BASIC_AUTH_ENABLED = value.strip().lower() not in ('false', '0', 'no', 'off', 'disabled')
                     elif key == 'PUMPHOUSE_PORT':
                         PUMPHOUSE_PORT = int(value)
                     elif key == 'NTFY_TOPIC' and not NTFY_TOPIC:

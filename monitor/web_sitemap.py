@@ -23,7 +23,7 @@ MEDIA_HINTS = ('serve', 'clips', 'hero-photos', 'best-frame', '/frame', '/snapsh
 # endpoint -> kind overrides where the path heuristic is wrong
 KIND_OVERRIDE = {
     'ping': 'Utility', 'uptime_redirect': 'Utility', 'passkeys.logout': 'Utility',
-    'passkeys.login_basic': 'Utility', 'passkeys.login_page': 'Page',
+    'passkeys.login_basic_entry': 'Utility', 'passkeys.login_page': 'Page',
     'passkeys.manage_page': 'Page', 'control': 'Action',
     'watch_bypass_flow': 'Page', 'watch_pressure_low': 'Page',
     'timelapse.timelapse_best_frame_view': 'Page',
@@ -46,7 +46,7 @@ SEC = {
     'ring.archive_data': ('med', 'Public index of archived Ring photos'),
     'ring.serve_archive': ('med', 'Public Ring photos (people, vehicles)'),
     'ring.ring_review': ('med', 'Public Ring photo review page'),
-    'passkeys.login_basic': ('med', 'Basic auth has no lockout or rate limit; password is a known default'),
+    'passkeys.login_basic_entry': ('med', 'Basic auth has no lockout or rate limit; can be turned off with BASIC_AUTH_ENABLED=false in secrets.conf'),
     'passkeys.login_options': ('low', 'Public by design; passkey login'),
     'passkeys.login_verify': ('low', 'Public by design; passkey login'),
 }
