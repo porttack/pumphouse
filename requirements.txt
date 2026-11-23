@@ -10,3 +10,4 @@ pyecobee>=1.3.0
 pyotp>=2.9.0
 selenium>=4.15.0
 ring_doorbell>=0.9.0
+webauthn>=2.0.0

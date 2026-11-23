@@ -20,6 +20,9 @@ except Exception:
 
 dosatron_bp = Blueprint("dosatron", __name__)
 
+from monitor.passkeys import protect_blueprint  # noqa: E402
+protect_blueprint(dosatron_bp)
+
 DATA_DIR          = os.path.expanduser("~/.local/share/pumphouse/dosatron")
 CLIPS_DIR         = os.path.join(DATA_DIR, "clips")
 CYCLES_DIR        = os.path.join(DATA_DIR, "cycles")

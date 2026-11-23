@@ -18,6 +18,7 @@ import json
 from datetime import datetime, timedelta
 
 from flask import Blueprint, Response, request, jsonify
+from monitor.passkeys import inline_auth
 
 from monitor.config import (
     EVENTS_FILE,
@@ -640,6 +641,7 @@ def api_fills():
 
 
 @water2_bp.route('/api/record_chlorine', methods=['POST'])
+@inline_auth
 def api_record_chlorine():
     """Record a manual chlorine pour and step the persisted ppm estimate up.
 
@@ -648,13 +650,9 @@ def api_record_chlorine():
     through the tank since. See docs/chlorine-estimate.md.
     """
     from flask import request, jsonify
-    try:
-        from monitor.web import check_auth
-        auth = request.authorization
-        if not auth or not check_auth(auth.username, auth.password):
-            return jsonify({'ok': False, 'error': 'authentication required'}), 401
-    except ImportError:
-        pass
+    from monitor.passkeys import is_authed
+    if not is_authed():
+        return jsonify({'ok': False, 'error': 'authentication required'}), 401
 
     data = request.get_json(silent=True) or request.form
     try:
@@ -712,6 +710,11 @@ def water2_status():
     """
     via_cloudflare = bool(request.headers.get('CF-Ray'))
     dashboard_url  = f'https://{request.host}/?hours=120&totals=income'
+    # /dosatron is login-only; show its links as plain text to logged-out viewers.
+    from monitor.passkeys import is_authed as _is_authed
+    dosatron_links_css = '' if _is_authed() else (
+        'a[href^="/dosatron"]{pointer-events:none;color:inherit!important;'
+        'text-decoration:none!important}')
 
     hours_arg = request.args.get('hours', type=int)
     days_arg  = request.args.get('days',  type=int)
@@ -930,6 +933,7 @@ def water2_status():
     .links a:hover {{ text-decoration: underline; }}
     .win-link {{ color: #7aa4d8; }}
     .win-link.active {{ color: #cdd8f0; font-weight: 600; }}
+    {dosatron_links_css}
   </style>
 </head>
 <body>
@@ -1042,11 +1046,11 @@ def water2_status():
     <table>
       <thead><tr>
         <th>Start</th><th>Type</th><th>Gal in</th><th>Duration</th><th>GPM</th><th>Clicks</th>
-        <th>Tank gal</th><th>ppm</th><th>Purge</th><th>Cars</th>
+        <th>Tank gal</th><th>House gal</th><th>ppm</th><th>Purge</th><th>Cars</th>
       </tr></thead>
-      <tbody id="fills-body"><tr><td colspan="10">Loading&hellip;</td></tr></tbody>
+      <tbody id="fills-body"><tr><td colspan="11">Loading&hellip;</td></tr></tbody>
     </table>
-    <div class="flow-ts">GPM = gallons &divide; duration, so it's rough (bypass GPM is the assumed/calibrated rate; dosatron includes idle time in the pressure window). Gallons are estimates (clicks &times; gal/click; bypass flow time &times; GPM). Tank: sensor readings before and after the fill, ~ = estimate. ppm is the rough model.</div>
+    <div class="flow-ts">GPM = gallons &divide; duration, so it's rough (bypass GPM is the assumed/calibrated rate; dosatron includes idle time in the pressure window). Gallons are estimates (clicks &times; gal/click; bypass flow time &times; GPM). Tank: sensor readings before and after the fill, ~ = estimate. House gal = gal in minus tank gain (needs real tank readings before and after; &plusmn;~6 gal sensor steps). ppm is the rough model.</div>
   </div>
   {controls_html}
   <div class="links">
@@ -1497,7 +1501,7 @@ def water2_status():
         .then(d => {{
           const body = document.getElementById('fills-body');
           if (!d.fills.length) {{
-            body.innerHTML = '<tr><td colspan="10">No fills in the last 24h</td></tr>';
+            body.innerHTML = '<tr><td colspan="11">No fills in the last 24h</td></tr>';
             return;
           }}
           const dash = '\u2014', arrow = ' \u2192 ';
@@ -1538,6 +1542,7 @@ def water2_status():
               + '<td>' + (f.gpm === null ? dash : f.gpm.toFixed(1)) + '</td>'
               + '<td>' + listen(f) + '</td>'
               + '<td' + trend(f.tank_before, afterVal) + '>' + tankBefore + arrow + after + '</td>'
+              + '<td>' + (f.house_gallons === null || f.house_gallons === undefined ? dash : '~' + f.house_gallons) + '</td>'
               + '<td' + trend(f.ppm_before, f.ppm_after) + '>' + v(f.ppm_before) + arrow + v(f.ppm_after) + '</td>'
               + '<td>' + (f.purge ? 'yes' : '') + '</td>'
               + '<td>' + v(f.cars) + '</td></tr>';

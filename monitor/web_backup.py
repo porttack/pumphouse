@@ -15,6 +15,8 @@ from pathlib import Path
 
 from flask import Blueprint, Response, request
 
+from monitor.passkeys import requires_auth
+
 backup_bp = Blueprint('backup', __name__)
 
 LOG_CSV = Path.home() / '.local/share/pumphouse/backup_log.csv'
@@ -187,20 +189,9 @@ def _summary_html(rows, repo_now, detail, est_now):
     return f'{banner}{prob_html}<div class="tiles">{tiles}</div>'
 
 
-def _auth_ok():
-    try:
-        from monitor.web import check_auth
-    except ImportError:
-        return True
-    a = request.authorization
-    return bool(a and check_auth(a.username, a.password))
-
-
 @backup_bp.route('/backup')
+@requires_auth
 def backup_page():
-    if not _auth_ok():
-        return Response('Authentication required', 401,
-                        {'WWW-Authenticate': 'Basic realm="Pumphouse"'})
     rows = _load()
     days = defaultdict(lambda: {'runs': 0, 'ok': 0, 'added': 0, 'processed': 0, 'new': 0,
                                 'changed': 0, 'repo': 0})

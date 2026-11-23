@@ -88,12 +88,16 @@ from monitor.web_ring import ring_bp  # noqa: E402
 from monitor.web_weather import weather_bp  # noqa: E402
 from monitor.web_water2 import water2_bp  # noqa: E402
 from monitor.web_backup import backup_bp  # noqa: E402
+from monitor.passkeys import passkeys_bp, requires_auth  # noqa: E402
+from monitor.web_sitemap import sitemap_bp  # noqa: E402
 app.register_blueprint(timelapse_bp)
 app.register_blueprint(dosatron_bp)
 app.register_blueprint(ring_bp)
 app.register_blueprint(weather_bp)
 app.register_blueprint(water2_bp)
 app.register_blueprint(backup_bp)
+app.register_blueprint(passkeys_bp)
+app.register_blueprint(sitemap_bp)
 
 # Hostname-based redirects for CNAME subdomains
 _SUBDOMAIN_REDIRECTS = {
@@ -291,15 +295,7 @@ def authenticate():
         {'WWW-Authenticate': 'Basic realm="Pumphouse Monitor"'}
     )
 
-def requires_auth(f):
-    """Decorator for basic auth"""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        auth = request.authorization
-        if not auth or not check_auth(auth.username, auth.password):
-            return authenticate()
-        return f(*args, **kwargs)
-    return decorated
+# requires_auth now lives in monitor/passkeys.py (passkey session OR Basic auth).
 
 def read_csv_tail(filepath, max_rows=20):
     """Read last N rows from CSV file"""
@@ -2290,7 +2286,7 @@ def water_status():
 
 
 @app.route('/')
-# @requires_auth
+@requires_auth
 def index():
     """Main status page"""
     # ?owner / ?manager mode: unlocks control buttons and shows Ring snapshot
