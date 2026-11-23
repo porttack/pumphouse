@@ -216,6 +216,12 @@ def get_next_daily_status_time(current_time, target_time_str):
         # If parsing fails, default to 6am tomorrow
         return (dt.replace(hour=6, minute=0, second=0, microsecond=0) + timedelta(days=1)).timestamp()
 
+def _signed_ring_url():
+    """Ring snapshot URL with a 24 h signature (ntfy can't log in)."""
+    from monitor.passkeys import sign_path
+    return f"{DASHBOARD_URL}{sign_path('/api/ring.jpg').lstrip('/')}"
+
+
 class SnapshotTracker:
     """Track data for snapshot intervals"""
 
@@ -1477,7 +1483,7 @@ class SimplifiedMonitor:
                                     priority='high',
                                     tags=['car'],
                                     click_url=DASHBOARD_URL,
-                                    attach_url=f'{DASHBOARD_URL}api/ring.jpg',
+                                    attach_url=_signed_ring_url(),
                                     debug=self.debug
                                 )
                                 if self.last_vehicle_count == 0:
@@ -1499,7 +1505,7 @@ class SimplifiedMonitor:
                                     priority='default',
                                     tags=['car'],
                                     click_url=DASHBOARD_URL,
-                                    attach_url=f'{DASHBOARD_URL}api/ring.jpg',
+                                    attach_url=_signed_ring_url(),
                                     debug=self.debug
                                 )
                     if snapshot_vehicle_count is not None:

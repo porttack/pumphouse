@@ -834,6 +834,16 @@ def water2_status():
     else:
         maint_html = ''
 
+    # Ring camera: shown to anyone who can see this full view (login or maintenance).
+    ring_html = (
+        '<div class="card" style="text-align:center;">'
+        '<div style="font-size:0.8rem;color:#8fb3e8;margin-bottom:6px;">Ring camera (snapshot, refreshes every minute)</div>'
+        '<img id="ring-img" src="/api/ring.jpg?_t=' + str(_ts) + '" alt="Ring camera snapshot" '
+        'style="width:100%;border-radius:6px;display:block;" '
+        'onerror="this.alt=\'Ring snapshot unavailable\';this.style.minHeight=\'60px\'">'
+        '</div>'
+        '<script>setInterval(function(){document.getElementById("ring-img").src="/api/ring.jpg?_t="+Date.now()},60000);</script>')
+
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1078,6 +1088,7 @@ def water2_status():
   </div>
   {controls_html}
   {maint_html}
+  {ring_html}
   <div class="links">
     <a href="/timelapse">Timelapse</a>
     <span>&bull;</span>

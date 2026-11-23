@@ -38,14 +38,11 @@ KIND_OVERRIDE = {
 SEC = {
     'control': ('high', 'Changes relays via GET with the secret in the URL (logs, history, Referer); also needs login or maintenance mode'),
     'ring.delete_archive': ('high', 'Public delete of archived Ring photos'),
-    'timelapse.api_ratings_delete': ('med', 'Refused via Cloudflare, but /api/ paths need no login, so open on the :6443 hostname'),
-    'timelapse.timelapse_set_snapshot': ('low', 'Refused via Cloudflare; direct access requires login'),
-    'timelapse.timelapse_set_snapshot_file': ('low', 'Refused via Cloudflare; direct access requires login'),
-    'timelapse.timelapse_pick_best': ('low', 'Refused via Cloudflare; direct access requires login'),
-    'timelapse.timelapse_rate': ('low', 'Public rating writes (rating spam)'),
+    'timelapse.timelapse_rate': ('low', 'Public by design; guest ratings (normally handled by the Cloudflare Worker, direct access needs login)'),
     'timelapse.timelapse_frame_view': ('low', 'Public POST that echoes an uploaded image back into a page'),
     'water_status': ('med', 'While maintenance sharing is ON, logged-out visitors get the full view incl. relay controls'),
-    'ring_snapshot': ('med', 'Public live Ring camera image of the property'),
+    'ring_snapshot': ('low', 'Live Ring image; login or maintenance mode required'),
+    'ring_snapshot_api': ('med', 'Live Ring image for anyone with maintenance mode on, or a signed 24 h link'),
     'ring.archive_data': ('med', 'Public index of archived Ring photos'),
     'ring.serve_archive': ('med', 'Public Ring photos (people, vehicles)'),
     'ring.ring_review': ('med', 'Public Ring photo review page'),
@@ -55,7 +52,7 @@ SEC = {
 }
 DOS = {
     'dosatron.api_live': ('high', 'Spawns arecord + encoder per request and streams; only 16 worker threads total'),
-    'timelapse.timelapse_pick_best': ('low', 'Starts a frame-scoring job; refused via Cloudflare, login required direct'),
+    'timelapse.timelapse_pick_best': ('low', 'Starts a frame-scoring job; login required'),
     'chart_data': ('med', '?hours unbounded; re-reads snapshots.csv every call'),
     'timelapse.snapshot': ('med', 'Runs ffmpeg (up to 15 s) per uncached request; Cloudflare caches, :6443 does not'),
     'epaper_bmp': ('med', '8-min cache, but query overrides (hours/occupied/threshold) skip it and re-render'),
@@ -69,7 +66,7 @@ DOS = {
     'timelapse.timelapse_view': ('med', 'Very large handler; serves big MP4s, holding a thread'),
     'timelapse.timelapse_latest_mp4': ('med', 'Serves a large MP4, holding a thread'),
     'timelapse.timelapse_test_mp4': ('med', 'Serves a large MP4, holding a thread'),
-    'timelapse.timelapse_frame_view': ('med', 'POST body size is unlimited (no MAX_CONTENT_LENGTH)'),
+    'timelapse.timelapse_frame_view': ('low', 'Public POST; body capped at 8 MB'),
     'ring_snapshot': ('low', 'Cached; Ring API is called at most once per cache window'),
     'ring.archive_data': ('low', 'Directory scan per call'),
     'ring.serve_archive': ('low', 'Reads the whole file into memory'),
@@ -117,6 +114,10 @@ def _desc(fn):
     return line[:140]
 
 
+EXPOSURE_RANK = {'public': 0, 'tunnel': 1, 'mixed': 2, 'token': 3, 'maint': 4, 'login': 5}
+LEVEL_RANK = {'high': 0, 'med': 1, 'low': 2, None: 3}
+
+
 def collect_routes():
     rows = []
     for rule in current_app.url_map.iter_rules():
@@ -137,7 +138,11 @@ def collect_routes():
             'mutates': mutates,
             'linkable': 'GET' in methods and '<' not in rule.rule,
         })
-    rows.sort(key=lambda r: (r['path'], r['methods']))
+    # Default order: least-protected first, then worst security risk, DoS risk, path.
+    rows.sort(key=lambda r: (EXPOSURE_RANK[r['access']],
+                             LEVEL_RANK[r['sec'][0] if r['sec'] else None],
+                             LEVEL_RANK[r['dos'][0] if r['dos'] else None],
+                             r['path'], r['methods']))
     return rows
 
 
@@ -154,7 +159,7 @@ input[type=search]{padding:8px;border-radius:6px;border:1px solid var(--line);ba
 color:var(--fg);min-width:200px}
 .w{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px}
 th,td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
-th{position:sticky;top:0;background:var(--bg)}tr:nth-child(even){background:var(--row)}
+th{position:sticky;top:0;background:var(--bg);cursor:pointer;user-select:none}th.s::after{content:' \\25B2'}th.s.d::after{content:' \\25BC'}tr:nth-child(even){background:var(--row)}
 tr.warn{background:var(--warn)}
 code{font-family:ui-monospace,monospace;font-size:13px}a{color:inherit}
 .b{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;white-space:nowrap}
@@ -175,6 +180,12 @@ if(c.checked)on[c.dataset.k].add(c.value)});let n=0;
 rows.forEach(r=>{const ok=r.textContent.toLowerCase().includes(t)&&on.kind.has(r.dataset.kind)&&
 on.access.has(r.dataset.access)&&(!document.getElementById('wo').checked||r.dataset.risk==='1');
 r.hidden=!ok;if(ok)n++});document.getElementById('n').textContent=n+' of '+rows.length}
+const tb=document.querySelector('tbody'),ths=[...document.querySelectorAll('th[data-c]')];
+const val=(r,c)=>{const t=r.children[c];return t.dataset.v!==undefined?t.dataset.v:t.textContent.trim().toLowerCase()};
+ths.forEach(h=>h.onclick=()=>{const c=+h.dataset.c,d=h.classList.contains('s')&&!h.classList.contains('d');
+ths.forEach(x=>x.classList.remove('s','d'));h.classList.add('s');if(d)h.classList.add('d');
+const num=rows.every(r=>val(r,c)!==''&&!isNaN(val(r,c)));
+[...rows].sort((a,b)=>{const x=val(a,c),y=val(b,c);const k=num?x-y:String(x).localeCompare(String(y));return d?-k:k}).forEach(r=>tb.appendChild(r))});
 q.oninput=go;cks.forEach(c=>c.onchange=go);document.getElementById('wo').onchange=go;go();
 """
 
@@ -193,14 +204,14 @@ def sitemap_page():
         note = '<div class=m>&#9888; changes state, no login</div>' if warn else ''
         def cell(r_):
             if not r_:
-                return '<td class=r><span class=m>&mdash;</span></td>'
-            return (f'<td class=r><span class="b {r_[0]}">{r_[0].upper()}</span>'
+                return '<td class=r data-v=3><span class=m>&mdash;</span></td>'
+            return (f'<td class=r data-v={LEVEL_RANK[r_[0]]}><span class="b {r_[0]}">{r_[0].upper()}</span>'
                     f'<div class=m>{html.escape(r_[1])}</div></td>')
         risky = '1' if (r['sec'] and r['sec'][0] in ('high', 'med')) or (r['dos'] and r['dos'][0] in ('high', 'med')) else '0'
         body.append(
             f'<tr data-risk="{risky}" data-kind="{r["kind"]}" data-access="{r["access"]}"{" class=warn" if warn else ""}>'
-            f'<td>{path}</td><td>{html.escape(" ".join(r["methods"]))}</td><td>{r["kind"]}</td>'
-            f'<td><span class="b {r["access"]}">{label}</span>{note}</td>'
+            f'<td data-v="{html.escape(r["path"])}">{path}</td><td>{html.escape(" ".join(r["methods"]))}</td><td>{r["kind"]}</td>'
+            f'<td data-v={EXPOSURE_RANK[r["access"]]}><span class="b {r["access"]}">{label}</span>{note}</td>'
             f'{cell(r["sec"])}{cell(r["dos"])}<td>{html.escape(r["desc"])}</td></tr>')
     kinds = ['Page', 'API', 'Media', 'Action', 'Utility']
     kcb = ''.join(f'<label><input type=checkbox data-k=kind value="{k}" checked> {k}</label>' for k in kinds)
@@ -210,15 +221,15 @@ def sitemap_page():
     page = (f'<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">'
             f'<title>Sitemap</title><style>{_CSS}</style><h1>Sitemap</h1>'
             f'<p class=s>Generated from the live route table. Page = for people; API/Media = data for scripts and pages; '
-            f'Action = triggers a relay. <span id=n></span> shown.</p>'
+            f'Action = triggers a relay. Sorted least-protected first; click a column header to re-sort. <span id=n></span> shown.</p>'
             f'<div class=f><input id=q type=search placeholder="Filter…">{kcb}{acb}'
             f'<label><input type=checkbox id=wo> Only HIGH/MED risk</label></div>'
             f'<div class=note><b>Reading the risk columns.</b> Hand-reviewed from the code, not a scanner; see SEC/DOS in web_sitemap.py.'
             f'<ul><li><b>Global DoS exposure:</b> no rate limiting anywhere, and gunicorn has 2 workers &times; 8 threads = 16 concurrent requests, '
             f'so a few slow requests can stall the whole site. Hostnames behind Cloudflare get some protection; '
             f'<code>pumphouse.&hellip;:6443</code> (DNS-only) gets none.</li>'
-            f'<li><b>Global:</b> no request-body size limit; Basic auth (accepted on login routes) has no lockout.</li>'
+            f'<li><b>Global:</b> request bodies are capped at 8 MB; Basic auth (accepted on login routes) has no lockout.</li>'
             f'<li><b>Cloudflare vs direct:</b> non-API pages are public only when they arrive through the Cloudflare tunnel (CF-Ray header <i>and</i> a loopback connection, so it can&rsquo;t be faked); direct visits to them &mdash; LAN or the :6443 hostname &mdash; require login. <code>/api/*</code>, <code>/ping</code> and the login pages are exempt for devices and scripts.</li></ul></div>'
-            f'<div class=w><table><thead><tr><th>Path<th>Methods<th>Type<th>Access<th>Security risk<th>DoS risk<th>What it does</thead>'
+            f'<div class=w><table><thead><tr><th data-c=0>Path<th data-c=1>Methods<th data-c=2>Type<th data-c=3>Access<th data-c=4>Security risk<th data-c=5>DoS risk<th data-c=6>What it does</thead>'
             f'<tbody>{"".join(body)}</tbody></table></div><script>{_JS}</script>')
     return Response(page, mimetype='text/html')

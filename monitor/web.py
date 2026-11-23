@@ -74,6 +74,8 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
 app = Flask(__name__)
+# Reject request bodies over 8 MB (largest legit upload is a base64 JPEG frame).
+app.config['MAX_CONTENT_LENGTH'] = 8 * 1024 * 1024
 
 import logging as _logging  # noqa: E402
 _logging.basicConfig(level=_logging.WARNING, format='%(name)s %(levelname)s %(message)s')
@@ -115,6 +117,8 @@ def _subdomain_redirect():
 
 # Non-API pages: public through the Cloudflare tunnel, login required if direct.
 require_login_for_direct_access(app)
+from monitor.passkeys import no_shared_cache_for_gated  # noqa: E402
+no_shared_cache_for_gated(app)
 
 @app.route('/uptime')
 def uptime_redirect():
@@ -2653,9 +2657,7 @@ def sunset():
     return Response(f'Camera unavailable: {last_err}', status=503)
 
 
-@app.route('/api/ring.jpg')          # API path: stays reachable for ntfy attachments
-@app.route('/ring-snapshot')
-def ring_snapshot():
+def _ring_snapshot_response():
     """
     Proxy a Ring camera snapshot with a shared file-based cache.
     All processes share the same cache file so Ring is only called once
@@ -2668,6 +2670,27 @@ def ring_snapshot():
     mtime = ring_camera.get_cache_mtime()
     headers = {'X-Ring-Time': str(int(mtime))} if mtime else {}
     return Response(img_bytes, status=200, mimetype='image/jpeg', headers=headers)
+
+
+@app.route('/ring-snapshot')
+@requires_full_access
+def ring_snapshot():
+    """Ring camera snapshot for the dashboard (login, or maintenance mode)."""
+    return _ring_snapshot_response()
+
+
+@app.route('/api/ring.jpg')
+def ring_snapshot_api():
+    """Ring camera snapshot. Needs login or maintenance mode, OR a signed
+    expiring link (?e=&s=) -- ntfy's servers fetch notification attachments and
+    can't log in, so poll.py attaches signed URLs."""
+    from monitor.passkeys import full_access, valid_signature
+    from flask import g
+    if not (full_access() or valid_signature(request.path)):
+        return jsonify(ok=False, error='authentication required'), 401
+    g.gated = True      # never let a shared cache (Cloudflare) store this
+    return _ring_snapshot_response()
+ring_snapshot_api._auth = 'maint'          # read by /sitemap
 
 
 @app.route('/ping')

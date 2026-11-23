@@ -15,6 +15,9 @@ from flask import Blueprint, Response, jsonify
 
 ring_bp = Blueprint('ring', __name__)
 
+from monitor.passkeys import protect_blueprint  # noqa: E402
+protect_blueprint(ring_bp)      # archive page, photos and delete: login required
+
 _ARCHIVE_DIR = Path.home() / '.config' / 'pumphouse' / 'ring_archive'
 _DATE_RE     = re.compile(r'^\d{4}-\d{2}-\d{2}$')
 _FILE_RE     = re.compile(r'^\d{4}\.jpg$')

@@ -7,6 +7,7 @@ import os
 
 from flask import Blueprint, Response, request, redirect, send_file
 from monitor.config import CAMERA_USER, CAMERA_PASS, DEFAULT_SNAPSHOTS_FILE
+from monitor.passkeys import requires_auth
 from monitor.weather_api import _WMO, _QUIPS, current_weather_desc
 from monitor.pick_best import start_pick_best, get_status as _best_status, reset_best, BEST_DIR
 
@@ -1061,6 +1062,7 @@ def timelapse_best_frame_view(date_str, filename):
 
 
 @timelapse_bp.route('/timelapse/<date_str>/set-snapshot-file', methods=['POST'])
+@requires_auth(page=False)
 def timelapse_set_snapshot_file(date_str):
     """Copy a saved best-frame file directly to the snapshot for date_str.
     Avoids the browser round-trip that causes Request Entity Too Large."""
@@ -1162,6 +1164,7 @@ def timelapse_frame_view(date_str):
 
 
 @timelapse_bp.route('/timelapse/<date_str>/set-snapshot', methods=['POST'])
+@requires_auth(page=False)
 def timelapse_set_snapshot(date_str):
     """Save a POSTed base64 JPEG as the key snapshot for the given date.
     Only available via direct (non-Cloudflare) access."""
@@ -1207,6 +1210,7 @@ def api_ratings(date_str):
 
 
 @timelapse_bp.route('/api/ratings/<date_str>', methods=['DELETE'])
+@requires_auth(page=False)
 def api_ratings_delete(date_str):
     """Zero out ratings for a date. Only permitted from direct Pi access, not via Cloudflare."""
     import re
@@ -1270,6 +1274,7 @@ def timelapse_test_mp4():
 
 
 @timelapse_bp.route('/timelapse/<date_str>/pick-best', methods=['POST'])
+@requires_auth(page=False)
 def timelapse_pick_best(date_str):
     """
     Start a background job that scores all frames in the day's timelapse and

@@ -23,7 +23,7 @@ from functools import wraps
 from pathlib import Path
 from urllib.parse import quote
 
-from flask import (Blueprint, Response, jsonify, redirect, request,
+from flask import (Blueprint, Response, g, jsonify, redirect, request,
                    render_template_string)
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from webauthn import (generate_authentication_options,
@@ -153,6 +153,7 @@ def requires_auth(f=None, *, page=True):
         @wraps(fn)
         def decorated(*args, **kwargs):
             if is_authed():
+                g.gated = True
                 return fn(*args, **kwargs)
             if page and request.method == 'GET':
                 return redirect('/login?next=' + quote(request.full_path.rstrip('?'), safe='/'))
@@ -432,6 +433,7 @@ def protect_blueprint(bp):
     @bp.before_request
     def _gate():
         if is_authed():
+            g.gated = True
             return None
         if request.method == 'GET' and not request.path.startswith('/api/'):
             return redirect('/login?next=' + quote(request.full_path.rstrip('?'), safe='/'))
@@ -478,6 +480,7 @@ def requires_full_access(f=None, *, page=False):
         @wraps(fn)
         def decorated(*args, **kwargs):
             if full_access():
+                g.gated = True
                 return fn(*args, **kwargs)
             if page and request.method == 'GET':
                 return redirect('/login?next=' + quote(request.full_path.rstrip('?'), safe='/'))
@@ -530,3 +533,46 @@ def require_login_for_direct_access(app):
             return redirect('/login?next=' + quote(request.full_path.rstrip('?'), safe='/'))
         return Response('Authentication required', 401,
                         {'WWW-Authenticate': 'Basic realm="Pumphouse"'})
+
+
+# ── signed, expiring links (for ntfy attachments) ────────────────────────────
+# ntfy's servers fetch notification images and can't log in, so those URLs carry
+# an HMAC signature + expiry instead.
+
+def sign_path(path, ttl=24 * 3600):
+    """Return path + ?e=<expiry>&s=<sig>, valid for ttl seconds."""
+    import hashlib
+    import hmac
+    exp = int(time.time()) + ttl
+    sig = hmac.new(_secret().encode(), f'{path}|{exp}'.encode(), hashlib.sha256).hexdigest()[:32]
+    return f'{path}?e={exp}&s={sig}'
+
+
+def valid_signature(path):
+    import hashlib
+    import hmac
+    try:
+        exp = int(request.args.get('e', ''))
+        sig = request.args.get('s', '')
+    except ValueError:
+        return False
+    if exp < time.time():
+        return False
+    want = hmac.new(_secret().encode(), f'{path}|{exp}'.encode(), hashlib.sha256).hexdigest()[:32]
+    return hmac.compare_digest(sig, want)
+
+
+def no_shared_cache_for_gated(app):
+    """Responses from login/maintenance-gated routes must never be stored by a
+    shared cache. Cloudflare caches .jpg/.wav/.mp4 URLs by extension and would
+    otherwise serve an owner's (authorized) response to anonymous visitors."""
+    @app.after_request
+    def _private(resp):
+        if getattr(g, 'gated', False):
+            cc = resp.headers.get('Cache-Control', '')
+            if not cc or 'no-store' not in cc:
+                resp.headers['Cache-Control'] = (
+                    cc.replace('public', 'private') if 'max-age' in cc else 'private, no-store')
+                if 'private' not in resp.headers['Cache-Control']:
+                    resp.headers['Cache-Control'] += ', private'
+        return resp
