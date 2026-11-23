@@ -9,6 +9,7 @@ estimate so it can be compared with the Cloudflare bill.
 import csv
 import html
 import json
+from datetime import datetime, timedelta
 from collections import defaultdict
 from pathlib import Path
 
@@ -30,6 +31,8 @@ NOT_BACKED_UP = [
 # Cloudflare R2 standard-storage list prices (check dash for changes).
 R2_STORAGE_PER_GB_MONTH = 0.015
 R2_FREE_GB = 10.0
+SAVED = ('ok', 'WARN')   # a snapshot reached R2 (WARN = cleanup step had a problem)
+NEXT_RUN_HHMM = (3, 30)  # nightly cron time
 
 
 def _mb(n):
@@ -87,6 +90,103 @@ def _contents_html(detail):
             + (f'<h2>Largest new/changed files in the latest run</h2><div class="card"><table>{top}</table></div>' if top else ''))
 
 
+def _ago(dt, now):
+    sec = (now - dt).total_seconds()
+    if sec < 90:
+        return 'just now'
+    if sec < 5400:
+        return f'{sec / 60:.0f} min ago'
+    if sec < 172800:
+        return f'{sec / 3600:.0f} h ago'
+    return f'{sec / 86400:.0f} days ago'
+
+
+def _summary_html(rows, repo_now, detail, est_now):
+    now = datetime.now()
+    if not rows:
+        return '<div class="banner bad">No backup has run yet.</div>'
+    last = rows[-1]
+    last_saved = next((r for r in reversed(rows) if r['status'] in SAVED), None)
+    saved_dt = datetime.fromisoformat(last_saved['ts']) if last_saved else None
+    age_h = (now - saved_dt).total_seconds() / 3600 if saved_dt else 9e9
+
+    # overall health
+    if last['status'] not in SAVED or age_h > 50:
+        level, msg = 'bad', ('Last backup FAILED' if last['status'] not in SAVED else 'No recent backup')
+    elif last['status'] == 'WARN' or age_h > 30:
+        level, msg = 'warn', ('Backup saved, but cleanup reported a problem' if last['status'] == 'WARN'
+                              else 'Backup is overdue')
+    else:
+        level, msg = 'good', 'Backups healthy'
+    sub = (f'Last good backup {_ago(saved_dt, now)} ({saved_dt:%a %b %-d, %-I:%M %p})'
+           if saved_dt else 'No successful backup yet')
+    banner = f'<div class="banner {level}"><b>{msg}</b><span>{sub}</span></div>'
+
+    # last 30 days reliability
+    cutoff = now - timedelta(days=30)
+    recent = [r for r in rows if datetime.fromisoformat(r['ts']) >= cutoff]
+    ok_n = sum(r['status'] == 'ok' for r in recent)
+    warn_n = sum(r['status'] == 'WARN' for r in recent)
+    fail_n = len(recent) - ok_n - warn_n
+    problems = [r for r in recent if r['status'] != 'ok'][-5:]
+    prob_html = ''
+    if problems:
+        items = ''.join(
+            f'<li><b>{html.escape(r["ts"].replace("T", " "))}</b> '
+            f'<span class="{"warn" if r["status"] == "WARN" else "bad"}">{html.escape(r["status"])}</span> '
+            f'{html.escape(r["error"][:220])}</li>' for r in reversed(problems))
+        prob_html = f'<div class="card probs"><b>Recent problems</b><ul>{items}</ul></div>'
+
+    # next scheduled run
+    nxt = now.replace(hour=NEXT_RUN_HHMM[0], minute=NEXT_RUN_HHMM[1], second=0, microsecond=0)
+    if nxt <= now:
+        nxt += timedelta(days=1)
+    nxt_h = (nxt - now).total_seconds() / 3600
+
+    # uploads + growth
+    week_ago = now - timedelta(days=7)
+    up7 = sum(_int(r['bytes_added']) for r in rows
+              if r['status'] in SAVED and datetime.fromisoformat(r['ts']) >= week_ago)
+    with_repo = [r for r in rows if r['status'] in SAVED and r['repo_bytes']]
+    growth = '—'
+    growth_sub = 'needs a few days of data'
+    if len(with_repo) >= 2:
+        a, b = with_repo[0], with_repo[-1]
+        days_span = (datetime.fromisoformat(b['ts']) - datetime.fromisoformat(a['ts'])).total_seconds() / 86400
+        if days_span >= 1:
+            per_day = (_int(b['repo_bytes']) - _int(a['repo_bytes'])) / days_span
+            growth = f'{_mb(max(per_day, 0))}/day'
+            room = R2_FREE_GB * 1e9 - repo_now
+            if per_day <= 0:
+                growth_sub = 'not growing'
+            elif room <= 0:
+                growth_sub = 'already past the free tier'
+            else:
+                d = room / per_day
+                growth_sub = (f'~{d:.0f} days until free tier is full' if d < 730 else 'free tier lasts years')
+    pct = min(100.0, 100.0 * repo_now / (R2_FREE_GB * 1e9))
+    nfiles = sum(g['files'] for g in detail['groups'].values()) if detail else 0
+    src = _int(last_saved['bytes_processed']) if last_saved else 0
+    snaps_n = _int(with_repo[-1]['snapshots']) if with_repo and with_repo[-1]['snapshots'] else 0
+
+    def tile(big, small, extra=''):
+        return f'<div class="tile"><b>{big}</b><span>{small}</span>{extra}</div>'
+
+    tiles = ''.join([
+        tile(_ago(saved_dt, now) if saved_dt else '—', 'since last good backup'),
+        tile(f'{nxt:%a %-I:%M %p}', f'next scheduled run (in {nxt_h:.0f} h)'),
+        tile(f'{ok_n}/{len(recent)} ok', f'last 30 days · {warn_n} warnings · {fail_n} failed'),
+        tile(_mb(repo_now), f'stored in R2 · {pct:.0f}% of {R2_FREE_GB:.0f} GB free tier',
+             f'<i class="meter"><u style="width:{pct:.0f}%"></u></i>'),
+        tile(_mb(up7), 'uploaded in the last 7 days'),
+        tile(growth, 'repo growth rate', f'<span>{growth_sub}</span>'),
+        tile(f'{snaps_n}', 'snapshots kept · 14 daily / 8 weekly / 12 monthly'),
+        tile(_mb(src), f'source data · {nfiles:,} files' if nfiles else 'source data scanned'),
+        tile(f'${est_now:,.2f}/mo', f'est. storage cost (first {R2_FREE_GB:.0f} GB free)'),
+    ])
+    return f'{banner}{prob_html}<div class="tiles">{tiles}</div>'
+
+
 def _auth_ok():
     try:
         from monitor.web import check_auth
@@ -111,7 +211,7 @@ def backup_page():
         dd, mm = days[d], months[m]
         dd['runs'] += 1
         mm['runs'] += 1
-        if r['status'] == 'ok':
+        if r['status'] in SAVED:
             dd['ok'] += 1
             dd['added'] += _int(r['bytes_added'])
             dd['new'] += _int(r['files_new'])
@@ -128,7 +228,7 @@ def backup_page():
     detail_by_snap = _load_detail()
     latest_detail = None
     for r in reversed(rows):
-        if r['status'] == 'ok' and r['snapshot'] in detail_by_snap:
+        if r['status'] in SAVED and r['snapshot'] in detail_by_snap:
             latest_detail = detail_by_snap[r['snapshot']]
             break
     run_rows = ''
@@ -140,12 +240,14 @@ def backup_page():
                              for k, g in parts if g['added'] or g['modified'] or g['removed'])[:300] or 'no changes'
         else:
             what = 'initial full backup' if d else ''
-        st = '<span class="good">ok</span>' if r['status'] == 'ok' else f'<span class="bad">{html.escape(r["status"])}</span>'
+        st = {'ok': '<span class="good">ok</span>', 'WARN': '<span class="warn">warn</span>'}.get(
+            r['status'], f'<span class="bad">{html.escape(r["status"])}</span>')
         run_rows += (f'<tr><td>{html.escape(r["ts"].replace("T", " "))}</td><td>{st}</td><td>{html.escape(r["snapshot"])}</td>'
                      f'<td class="n">{_mb(_int(r["bytes_added"]))}</td><td class="wrap">{what}</td></tr>')
 
     last = rows[-1] if rows else None
-    last_ok = next((r for r in reversed(rows) if r['status'] == 'ok'), None)
+    last_ok = next((r for r in reversed(rows) if r['status'] in SAVED and r['repo_bytes']), None)
+    last_saved = next((r for r in reversed(rows) if r['status'] in SAVED), None)
     repo_now = _int(last_ok['repo_bytes']) if last_ok else 0
     gb = repo_now / 1e9
     est_now = max(0.0, gb - R2_FREE_GB) * R2_STORAGE_PER_GB_MONTH
@@ -179,13 +281,14 @@ def backup_page():
         status = 'No backup has run yet.'
 
     contents = _contents_html(latest_detail)
+    summary = _summary_html(rows, repo_now, latest_detail, est_now)
     not_backed = ''.join(f'<tr><td>{html.escape(a)}</td><td>{html.escape(b)}</td></tr>' for a, b in NOT_BACKED_UP)
     page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Backup Status</title>
 <style>
-:root{{--bg:#fafafa;--fg:#1c1c1e;--mut:#6b6b70;--card:#fff;--bd:#e3e3e6;--acc:#2563eb;--ok:#15803d;--bad:#b91c1c}}
-@media(prefers-color-scheme:dark){{:root{{--bg:#111113;--fg:#ececef;--mut:#9a9aa2;--card:#1b1b1f;--bd:#2c2c31;--acc:#60a5fa;--ok:#4ade80;--bad:#f87171}}}}
+:root{{--bg:#fafafa;--fg:#1c1c1e;--mut:#6b6b70;--card:#fff;--bd:#e3e3e6;--acc:#2563eb;--ok:#15803d;--bad:#b91c1c;--warn:#b45309}}
+@media(prefers-color-scheme:dark){{:root{{--bg:#111113;--fg:#ececef;--mut:#9a9aa2;--card:#1b1b1f;--bd:#2c2c31;--acc:#60a5fa;--ok:#4ade80;--bad:#f87171;--warn:#fbbf24}}}}
 body{{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif}}
 main{{max-width:900px;margin:0 auto}}h1{{font-size:1.4rem;margin:.2rem 0 1rem}}
 h2{{font-size:1rem;margin:1.6rem 0 .5rem;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}}
@@ -199,16 +302,18 @@ th{{color:var(--mut);font-weight:600}}td.n{{text-align:right;font-variant-numeri
 .sub{{padding-left:28px;color:var(--mut)}}.path{{font-family:ui-monospace,monospace;font-size:.78rem;white-space:normal;word-break:break-all}}
 .wrap{{white-space:normal;max-width:420px}}.grp td{{font-weight:600}}tr.kids td{{padding:0 8px;border-bottom:1px solid var(--bd)}}
 details summary{{cursor:pointer;list-style:none}}summary.sm{{color:var(--mut);font-size:.78rem;font-weight:400}}
+.banner{{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline;padding:12px 14px;border-radius:10px;border:1px solid var(--bd);margin-bottom:12px}}
+.banner b{{font-size:1.1rem}}.banner span{{color:var(--mut)}}
+.banner.good{{border-color:var(--ok);background:color-mix(in srgb,var(--ok) 10%,var(--card))}}
+.banner.warn{{border-color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,var(--card))}}
+.banner.bad{{border-color:var(--bad);background:color-mix(in srgb,var(--bad) 10%,var(--card))}}
+.probs{{margin-bottom:12px;font-size:.85rem}}.probs ul{{margin:.3rem 0 0;padding-left:1.1rem}}.probs li{{margin:.2rem 0}}
+.meter{{display:block;height:6px;background:var(--bd);border-radius:3px;margin-top:6px;overflow:hidden}}.meter u{{display:block;height:100%;background:var(--acc)}}
+.warn{{color:var(--warn);font-weight:600}}
 .good{{color:var(--ok);font-weight:600}}.bad{{color:var(--bad);font-weight:600}}.note{{color:var(--mut);font-size:.8rem;margin-top:.6rem}}
 </style></head><body><main>
 <h1>Pi backup → Cloudflare R2</h1>
-<p>Last run: {status}</p>
-<div class="tiles">
-<div class="tile"><b>{_mb(repo_now)}</b><span>repository size (stored, encrypted)</span></div>
-<div class="tile"><b>{_int(last_ok['snapshots']) if last_ok else 0}</b><span>snapshots kept</span></div>
-<div class="tile"><b>{_mb(_int(last_ok['bytes_processed'])) if last_ok else '—'}</b><span>source data scanned</span></div>
-<div class="tile"><b>${est_now:,.2f}/mo</b><span>est. storage cost now (first {R2_FREE_GB:.0f} GB free)</span></div>
-</div>
+{summary}
 <h2>What's in the latest backup</h2>
 {contents}
 <h2>Recent runs — what changed</h2>

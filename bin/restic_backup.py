@@ -230,13 +230,24 @@ def main():
         if r.returncode == 3:
             row['error'] = 'some files unreadable (rc=3)'
 
-        sh(['restic', 'forget'] + KEEP + (['--prune'] if '--prune' in sys.argv else []), env=env)
-        st = json.loads(sh(['restic', 'stats', '--mode', 'raw-data', '--json'], env=env).stdout)
-        row.update(repo_bytes=st['total_size'], repo_objects=st['total_blob_count'])
-        snaps = json.loads(sh(['restic', 'snapshots', '--json'], env=env).stdout)
-        row['snapshots'] = len(snaps)
+        # The snapshot is safely in R2 at this point. Housekeeping problems (e.g. a stale
+        # lock) downgrade the run to WARN instead of calling a good backup FAILED.
         row['status'] = 'ok'
+        snaps = []
+        try:
+            sh(['restic', 'unlock'], env=env, check=False)  # removes only stale locks
+            sh(['restic', 'forget'] + KEEP + (['--prune'] if '--prune' in sys.argv else []), env=env)
+            st = json.loads(sh(['restic', 'stats', '--mode', 'raw-data', '--json'], env=env).stdout)
+            row.update(repo_bytes=st['total_size'], repo_objects=st['total_blob_count'])
+            snaps = json.loads(sh(['restic', 'snapshots', '--json'], env=env).stdout)
+            row['snapshots'] = len(snaps)
+        except Exception as e:
+            err = getattr(e, 'stderr', '') or str(e)
+            row['status'] = 'WARN'
+            row['error'] = ('backup saved, cleanup failed: ' + err.replace('\n', ' '))[:400]
+            notify_failure(row['error'])
         try:  # what's in it / what changed -- never fail the backup over this
+            snaps = snaps or json.loads(sh(['restic', 'snapshots', '--json'], env=env).stdout)
             snaps.sort(key=lambda x: x['time'])
             ids = [x['id'] for x in snaps]
             full = next((i for i in ids if i.startswith(row['snapshot'])), ids[-1])
@@ -251,7 +262,7 @@ def main():
     row['duration_s'] = round(time.time() - t0)
     append_row(row)
     print(row)
-    return 0 if row['status'] == 'ok' else 1
+    return 0 if row['status'] in ('ok', 'WARN') else 1
 
 
 if __name__ == '__main__':
