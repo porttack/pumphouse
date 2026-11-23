@@ -15,7 +15,7 @@
 //   └─────────────────────────────────────────────┘
 //
 // TAP ZONES:
-//   - gallons (top-left)   → /water page
+//   - gallons (top-left)   → /water page (full view when logged in)
 //   - percent (top-right)  → owner dashboard  (also the whole-widget fallback)
 //   - graph   (center)     → /weather page
 //   - "3d ago" (bot-left)  → cycle the widget's graph window 3d ⇄ 6h
@@ -33,11 +33,17 @@
 //   4. Long-press home screen → "+" → Scriptable → add a Medium widget
 //   5. Long-press the widget → "Edit Widget" → choose this script
 
-// Replace YOUR-HOST with your DDNS hostname (secrets.conf PUMPHOUSE_HOST)
-const BASE = "https://YOUR-HOST:6443";
+// Everything (image fetch + tap-zone pages) goes through one host. The server
+// fills this in when you copy the script from /scriptable, using whichever host
+// you opened that page on -- open it at https://onblackberryhill.com/scriptable
+// so the widget goes through Cloudflare (works on any network, no :6443).
+//   - /api/epaper.jpg needs no login
+//   - /weather is public
+//   - /water shows the full owner view once you've signed in with your passkey
+//   - /dashboard needs your passkey (a session lasts weeks per hostname)
+const BASE = "https://onblackberryhill.com";
 
-// Page routes for the tap zones
-const URL_WATER  = `${BASE}/water`;
+const URL_WATER   = `${BASE}/water`;
 const URL_WEATHER = `${BASE}/weather`;
 const URL_OWNER   = `${BASE}/dashboard`;
 
@@ -72,7 +78,8 @@ if (args.queryParameters && args.queryParameters.toggle) {
 async function buildWidget() {
   const hours = readHours();
 
-  const imgUrl = `${BASE}/api/epaper.jpg?tenant=no&scale=4&hours=${hours}`;
+  const bucket = Math.floor(Date.now() / 300000);   // new URL every 5 min -> CDN can cache within a bucket
+  const imgUrl = `${BASE}/api/epaper.jpg?tenant=no&scale=4&hours=${hours}&_t=${bucket}`;
   const toggleUrl =
     `scriptable:///run/${encodeURIComponent(Script.name())}?toggle=1`;
 
@@ -86,7 +93,7 @@ async function buildWidget() {
   let isError = false;
   try {
     let req = new Request(imgUrl);
-    req.timeoutInterval = 15;
+    req.timeoutInterval = 25;   // a cold render on the Pi can take ~10 s
     image = await req.loadImage();
     fm.writeImage(cachePath, image);
   } catch (error) {

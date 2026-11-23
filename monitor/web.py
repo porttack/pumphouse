@@ -2016,7 +2016,9 @@ def scriptable_widget():
     except OSError:
         return Response(f'Widget template not found: {template_path}', 500)
 
-    base = (DASHBOARD_URL or request.host_url).rstrip('/')
+    # Use the host this page was opened on (open it via onblackberryhill.com so
+    # the widget goes through Cloudflare).
+    base = request.host_url.rstrip('/')
     code, n = _re.subn(r'^const BASE = ".*";$',
                        f'const BASE = "{base}";', template, flags=_re.MULTILINE)
     if n != 1:

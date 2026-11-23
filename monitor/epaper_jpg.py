@@ -185,12 +185,22 @@ def render_epaper_jpg(
 
     # ── Cache (8 minutes, same policy as epaper_bmp) ─────────────────────
     _cache_max_age  = 8 * 60
-    _is_cacheable   = (hours_explicit is None and occupied_override is None
-                       and threshold_override is None)
+    # Only the standard graph windows are cached (one file each), so arbitrary
+    # ?hours=N values can't create unlimited cache files or force a re-render.
+    _CACHEABLE_HOURS = (6, 12, 24, 72, 120)
+    _is_cacheable   = (occupied_override is None and threshold_override is None
+                       and not use_estimate and min_range_pct is None
+                       and (hours_explicit is None or hours_explicit in _CACHEABLE_HOURS))
     if _is_cacheable:
         _parts = []
         if tenant_override:
             _parts.append(f'tenant-{tenant_override}')
+        # public_mode strips check-in/out info, so it must never share a cache
+        # file with the normal render (or the public image could leak it).
+        if public_mode:
+            _parts.append('public')
+        if hours_explicit is not None:
+            _parts.append(f'h{hours_explicit}')
         if scale != 4:
             _parts.append(f's{scale}')
         _cache_file = 'epaper_jpg_cache' + ('_' + '_'.join(_parts) if _parts else '') + '.jpg'
