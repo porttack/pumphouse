@@ -339,7 +339,7 @@
             </div>
             {% endif %}
             <div id="image-row" style="display:flex; align-items:flex-start; gap:12px; flex-wrap:wrap;">
-                <a id="epaper-link" href="https://onblackberryhill2.tplinkdns.com:6443/?hours=120&totals=income"
+                <a id="epaper-link" href="https://onblackberryhill2.tplinkdns.com:6443/dashboard?hours=120"
                    style="flex-shrink:0; display:block; width:100%; max-width:500px;">
                     <img id="epaper-img" src="/api/epaper.jpg?tenant=no&hours={{ hours }}&_t={{ epaper_cache_bust }}"
                          alt="E-paper display">
@@ -636,15 +636,15 @@
             {% if owner_mode %}
             <div style="margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
                 {% if pressure_low_watch %}
-                <a href="/watch/pressure_low?enable=0&back=/?owner" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #f44336; background: #f44336; color: #fff;">● Pressure LOW alerts: ON</a>
+                <a href="/watch/pressure_low?enable=0&back=/dashboard" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #f44336; background: #f44336; color: #fff;">● Pressure LOW alerts: ON</a>
                 {% else %}
-                <a href="/watch/pressure_low?enable=1&back=/?owner" class="time-btn" style="font-size: 12px; padding: 4px 10px;">○ Pressure LOW alerts: OFF</a>
+                <a href="/watch/pressure_low?enable=1&back=/dashboard" class="time-btn" style="font-size: 12px; padding: 4px 10px;">○ Pressure LOW alerts: OFF</a>
                 {% endif %}
                 <span style="color: #555; font-size: 12px;">|</span>
                 {% if bypass_flow_watch %}
-                <a href="/watch/bypass_flow?enable=0&back=/?owner" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #f44336; background: #f44336; color: #fff;">● Bypass Flow alerts: ON</a>
+                <a href="/watch/bypass_flow?enable=0&back=/dashboard" class="time-btn active" style="font-size: 12px; padding: 4px 10px; border-color: #f44336; background: #f44336; color: #fff;">● Bypass Flow alerts: ON</a>
                 {% else %}
-                <a href="/watch/bypass_flow?enable=1&back=/?owner" class="time-btn" style="font-size: 12px; padding: 4px 10px;">○ Bypass Flow alerts: OFF</a>
+                <a href="/watch/bypass_flow?enable=1&back=/dashboard" class="time-btn" style="font-size: 12px; padding: 4px 10px;">○ Bypass Flow alerts: OFF</a>
                 {% endif %}
                 <span style="color: #555; font-size: 12px;">|</span>
                 {% if relay_status.supply_override == 'ON' %}

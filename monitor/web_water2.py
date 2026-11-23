@@ -708,7 +708,7 @@ def water2_status():
     Cache-Control is no-store so relay state is always fresh.
     """
     via_cloudflare = bool(request.headers.get('CF-Ray'))
-    dashboard_url  = f'https://{request.host}/?hours=120&totals=income'
+    dashboard_url  = f'https://{request.host}/dashboard?hours=120'
     # /dosatron is login-only; show its links as plain text to logged-out viewers.
     from monitor.passkeys import is_authed as _is_authed
     dosatron_links_css = '' if _is_authed() else (
@@ -744,15 +744,15 @@ def water2_status():
         + _range_link('3 days',   'days=3',   hours_arg == 72)
         + '</div>'
     )
-    if via_cloudflare:
-        img_inner   = img_tag
-        extra_links = ''
-    else:
+    if is_authed():     # logged-in owner: link to the dashboard (works via Cloudflare too)
         img_inner   = f'<a href="{dashboard_url}">{img_tag}</a>'
         extra_links = (
             '\n    <span>&bull;</span>'
-            '\n    <a href="/">Dashboard</a>'
+            '\n    <a href="/dashboard">Dashboard</a>'
         )
+    else:
+        img_inner   = img_tag
+        extra_links = ''
     img_html = f'<div class="img-wrap">{img_inner}<div class="spinner" id="tank-spinner"></div></div>'
 
     back = '/water'

@@ -373,7 +373,7 @@ Tap the blue button below. Your browser or phone will then ask for fingerprint, 
 <p><input id=name placeholder="Name (e.g. Pixel 9)" style="width:100%;padding:10px;box-sizing:border-box"></p>
 <button id=add style="font-size:1.15em;padding:16px">&#128273; Create a passkey on this device</button>
 <div class=err id=err></div>
-<p><a href="/">Home</a> · <a href="/logout">Sign out</a></p>
+<p><a href="/dashboard">Dashboard</a> · <a href="/logout">Sign out</a></p>
 <script>{{b64|safe}}
 add.onclick=async()=>{err.textContent='';
  try{

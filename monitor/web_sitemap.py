@@ -61,7 +61,7 @@ DOS = {
     'epaper_bmp': ('med', '8-min cache, but query overrides (hours/occupied/threshold) skip it and re-render'),
     'epaper_jpg': ('med', 'Renders a 4x image; varying query params gives distinct cache keys'),
     'sunset': ('med', 'Matplotlib render per request; no cache'),
-    'index': ('med', 'Heavy page: tank API call + CSV reads'),
+    'dashboard': ('med', 'Heavy page: tank API call + CSV reads'),
     'water2.api_flow_status': ('med', 'Reads CSV/JSONL history on each call'),
     'dosatron.api_training_clips': ('med', 'Scans the full detections JSONL per call'),
     'dosatron.api_cycles': ('med', 'Loads and sorts all cycle records per call'),

@@ -301,7 +301,7 @@ def snapshot():
   <div class="actions">
     <a class="btn" href="{tl_link}">&#8592; Timelapses</a>
     <button class="btn btn-admin" onclick="location.reload()">&#8635; New Snapshot</button>
-    {'<a class="btn btn-admin" href="/">Dashboard</a>' if is_direct else ''}
+    {'<a class="btn btn-admin" href="/dashboard">Dashboard</a>' if is_direct else ''}
     <a class="btn btn-admin" href="data:image/jpeg;base64,{img_b64}" download="snapshot-{date_str}.jpg">&#8681; Download</a>
   </div>
   <script>
@@ -1001,7 +1001,7 @@ def timelapse_best_frame_view(date_str, filename):
 
     img_b64   = _b64.b64encode(open(path, 'rb').read()).decode()
     is_direct = not bool(request.headers.get('CF-Ray'))
-    dash_btn  = '<a class="btn" href="/">Dashboard</a>' if is_direct else ''
+    dash_btn  = '<a class="btn" href="/dashboard">Dashboard</a>' if is_direct else ''
     set_key_btn = (
         f'<button id="set-key-btn" class="btn" onclick="setKeySnapshot()">Set key snapshot</button>'
         if is_direct else ''
@@ -1104,7 +1104,7 @@ def timelapse_frame_view(date_str):
     img_b64 = _b64.b64encode(jpeg_bytes).decode()
 
     is_direct = not bool(request.headers.get('CF-Ray'))
-    dash_btn = '<a class="btn" href="/">Dashboard</a>' if is_direct else ''
+    dash_btn = '<a class="btn" href="/dashboard">Dashboard</a>' if is_direct else ''
     set_key_btn = (
         '<button id="set-key-btn" class="btn" onclick="setKeySnapshot()">Set key snapshot</button>'
         if is_direct else ''
@@ -1456,7 +1456,7 @@ def timelapse_view(date_or_file):
     zoom_btn   = ('<button id="zoom-btn" class="speed-btn dl-btn">&#128269; Zoom</button>'
                   if zoom_name else '')
     now_btn      = '<a href="/snapshot" class="speed-btn dl-btn">Now</a>'
-    dash_btn     = '<a href="/" class="speed-btn dl-btn">Dashboard</a>' if is_direct else ''
+    dash_btn     = '<a href="/dashboard" class="speed-btn dl-btn">Dashboard</a>' if is_direct else ''
     best_btn     = ('<button id="best-btn" class="speed-btn dl-btn">&#9733; Best Frames</button>'
                     if is_direct else '')
     public_link  = (f' (<a href="https://onblackberryhill.com/timelapse/{date_str}">public</a>)'

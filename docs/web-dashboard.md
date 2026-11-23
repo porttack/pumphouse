@@ -110,8 +110,9 @@ The dashboard auto-refreshes every 60 minutes.
 
 | Route | Description |
 |-------|-------------|
-| `GET /` | Web dashboard (requires auth); `?owner` enables control buttons + income totals |
-| `GET /?hours=N` | Dashboard filtered to last N hours of events (`?days=N` also accepted) |
+| `GET /dashboard` | Owner dashboard (requires login): control buttons, Ring image, income totals |
+| `GET /dashboard?hours=N` | Dashboard filtered to last N hours of events (`?days=N` also accepted; default 120) |
+| `GET /` | Redirects to `/dashboard` (through Cloudflare, `/` redirects to `/timelapse` instead) |
 | `GET /water` | Public water tank status page (embedded e-paper image, auto-refreshes) |
 | `GET /water?hours=N` | Water status with explicit graph timespan (`?days=N` also accepted) |
 | `GET /watch/pressure_low` | Toggle pressure-LOW ntfy watch flag (owner mode) |
@@ -128,12 +129,13 @@ The dashboard auto-refreshes every 60 minutes.
 
 ---
 
-## Owner Mode (`?owner`) and Manager Mode (`?manager`)
+## Owner dashboard (`/dashboard`)
 
-Append `?owner` or `?manager` to the dashboard URL to unlock elevated features:
+`/dashboard` requires login (passkey or Basic auth), so everything the old `?owner` / `?manager` modes unlocked is always on: control buttons (relay tokens are embedded in the HTML only for logged-in users), the Ring camera image, income totals, and a 120 h default range. `?owner` and `?manager` are ignored.
 
-| Feature | `?owner` | `?manager` |
-|---------|----------|------------|
+Buttons turn red when the corresponding relay/flag is active. Clicking any button redirects back to `/dashboard`.
+
+---------|----------|------------|
 | Ring camera image | Yes | Yes |
 | Control buttons (relays, watch toggle) | Yes | No |
 | Income totals in reservations | Yes | No |

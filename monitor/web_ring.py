@@ -71,7 +71,7 @@ h1{color:#4CAF50;font-size:1.3em;margin-bottom:4px}
 </style>
 </head>
 <body>
-<h1><a href="/">&#8592;</a> Ring Archive Review</h1>
+<h1><a href="/dashboard">&#8592;</a> Ring Archive Review</h1>
 <div class="subtitle">Archived driveway snapshots, newest day first</div>
 
 <div id="archive"></div>

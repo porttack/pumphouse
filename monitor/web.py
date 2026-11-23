@@ -11,7 +11,7 @@ import io
 import threading
 import time as _time
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, Response, jsonify, send_file
+from flask import Flask, render_template, request, Response, jsonify, send_file, redirect
 from functools import wraps
 
 from monitor import __version__
@@ -2099,7 +2099,7 @@ def _water_public():
     Direct Pi access (no CF-Ray): tenant=no mode, dashboard link shown.
     """
     via_cloudflare = bool(request.headers.get('CF-Ray'))
-    dashboard_url = f'https://{request.host}/?hours=120&totals=income'
+    dashboard_url = f'https://{request.host}/dashboard?hours=120'
 
     # Support ?hours=N or ?days=N to control the graph timespan
     hours_arg = request.args.get('hours', type=int)
@@ -2119,7 +2119,7 @@ def _water_public():
             '\n    <span>&bull;</span>'
             f'\n    <a href="/api/epaper.jpg?{img_param}">Image only</a>'
             '\n    <span>&bull;</span>'
-            '\n    <a href="/">Dashboard</a>'
+            '\n    <a href="/dashboard">Dashboard</a>'
             '\n    <span>&bull;</span>'
             '\n    <a href="https://onblackberryhill.com/water">Public view</a>'
             '\n    <span>&bull;</span>'
@@ -2206,19 +2206,28 @@ def _water_public():
 
 
 @app.route('/')
-@requires_auth
 def index():
-    """Main status page"""
-    # ?owner / ?manager mode: unlocks control buttons and shows Ring snapshot
-    owner_mode   = 'owner'   in request.args
-    manager_mode = 'manager' in request.args
-    show_ring    = owner_mode or manager_mode
+    """Old dashboard URL (and the Pi's root): send to /dashboard. Through
+    Cloudflare, / is redirected to /timelapse before reaching here."""
+    qs = request.query_string.decode()
+    return redirect('/dashboard' + ('?' + qs if qs else ''), code=302)
+
+
+@app.route('/dashboard')
+@requires_auth
+def dashboard():
+    """Owner dashboard (login required): controls, Ring image, income totals."""
+    # Login is required to get here, so everything the old ?owner / ?manager
+    # modes unlocked (control buttons + relay tokens, Ring image, income totals,
+    # 120 h default range) is always on.
+    owner_mode = True
+    show_ring  = True
 
     # Get hours parameter for filtering events by time; days=n is an alias
     hours = request.args.get('hours', type=int)
     days  = request.args.get('days',  type=int)
     if hours is None:
-        hours = days * 24 if days is not None else (120 if owner_mode else DASHBOARD_DEFAULT_HOURS)
+        hours = days * 24 if days is not None else 120
 
     # Get sensor data
     sensor_data = get_sensor_data()
@@ -2441,9 +2450,9 @@ def index():
     else:
         month_after_next = next_month_start.replace(month=next_month_start.month + 1)
 
-    # Check if totals parameter matches secret (?owner implicitly enables it)
+    # Income totals are always shown on the (login-protected) dashboard
     from monitor.config import SECRET_TOTALS_TOKEN
-    totals_arg = request.args.get('totals') or (SECRET_TOTALS_TOKEN if owner_mode else None)
+    totals_arg = request.args.get('totals') or SECRET_TOTALS_TOKEN
     show_totals = totals_arg == SECRET_TOTALS_TOKEN if SECRET_TOTALS_TOKEN else False
 
     # Filter reservations - ONLY based on checkout month, using ALL reservations including checked out
@@ -2670,7 +2679,7 @@ def ping():
 def watch_pressure_low():
     """Toggle the temporary pressure-LOW ntfy alert on or off."""
     enable = request.args.get('enable', '1')
-    back = request.args.get('back', '/?owner')
+    back = request.args.get('back', '/dashboard')
     if enable == '1':
         PRESSURE_LOW_WATCH_FILE.parent.mkdir(parents=True, exist_ok=True)
         PRESSURE_LOW_WATCH_FILE.touch()
@@ -2705,7 +2714,7 @@ def watch_pressure_low():
 def watch_bypass_flow():
     """Toggle bypass-flow-cycle ntfy alerts on or off."""
     enable = request.args.get('enable', '1')
-    back   = request.args.get('back', '/?owner')
+    back   = request.args.get('back', '/dashboard')
     if enable == '1':
         BYPASS_FLOW_WATCH_FILE.parent.mkdir(parents=True, exist_ok=True)
         BYPASS_FLOW_WATCH_FILE.touch()
@@ -2731,7 +2740,7 @@ def control(token):
     """
     Relay control endpoint: secret token AND (logged in OR maintenance sharing on).
     """
-    back = request.args.get('back', '/?owner')
+    back = request.args.get('back', '/dashboard')
     action_taken = None
     success = False
 
