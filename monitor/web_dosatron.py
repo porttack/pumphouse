@@ -178,7 +178,7 @@ def _resolve_window(default_hours: float = 24):
     """Parse start/end/hours query params into (start_dt, end_dt).
 
     Explicit start/end (ISO 8601) take precedence — used when linking in from
-    elsewhere (e.g. /water2) with a specific duty window. Otherwise hours is
+    elsewhere (e.g. /water) with a specific duty window. Otherwise hours is
     a duration back from end (or from now, if end isn't given either), so the
     existing quick-refresh buttons/auto-refresh keep working unchanged.
     """

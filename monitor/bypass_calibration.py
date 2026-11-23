@@ -79,7 +79,7 @@ def get_calibrated_bypass_gpm() -> float:
 
 
 def get_calibration_status() -> dict:
-    """Return the raw calibration state, for display (e.g. /water2)."""
+    """Return the raw calibration state, for display (e.g. /water)."""
     state = _read_state()
     total_flow_min = state['total_flow_seconds'] / 60.0
     calibrated = (total_flow_min >= BYPASS_GPM_MIN_CALIBRATION_MINUTES and state['total_gallons'] > 0)

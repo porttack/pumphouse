@@ -27,7 +27,7 @@ KIND_OVERRIDE = {
     'passkeys.manage_page': 'Page', 'control': 'Action',
     'watch_bypass_flow': 'Page', 'watch_pressure_low': 'Page',
     'timelapse.timelapse_best_frame_view': 'Page',
-    'water2.water2_redirect': 'Utility', 'water_status': 'Page',
+    'water_status': 'Page',
 }
 
 

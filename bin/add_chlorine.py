@@ -70,7 +70,7 @@ def main():
         d = dose_summary(ppm, None)
         print(f'Current estimate: ~{ppm:.1f} ppm')
         print(f'Nothing recorded. Pass an amount in fl oz (see --help), '
-              f'or check /water2 for the suggested pour.')
+              f'or check /water for the suggested pour.')
         return 1
 
     floz = args.amount * 8.0 if args.cups else args.amount

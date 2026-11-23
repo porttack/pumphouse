@@ -5,7 +5,7 @@
 //
 //   ┌─────────────────────────────────────────────┐
 //   │  1,234 gal        available        87%       │  header
-//   │  └─► /water2                    └─► owner dash│
+//   │  └─► /water                    └─► owner dash│
 //   │                                               │
 //   │              [ camera + graph ]               │  graph
 //   │                 └─► /weather                  │
@@ -15,7 +15,7 @@
 //   └─────────────────────────────────────────────┘
 //
 // TAP ZONES:
-//   - gallons (top-left)   → /water2 page
+//   - gallons (top-left)   → /water page
 //   - percent (top-right)  → owner dashboard  (also the whole-widget fallback)
 //   - graph   (center)     → /weather page
 //   - "3d ago" (bot-left)  → cycle the widget's graph window 3d ⇄ 6h
@@ -37,7 +37,7 @@
 const BASE = "https://YOUR-HOST:6443";
 
 // Page routes for the tap zones
-const URL_WATER2  = `${BASE}/water2`;
+const URL_WATER  = `${BASE}/water`;
 const URL_WEATHER = `${BASE}/weather`;
 const URL_OWNER   = `${BASE}/?owner`;
 
@@ -136,10 +136,10 @@ async function buildWidget() {
   col.layoutVertically();
   col.spacing = 0;
 
-  // Header row: gallons (left) → water2 ; percent (right) → owner
+  // Header row: gallons (left) → water ; percent (right) → owner
   const header = col.addStack();
   header.layoutHorizontally();
-  addZone(header, 125, H_HEADER, URL_WATER2);   // "1,234 gal"
+  addZone(header, 125, H_HEADER, URL_WATER);   // "1,234 gal"
   header.addSpacer();                            // "available water" — dead → owner
   addZone(header, 115, H_HEADER, URL_OWNER);     // "87%"
 

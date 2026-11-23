@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Seed chlorine_ppm_history.jsonl (used by /water2's fills table) for the period
+Seed chlorine_ppm_history.jsonl (used by /water's fills table) for the period
 before live logging began.
 
 Works BACKWARD from the first live history point by inverting each snapshot's

@@ -149,7 +149,7 @@ BYPASS_GPM_MIN_CALIBRATION_MINUTES = 60  # min accumulated real flow before trus
 # ── Chlorine shock-dose calculator (added 2026-08-22) ─────────────────────────
 # How much 12% sodium hypochlorite ("liquid chlorine"/pool chlorine) to pour into
 # the main tank to bring the estimated residual up to a target. Surfaced on
-# /water2, in the daily status email, and in daily.csv so a maintenance person can
+# /water, in the daily status email, and in daily.csv so a maintenance person can
 # be given a single number over the phone.
 #
 # CHLORINE_DOSE_PERCENT is read as TRADE percent — grams of available chlorine

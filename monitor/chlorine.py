@@ -92,7 +92,7 @@ def _write_state(ppm: float) -> None:
         os.replace(tmp, CHLORINE_PPM_STATE_FILE)
     except Exception:
         pass
-    # Append-only history so /water2's fill table can show ppm before/after a fill.
+    # Append-only history so /water's fill table can show ppm before/after a fill.
     try:
         with open(CHLORINE_PPM_HISTORY_FILE, 'a') as f:
             f.write(json.dumps({'ts': now_iso, 'ppm': round(ppm, 3)}) + '\n')

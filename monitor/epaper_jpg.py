@@ -258,7 +258,7 @@ def render_epaper_jpg(
             pass
 
     # Live dosatron estimate (last sensor fetch + clicks since) as the current
-    # depth — lets /water2 show the fill rising in real time between sensor reads.
+    # depth — lets /water show the fill rising in real time between sensor reads.
     if use_estimate:
         try:
             import json as _json

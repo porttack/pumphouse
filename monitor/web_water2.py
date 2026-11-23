@@ -2,7 +2,7 @@
 Owner-facing water status page + live flow API — Flask blueprint.
 
 Mounted at:
-  /water2           — owner control page (graph, live flow card, bypass controls)
+  (full owner view, rendered by /water when logged in or maintenance sharing is on)
   /api/flow_status  — JSON polled by that page every ~10s
 
 Flow, GPM and duty cycle are derived from dosatron *clicks* (ground truth for
@@ -698,14 +698,6 @@ def api_chlorine_additions():
         return jsonify({'additions': read_additions(limit=20)[::-1]})
     except Exception:
         return jsonify({'additions': []})
-
-
-@water2_bp.route('/water2')
-def water2_redirect():
-    """Old URL: redirect to /water (which shows this view when logged in)."""
-    from flask import redirect
-    qs = request.query_string.decode()
-    return redirect('/water' + ('?' + qs if qs else ''), code=302)
 
 
 def water2_status():

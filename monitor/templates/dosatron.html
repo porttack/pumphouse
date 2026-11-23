@@ -266,7 +266,7 @@ const fmt = iso => {
 const fmtDur = s => s >= 60 ? `${(s/60).toFixed(1)} min` : `${Math.round(s)} s`;
 
 // ── time range ───────────────────────────────────────────────────────────────
-// Either an explicit start/end (arrived here via a link, e.g. from /water2's
+// Either an explicit start/end (arrived here via a link, e.g. from /water's
 // duty window) or a plain hours-back-from-now preset. Presets stay live
 // (always "now" relative); a linked-in start/end is a fixed point in time.
 const initParams = new URLSearchParams(location.search);

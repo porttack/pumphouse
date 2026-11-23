@@ -23,7 +23,7 @@ its own assumed inflow concentration, proportional to gallons delivered:
   water's own chlorine demand on top of plain dilution (see Recalibration below).
 
 State persists in `chlorine_ppm_state.json`, advanced once per ~15-min snapshot
-by `monitor/poll.py`. `/water2` projects it forward live during active bypass.
+by `monitor/poll.py`. `/water` projects it forward live during active bypass.
 
 `ppm_series_by_day()` replays the same math from `CHLORINE_ANCHOR_PPM` /
 `CHLORINE_ANCHOR_TS` to produce historical per-day values for `daily.csv`,
@@ -56,7 +56,7 @@ may land slightly under target.
 
 ## Where it surfaces
 
-- `/water2` — "Est. chlorine (rough)" plus a "12% chlorine to add" row.
+- `/water` — "Est. chlorine (rough)" plus a "12% chlorine to add" row.
 - Daily status email — a "Tank Chlorine (est.)" tile with both dose targets, and
   `Cl~` / `oz→15` / `oz→10` columns in the daily table.
 - `daily.csv` — `chlorine_ppm_est`, `chlorine_floz_to_15`, `chlorine_floz_to_10`.
@@ -66,7 +66,7 @@ may land slightly under target.
 The model only sees water movement, so a physical pour is invisible to it — every
 ppm figure after an unrecorded pour stays wrong. Record it one of two ways:
 
-**From /water2** — "+ Log a chlorine pour" under the chlorine rows. Amount (fl oz
+**From /water** — "+ Log a chlorine pour" under the chlorine rows. Amount (fl oz
 or cups), strength, how many hours ago, and a note. Auth-gated, since it mutates
 the running estimate.
 
