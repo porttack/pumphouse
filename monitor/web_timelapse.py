@@ -822,6 +822,10 @@ def _current_conditions():
     return result
 
 
+# How long a "KV has no rating for this date" result is trusted before rechecking.
+_KV_RECHECK_SECS = 6 * 3600
+
+
 @timelapse_bp.route('/timelapse')
 def timelapse_index():
     """Redirect to a timelapse date.
@@ -841,18 +845,36 @@ def timelapse_index():
         for d in (today, yesterday):
             if d in dates_set:
                 return redirect(f'/timelapse/{d}')
+    import time as _time
     ratings = _read_ratings()
+    now = _time.time()
+    kv_updates = {}          # date -> entry learned from KV this request
+    target = None
     for d in reversed(dates):
         r = ratings.get(d, {})
-        # If not in local file and KV is the backend, fall back to KV
-        if not r and _RATINGS_BACKEND == 'cloudflare_kv':
-            r = _kv_read_rating(d) or {}
-            if r.get('count', 0) > 0:
-                # Sync back into local file so future lookups don't need KV
-                ratings[d] = r
-                _write_ratings(ratings)
+        # Fall back to KV for dates with no local rating, or whose last KV check
+        # found nothing long enough ago. "Nothing" results are remembered
+        # (kv_checked) so we don't make one KV round trip per unrated date on
+        # every request -- that used to add ~15 s to /timelapse.
+        needs_kv = (not r) or (r.get('count', 0) == 0
+                               and now - r.get('kv_checked', 0) > _KV_RECHECK_SECS)
+        if needs_kv and _RATINGS_BACKEND == 'cloudflare_kv':
+            kv = _kv_read_rating(d)
+            if kv is not None:       # None = lookup failed; try again next time
+                r = kv if kv.get('count', 0) > 0 else {'count': 0, 'sum': 0, 'kv_checked': now}
+                kv_updates[d] = r
         if r.get('count', 0) > 0 and r['sum'] / r['count'] >= 4.5:
-            return redirect(f'/timelapse/{d}')
+            target = d
+            break
+    if kv_updates:
+        with _ratings_lock:          # merge into a fresh copy; don't clobber concurrent ratings
+            fresh = _read_ratings()
+            for d, v in kv_updates.items():
+                if fresh.get(d, {}).get('count', 0) == 0:
+                    fresh[d] = v
+            _write_ratings(fresh)
+    if target:
+        return redirect(f'/timelapse/{target}')
     return redirect(f'/timelapse/{dates[-1]}')
 
 

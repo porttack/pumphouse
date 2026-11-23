@@ -495,3 +495,38 @@ def maintenance_access():
         body = request.get_json(silent=True) or {}
         return jsonify(ok=True, **set_maint(bool(body.get('enabled'))))
     return jsonify(ok=True, **maint_state())
+
+
+# ── tunnel vs direct access ──────────────────────────────────────────────────
+# Public pages are served through the Cloudflare tunnel (cloudflared connects to
+# Flask from loopback and Cloudflare always adds CF-Ray). Anything else is
+# "direct" access (LAN or the DNS-only :6443 hostname) and must log in, except
+# the paths below. Requiring the loopback peer as well as CF-Ray means a direct
+# visitor can't claim tunnel status by sending a CF-Ray header themselves.
+
+DIRECT_EXEMPT_PREFIXES = ('/api/', '/login', '/logout', '/passkey', '/static/')
+DIRECT_EXEMPT_PATHS = ('/ping',)
+
+
+def is_tunnel_request():
+    return bool(request.headers.get('CF-Ray')) and request.remote_addr in ('127.0.0.1', '::1')
+
+
+def direct_exempt(path):
+    """True if this path never needs login even for direct access (APIs used by
+    devices/scripts, the login flow itself, uptime ping). Non-API routes that
+    require their own login still enforce it via their decorator."""
+    return path in DIRECT_EXEMPT_PATHS or path.startswith(DIRECT_EXEMPT_PREFIXES)
+
+
+def require_login_for_direct_access(app):
+    """Register the app-wide gate: non-API pages need login unless they arrive
+    through the Cloudflare tunnel."""
+    @app.before_request
+    def _direct_gate():
+        if is_tunnel_request() or direct_exempt(request.path) or is_authed():
+            return None
+        if request.method == 'GET':
+            return redirect('/login?next=' + quote(request.full_path.rstrip('?'), safe='/'))
+        return Response('Authentication required', 401,
+                        {'WWW-Authenticate': 'Basic realm="Pumphouse"'})

@@ -88,7 +88,7 @@ from monitor.web_ring import ring_bp  # noqa: E402
 from monitor.web_weather import weather_bp  # noqa: E402
 from monitor.web_water2 import water2_bp  # noqa: E402
 from monitor.web_backup import backup_bp  # noqa: E402
-from monitor.passkeys import passkeys_bp, requires_auth, requires_full_access  # noqa: E402
+from monitor.passkeys import passkeys_bp, requires_auth, requires_full_access, require_login_for_direct_access  # noqa: E402
 from monitor.web_sitemap import sitemap_bp  # noqa: E402
 app.register_blueprint(timelapse_bp)
 app.register_blueprint(dosatron_bp)
@@ -112,6 +112,9 @@ def _subdomain_redirect():
     for prefix, target in _SUBDOMAIN_REDIRECTS.items():
         if host.startswith(prefix) and request.path == '/':
             return redirect(target, code=302)
+
+# Non-API pages: public through the Cloudflare tunnel, login required if direct.
+require_login_for_direct_access(app)
 
 @app.route('/uptime')
 def uptime_redirect():
@@ -2641,6 +2644,7 @@ def sunset():
     return Response(f'Camera unavailable: {last_err}', status=503)
 
 
+@app.route('/api/ring.jpg')          # API path: stays reachable for ntfy attachments
 @app.route('/ring-snapshot')
 def ring_snapshot():
     """

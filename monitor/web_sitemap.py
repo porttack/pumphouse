@@ -12,7 +12,7 @@ import re
 
 from flask import Blueprint, Response, current_app
 
-from monitor.passkeys import requires_auth
+from monitor.passkeys import direct_exempt, requires_auth
 
 sitemap_bp = Blueprint('sitemap', __name__)
 
@@ -38,10 +38,10 @@ KIND_OVERRIDE = {
 SEC = {
     'control': ('high', 'Changes relays via GET with the secret in the URL (logs, history, Referer); also needs login or maintenance mode'),
     'ring.delete_archive': ('high', 'Public delete of archived Ring photos'),
-    'timelapse.api_ratings_delete': ('med', '"Direct access only" is just a missing CF-Ray header, so open on the :6443 hostname'),
-    'timelapse.timelapse_set_snapshot': ('med', 'Public: lets anyone replace the featured snapshot'),
-    'timelapse.timelapse_set_snapshot_file': ('med', 'Public: lets anyone replace the featured snapshot'),
-    'timelapse.timelapse_pick_best': ('med', '"Direct access only" is just a missing CF-Ray header, so open on the :6443 hostname'),
+    'timelapse.api_ratings_delete': ('med', 'Refused via Cloudflare, but /api/ paths need no login, so open on the :6443 hostname'),
+    'timelapse.timelapse_set_snapshot': ('low', 'Refused via Cloudflare; direct access requires login'),
+    'timelapse.timelapse_set_snapshot_file': ('low', 'Refused via Cloudflare; direct access requires login'),
+    'timelapse.timelapse_pick_best': ('low', 'Refused via Cloudflare; direct access requires login'),
     'timelapse.timelapse_rate': ('low', 'Public rating writes (rating spam)'),
     'timelapse.timelapse_frame_view': ('low', 'Public POST that echoes an uploaded image back into a page'),
     'water_status': ('med', 'While maintenance sharing is ON, logged-out visitors get the full view incl. relay controls'),
@@ -55,7 +55,7 @@ SEC = {
 }
 DOS = {
     'dosatron.api_live': ('high', 'Spawns arecord + encoder per request and streams; only 16 worker threads total'),
-    'timelapse.timelapse_pick_best': ('high', 'Starts a full-video frame-scoring job; ?rerun=1 resets it; reachable on :6443'),
+    'timelapse.timelapse_pick_best': ('low', 'Starts a frame-scoring job; refused via Cloudflare, login required direct'),
     'chart_data': ('med', '?hours unbounded; re-reads snapshots.csv every call'),
     'timelapse.snapshot': ('med', 'Runs ffmpeg (up to 15 s) per uncached request; Cloudflare caches, :6443 does not'),
     'epaper_bmp': ('med', '8-min cache, but query overrides (hours/occupied/threshold) skip it and re-render'),
@@ -80,7 +80,7 @@ DOS = {
 
 def _risks(endpoint, access, mutates):
     sec = SEC.get(endpoint)
-    if not sec and mutates and access == 'public':
+    if not sec and mutates and access in ('public', 'tunnel'):
         sec = ('med', 'Public state change, no login')
     return sec, DOS.get(endpoint)
 
@@ -98,7 +98,7 @@ def _kind(rule, endpoint, methods):
     return 'Page'
 
 
-def _access(fn, endpoint):
+def _access(fn, endpoint, path):
     if getattr(fn, '_auth', None):
         return fn._auth if fn._auth in ('maint', 'mixed') else 'login'
     bp = current_app.blueprints.get(endpoint.split('.')[0]) if '.' in endpoint else None
@@ -106,10 +106,9 @@ def _access(fn, endpoint):
         return 'login'
     if endpoint in TOKEN_ROUTES:
         return 'token'
-    if endpoint.startswith('passkeys.') and endpoint in (
-            'passkeys.login_page', 'passkeys.login_options', 'passkeys.login_verify'):
-        return 'public'
-    return 'public'
+    # Non-API pages are public only via the Cloudflare tunnel; direct access
+    # needs login (see passkeys.require_login_for_direct_access).
+    return 'public' if direct_exempt(path) else 'tunnel'
 
 
 def _desc(fn):
@@ -125,7 +124,7 @@ def collect_routes():
             continue
         fn = current_app.view_functions[rule.endpoint]
         methods = set(rule.methods) - {'HEAD', 'OPTIONS'}
-        access = _access(fn, rule.endpoint)
+        access = _access(fn, rule.endpoint, rule.rule)
         mutates = bool(methods & {'POST', 'PUT', 'PATCH', 'DELETE'})
         sec, dos = _risks(rule.endpoint, access, mutates)
         rows.append({
@@ -160,7 +159,7 @@ tr.warn{background:var(--warn)}
 code{font-family:ui-monospace,monospace;font-size:13px}a{color:inherit}
 .b{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;white-space:nowrap}
 .public{color:var(--pub);background:var(--pubbg)}.login{color:var(--log);background:var(--logbg)}
-.token,.maint,.mixed{color:var(--tok);background:var(--tokbg)}
+.token,.maint,.mixed{color:var(--tok);background:var(--tokbg)}.tunnel{color:var(--pub);background:var(--pubbg)}
 .m{color:var(--mut);font-size:12px}
 .high{color:#fff;background:#c0392b}.med{color:#5a3b00;background:#ffc861}.low{color:var(--mut);background:var(--row);border:1px solid var(--line)}
 @media(prefers-color-scheme:dark){.med{color:#ffd98a;background:#4a3508}}
@@ -187,10 +186,10 @@ def sitemap_page():
     rows = collect_routes()
     body = []
     for r in rows:
-        warn = r['mutates'] and r['access'] == 'public'
+        warn = r['mutates'] and r['access'] in ('public', 'tunnel')
         p = html.escape(r['path'])
         path = f'<a href="{p}"><code>{p}</code></a>' if r['linkable'] else f'<code>{p}</code>'
-        label = {'public': 'Public', 'login': 'Login required', 'token': 'Secret URL token', 'maint': 'Login or maintenance mode', 'mixed': 'Public view; full view if login/maintenance'}[r['access']]
+        label = {'public': 'Public', 'login': 'Login required', 'token': 'Secret URL token', 'maint': 'Login or maintenance mode', 'mixed': 'Public view; full view if login/maintenance', 'tunnel': 'Public via Cloudflare; login if direct'}[r['access']]
         note = '<div class=m>&#9888; changes state, no login</div>' if warn else ''
         def cell(r_):
             if not r_:
@@ -206,7 +205,7 @@ def sitemap_page():
     kinds = ['Page', 'API', 'Media', 'Action', 'Utility']
     kcb = ''.join(f'<label><input type=checkbox data-k=kind value="{k}" checked> {k}</label>' for k in kinds)
     acb = ''.join(f'<label><input type=checkbox data-k=access value="{a}" checked> {l}</label>'
-                  for a, l in (('public', 'Public'), ('login', 'Login'), ('maint', 'Login/maint'), ('mixed', 'Mixed'), ('token', 'Token')))
+                  for a, l in (('public', 'Public'), ('login', 'Login'), ('maint', 'Login/maint'), ('mixed', 'Mixed'), ('tunnel', 'Cloudflare-only'), ('token', 'Token')))
     n_warn = sum(1 for r in rows if r['mutates'] and r['access'] == 'public')
     page = (f'<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">'
             f'<title>Sitemap</title><style>{_CSS}</style><h1>Sitemap</h1>'
@@ -219,7 +218,7 @@ def sitemap_page():
             f'so a few slow requests can stall the whole site. Hostnames behind Cloudflare get some protection; '
             f'<code>pumphouse.&hellip;:6443</code> (DNS-only) gets none.</li>'
             f'<li><b>Global:</b> no request-body size limit; Basic auth (accepted on login routes) has no lockout.</li>'
-            f'<li><b>&ldquo;Direct access only&rdquo; checks</b> look for a missing CF-Ray header, so they don&rsquo;t restrict anyone using the :6443 hostname.</li></ul></div>'
+            f'<li><b>Cloudflare vs direct:</b> non-API pages are public only when they arrive through the Cloudflare tunnel (CF-Ray header <i>and</i> a loopback connection, so it can&rsquo;t be faked); direct visits to them &mdash; LAN or the :6443 hostname &mdash; require login. <code>/api/*</code>, <code>/ping</code> and the login pages are exempt for devices and scripts.</li></ul></div>'
             f'<div class=w><table><thead><tr><th>Path<th>Methods<th>Type<th>Access<th>Security risk<th>DoS risk<th>What it does</thead>'
             f'<tbody>{"".join(body)}</tbody></table></div><script>{_JS}</script>')
     return Response(page, mimetype='text/html')
