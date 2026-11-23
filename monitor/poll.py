@@ -1477,7 +1477,7 @@ class SimplifiedMonitor:
                                     priority='high',
                                     tags=['car'],
                                     click_url=DASHBOARD_URL,
-                                    attach_url=f'{DASHBOARD_URL}api/ring.jpg',
+                                    attach_url=f'{DASHBOARD_URL}ring-snapshot',
                                     debug=self.debug
                                 )
                                 if self.last_vehicle_count == 0:
@@ -1499,7 +1499,7 @@ class SimplifiedMonitor:
                                     priority='default',
                                     tags=['car'],
                                     click_url=DASHBOARD_URL,
-                                    attach_url=f'{DASHBOARD_URL}api/ring.jpg',
+                                    attach_url=f'{DASHBOARD_URL}ring-snapshot',
                                     debug=self.debug
                                 )
                     if snapshot_vehicle_count is not None:

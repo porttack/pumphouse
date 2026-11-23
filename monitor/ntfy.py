@@ -71,6 +71,6 @@ def test_ping(debug=False):
         priority="low",
         tags=["white_check_mark"],
         click_url=DASHBOARD_URL,
-        attach_url=f"{DASHBOARD_URL}api/chart.png?hours=24",
+        attach_url=f"{DASHBOARD_URL}api/epaper.jpg?tenant=no",
         debug=debug
     )

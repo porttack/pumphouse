@@ -53,7 +53,6 @@ SEC = {
 }
 DOS = {
     'dosatron.api_live': ('high', 'Spawns arecord + encoder per request and streams; only 16 worker threads total'),
-    'chart_image': ('high', 'Matplotlib render per request; ?hours unbounded; no cache'),
     'timelapse.timelapse_pick_best': ('high', 'Starts a full-video frame-scoring job; ?rerun=1 resets it; reachable on :6443'),
     'chart_data': ('med', '?hours unbounded; re-reads snapshots.csv every call'),
     'timelapse.snapshot': ('med', 'Runs ffmpeg (up to 15 s) per uncached request; Cloudflare caches, :6443 does not'),
