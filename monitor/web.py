@@ -88,7 +88,7 @@ from monitor.web_ring import ring_bp  # noqa: E402
 from monitor.web_weather import weather_bp  # noqa: E402
 from monitor.web_water2 import water2_bp  # noqa: E402
 from monitor.web_backup import backup_bp  # noqa: E402
-from monitor.passkeys import passkeys_bp, requires_auth  # noqa: E402
+from monitor.passkeys import passkeys_bp, requires_auth, requires_full_access  # noqa: E402
 from monitor.web_sitemap import sitemap_bp  # noqa: E402
 app.register_blueprint(timelapse_bp)
 app.register_blueprint(dosatron_bp)
@@ -2073,6 +2073,20 @@ async function copyCode() {
 
 @app.route('/water')
 def water_status():
+    """/water: public view; the full owner view (formerly /water2) when logged in
+    or when maintenance sharing is on."""
+    from monitor.passkeys import full_access
+    if full_access():
+        from monitor.web_water2 import water2_status
+        resp = water2_status()
+    else:
+        resp = _water_public()
+    resp.headers['Vary'] = 'Cookie'     # same URL, different content per login state
+    return resp
+water_status._auth = 'mixed'            # read by /sitemap
+
+
+def _water_public():
     """
     Public-facing water tank status page for tenants and guests.
     Shows current tank level and recent history with no occupancy information.
@@ -2173,6 +2187,9 @@ def water_status():
     <span>Updates every 10&ndash;30 minutes</span>
     <span>&bull;</span>
     <a href="/timelapse">Timelapse</a>{extra_links}
+  </div>
+  <div class="links" style="opacity:0.55;font-size:0.75rem;">
+    <a href="/login?next=/water">Owner login</a>
   </div>
 </body>
 </html>"""
@@ -2705,10 +2722,10 @@ def watch_bypass_flow():
 
 
 @app.route('/control/<token>')
+@requires_full_access(page=True)
 def control(token):
     """
-    Unauthenticated control endpoint using secret tokens.
-    Allows remote control via email links without authentication.
+    Relay control endpoint: secret token AND (logged in OR maintenance sharing on).
     """
     back = request.args.get('back', '/?owner')
     action_taken = None

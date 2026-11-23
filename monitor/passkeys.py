@@ -438,3 +438,60 @@ def protect_blueprint(bp):
         return Response('Authentication required', 401,
                         {'WWW-Authenticate': 'Basic realm="Pumphouse"'})
     bp._auth = 'login'      # read by /sitemap
+
+
+# ── "full access" = logged in, OR maintenance sharing switched on ────────────
+# The owner can flip maintenance sharing from the /water page. While it is ON,
+# logged-out visitors get the same full view + controls as a logged-in owner;
+# turning it OFF takes that away again immediately (also gates /control/<token>
+# and the data APIs, so URLs seen during the window stop working).
+
+MAINT_FILE = DATA_DIR / 'water_full_access.json'
+
+
+def maint_state():
+    """{'enabled': bool, 'since': epoch|None}. Missing/corrupt file = off."""
+    try:
+        d = json.loads(MAINT_FILE.read_text())
+        return {'enabled': bool(d.get('enabled')), 'since': d.get('since')}
+    except (FileNotFoundError, ValueError):
+        return {'enabled': False, 'since': None}
+
+
+def set_maint(enabled):
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    state = {'enabled': bool(enabled), 'since': int(time.time())}
+    tmp = MAINT_FILE.with_suffix('.tmp')
+    tmp.write_text(json.dumps(state))
+    os.replace(tmp, MAINT_FILE)
+    return state
+
+
+def full_access():
+    return is_authed() or maint_state()['enabled']
+
+
+def requires_full_access(f=None, *, page=False):
+    """Like requires_auth, but maintenance sharing also lets the request in.
+    page=True redirects browsers to /login; otherwise a JSON 401."""
+    def wrap(fn):
+        @wraps(fn)
+        def decorated(*args, **kwargs):
+            if full_access():
+                return fn(*args, **kwargs)
+            if page and request.method == 'GET':
+                return redirect('/login?next=' + quote(request.full_path.rstrip('?'), safe='/'))
+            return jsonify(ok=False, error='authentication required'), 401
+        decorated._auth = 'maint'     # read by /sitemap
+        return decorated
+    return wrap(f) if f else wrap
+
+
+@passkeys_bp.route('/api/maintenance_access', methods=['GET', 'POST'])
+@requires_auth(page=False)
+def maintenance_access():
+    """Owner-only: read or set whether logged-out visitors get the full /water view."""
+    if request.method == 'POST':
+        body = request.get_json(silent=True) or {}
+        return jsonify(ok=True, **set_maint(bool(body.get('enabled'))))
+    return jsonify(ok=True, **maint_state())

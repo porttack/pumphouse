@@ -18,7 +18,7 @@ import json
 from datetime import datetime, timedelta
 
 from flask import Blueprint, Response, request, jsonify
-from monitor.passkeys import inline_auth
+from monitor.passkeys import requires_full_access, full_access, is_authed, maint_state
 
 from monitor.config import (
     EVENTS_FILE,
@@ -336,6 +336,7 @@ def _resolve_window(win_param: 'str | None', float_calling: bool, now: float):
 
 
 @water2_bp.route('/api/flow_status')
+@requires_full_access
 def api_flow_status():
     """Real-time flow status: is water flowing, GPM, duty cycle, live tank level.
 
@@ -631,6 +632,7 @@ def api_flow_status():
 
 
 @water2_bp.route('/api/fills')
+@requires_full_access
 def api_fills():
     """Fills (contiguous inflow episodes) over the last `hours` (default 24)."""
     from monitor.fills import recent_fills
@@ -641,7 +643,7 @@ def api_fills():
 
 
 @water2_bp.route('/api/record_chlorine', methods=['POST'])
-@inline_auth
+@requires_full_access
 def api_record_chlorine():
     """Record a manual chlorine pour and step the persisted ppm estimate up.
 
@@ -650,9 +652,6 @@ def api_record_chlorine():
     through the tank since. See docs/chlorine-estimate.md.
     """
     from flask import request, jsonify
-    from monitor.passkeys import is_authed
-    if not is_authed():
-        return jsonify({'ok': False, 'error': 'authentication required'}), 401
 
     data = request.get_json(silent=True) or request.form
     try:
@@ -690,6 +689,7 @@ def api_record_chlorine():
 
 
 @water2_bp.route('/api/chlorine_additions')
+@requires_full_access
 def api_chlorine_additions():
     """Recent manual chlorine pours, newest first."""
     from flask import jsonify
@@ -701,6 +701,13 @@ def api_chlorine_additions():
 
 
 @water2_bp.route('/water2')
+def water2_redirect():
+    """Old URL: redirect to /water (which shows this view when logged in)."""
+    from flask import redirect
+    qs = request.query_string.decode()
+    return redirect('/water' + ('?' + qs if qs else ''), code=302)
+
+
 def water2_status():
     """
     Owner-facing water status page with bypass controls.
@@ -732,7 +739,7 @@ def water2_status():
     # Graph range toggle: 6 hours (default), 12 hours, 24 hours, or 3 days.
     def _range_link(text, qs, active):
         style = ('color:#cdd8f0;font-weight:600;' if active else 'color:#7aa4d8;')
-        return f'<a href="/water2?{qs}" style="text-decoration:none;{style}">{text}</a>'
+        return f'<a href="/water?{qs}" style="text-decoration:none;{style}">{text}</a>'
     range_html = (
         '<div style="font-size:0.82rem;color:#6a82b0;display:flex;gap:14px;'
         'justify-content:center;margin-top:-8px;">'
@@ -756,7 +763,7 @@ def water2_status():
         )
     img_html = f'<div class="img-wrap">{img_inner}<div class="spinner" id="tank-spinner"></div></div>'
 
-    back = '/water2'
+    back = '/water'
 
     controls_html = ''
     ctrl_cfg = None
@@ -809,6 +816,31 @@ def water2_status():
             'purgeNext':  f'/control/{SECRET_PURGE_NEXT_TOKEN}?back={back}',
             'purgeCancel': f'/control/{SECRET_PURGE_CANCEL_NEXT_TOKEN}?back={back}',
         }
+
+    # Maintenance sharing: owner can let logged-out visitors see this full view.
+    _m = maint_state()
+    if is_authed():
+        from datetime import datetime as _dt
+        _since = (' since ' + _dt.fromtimestamp(_m['since']).strftime('%a %-I:%M %p')) if _m['enabled'] and _m['since'] else ''
+        maint_html = (
+            '<div class="card" style="font-size:0.88rem;text-align:center;">'
+            + ('<div style="color:#ff9800;margin-bottom:8px;">&#9888; Maintenance access is ON' + _since
+               + ' &mdash; anyone with this link can see everything here and use the controls.</div>'
+               if _m['enabled'] else
+               '<div style="color:#8fb3e8;margin-bottom:8px;">Maintenance access is off &mdash; logged-out visitors see the public view.</div>')
+            + '<button id="maint-btn" style="padding:8px 16px;border-radius:6px;border:1px solid #7aa4d8;'
+              'background:' + ('#ff9800' if _m['enabled'] else 'transparent') + ';color:' + ('#fff' if _m['enabled'] else '#7aa4d8') + ';font:inherit;cursor:pointer;">'
+            + ('Turn off maintenance access' if _m['enabled'] else 'Share full view without login (maintenance)')
+            + '</button> <a href="/logout" style="color:#6a82b0;margin-left:12px;">Sign out</a></div>'
+            '<script>document.getElementById("maint-btn").onclick=async()=>{'
+            'const on=' + ('false' if _m['enabled'] else 'true') + ';'
+            'if(on&&!confirm("Anyone with this page link will be able to see all data and operate the valves until you turn this off. Continue?"))return;'
+            'const r=await fetch("/api/maintenance_access",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled:on})});'
+            'if(r.ok)location.reload();else alert("Failed ("+r.status+")")};</script>')
+    elif _m['enabled']:
+        maint_html = '<div style="font-size:0.8rem;color:#ff9800;text-align:center;">Maintenance access is on.</div>'
+    else:
+        maint_html = ''
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -1053,6 +1085,7 @@ def water2_status():
     <div class="flow-ts">GPM = gallons &divide; duration, so it's rough (bypass GPM is the assumed/calibrated rate; dosatron includes idle time in the pressure window). Gallons are estimates (clicks &times; gal/click; bypass flow time &times; GPM). Tank: sensor readings before and after the fill, ~ = estimate. House gal = gal in minus tank gain (needs real tank readings before and after; &plusmn;~6 gal sensor steps). ppm is the rough model.</div>
   </div>
   {controls_html}
+  {maint_html}
   <div class="links">
     <a href="/timelapse">Timelapse</a>
     <span>&bull;</span>

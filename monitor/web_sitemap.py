@@ -27,6 +27,7 @@ KIND_OVERRIDE = {
     'passkeys.manage_page': 'Page', 'control': 'Action',
     'watch_bypass_flow': 'Page', 'watch_pressure_low': 'Page',
     'timelapse.timelapse_best_frame_view': 'Page',
+    'water2.water2_redirect': 'Utility', 'water_status': 'Page',
 }
 
 
@@ -35,7 +36,7 @@ KIND_OVERRIDE = {
 # are auto-rated 'med' security. Review when handlers change — these are
 # judgements from reading the code (2026-11-23), not scanner output.
 SEC = {
-    'control': ('high', 'Changes relays via GET with the secret in the URL (logs, history, Referer); the URLs are shown on the login-protected /?owner page'),
+    'control': ('high', 'Changes relays via GET with the secret in the URL (logs, history, Referer); also needs login or maintenance mode'),
     'ring.delete_archive': ('high', 'Public delete of archived Ring photos'),
     'timelapse.api_ratings_delete': ('med', '"Direct access only" is just a missing CF-Ray header, so open on the :6443 hostname'),
     'timelapse.timelapse_set_snapshot': ('med', 'Public: lets anyone replace the featured snapshot'),
@@ -43,6 +44,7 @@ SEC = {
     'timelapse.timelapse_pick_best': ('med', '"Direct access only" is just a missing CF-Ray header, so open on the :6443 hostname'),
     'timelapse.timelapse_rate': ('low', 'Public rating writes (rating spam)'),
     'timelapse.timelapse_frame_view': ('low', 'Public POST that echoes an uploaded image back into a page'),
+    'water_status': ('med', 'While maintenance sharing is ON, logged-out visitors get the full view incl. relay controls'),
     'ring_snapshot': ('med', 'Public live Ring camera image of the property'),
     'ring.archive_data': ('med', 'Public index of archived Ring photos'),
     'ring.serve_archive': ('med', 'Public Ring photos (people, vehicles)'),
@@ -98,7 +100,7 @@ def _kind(rule, endpoint, methods):
 
 def _access(fn, endpoint):
     if getattr(fn, '_auth', None):
-        return 'login'
+        return fn._auth if fn._auth in ('maint', 'mixed') else 'login'
     bp = current_app.blueprints.get(endpoint.split('.')[0]) if '.' in endpoint else None
     if bp is not None and getattr(bp, '_auth', None):
         return 'login'
@@ -158,7 +160,7 @@ tr.warn{background:var(--warn)}
 code{font-family:ui-monospace,monospace;font-size:13px}a{color:inherit}
 .b{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;white-space:nowrap}
 .public{color:var(--pub);background:var(--pubbg)}.login{color:var(--log);background:var(--logbg)}
-.token{color:var(--tok);background:var(--tokbg)}
+.token,.maint,.mixed{color:var(--tok);background:var(--tokbg)}
 .m{color:var(--mut);font-size:12px}
 .high{color:#fff;background:#c0392b}.med{color:#5a3b00;background:#ffc861}.low{color:var(--mut);background:var(--row);border:1px solid var(--line)}
 @media(prefers-color-scheme:dark){.med{color:#ffd98a;background:#4a3508}}
@@ -188,7 +190,7 @@ def sitemap_page():
         warn = r['mutates'] and r['access'] == 'public'
         p = html.escape(r['path'])
         path = f'<a href="{p}"><code>{p}</code></a>' if r['linkable'] else f'<code>{p}</code>'
-        label = {'public': 'Public', 'login': 'Login required', 'token': 'Secret URL token'}[r['access']]
+        label = {'public': 'Public', 'login': 'Login required', 'token': 'Secret URL token', 'maint': 'Login or maintenance mode', 'mixed': 'Public view; full view if login/maintenance'}[r['access']]
         note = '<div class=m>&#9888; changes state, no login</div>' if warn else ''
         def cell(r_):
             if not r_:
@@ -204,7 +206,7 @@ def sitemap_page():
     kinds = ['Page', 'API', 'Media', 'Action', 'Utility']
     kcb = ''.join(f'<label><input type=checkbox data-k=kind value="{k}" checked> {k}</label>' for k in kinds)
     acb = ''.join(f'<label><input type=checkbox data-k=access value="{a}" checked> {l}</label>'
-                  for a, l in (('public', 'Public'), ('login', 'Login'), ('token', 'Token')))
+                  for a, l in (('public', 'Public'), ('login', 'Login'), ('maint', 'Login/maint'), ('mixed', 'Mixed'), ('token', 'Token')))
     n_warn = sum(1 for r in rows if r['mutates'] and r['access'] == 'public')
     page = (f'<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">'
             f'<title>Sitemap</title><style>{_CSS}</style><h1>Sitemap</h1>'
